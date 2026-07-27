@@ -567,6 +567,67 @@ env PATH="/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.cargo/bin" cargo test --workspace
 
 The second line is what CI's macOS and Windows jobs actually run.
 
+## D-026 — Dark-only UI on SundayRec's Brand Sheet v1.0 tokens
+
+**UX round.** The app adopts SundayRec's design tokens verbatim (bg `#0c1020`, four
+surface/border layers, four-level text hierarchy, gold `#EBB84B` accent, radius/shadow
+scales) so the two desktop apps read as one suite. Dark-only — the light theme is gone,
+and with it the two contrast bugs its `prefers-color-scheme: dark` block shipped:
+`.banner--error` at ~1.9:1 and the gold primary button at ~1.6:1.
+
+The system font stack replaces Playfair Display / Hanken Grotesk. Those were *named* in
+the old CSS but never loaded — no `@font-face`, no vendored files — so every user already
+saw the fallback. Dropping the names makes the CSS tell the truth, and SundayRec desktop
+uses the system stack too.
+
+Two contrast rules baked into the stylesheet: gold surfaces carry **dark** ink
+(`#0c1020` on `#EBB84B` ≈ 10:1), and banners are tint-background + coloured border +
+normal text — coloured text on a 10 % tint of the same colour is exactly how the old
+1.9:1 happened.
+
+## D-027 — "Re-sync single clips" (§9) is a full re-run with device overrides
+
+A partial-pipeline API would break the §7.3 accounting invariant (every input in exactly
+one bucket — a "previously placed, not re-examined" third bucket is a §5 schema change)
+and §3 determinism (a result assembled from two runs is a function of run *history*).
+
+The full re-run costs almost nothing warm: decode dominates (§10 "decode-bound") and the
+content-keyed cache makes a re-sync correlation-only — the same §10 "<30 s warm" budget
+already promised. The UI makes the cheapness legible: the re-sync button carries the
+subtitle "bufret analyse gjenbrukes", and a result goes visibly stale the moment inputs,
+overrides or the reference change. The user's *intent* — fix this one clip's grouping and
+get it re-placed — is one click and seconds of work, which is what §9 was after.
+
+## D-028 — `SyncRequest` gains `device_overrides` and `segment_count`; neither enters §5
+
+The request type is not schema-frozen (`SCHEMA_VERSION` covers `SyncResult` only).
+Semantics chosen for UI resilience: an override key matching no scanned file is
+**ignored** — a stale entry left after the user removed an input must not abort a run —
+and a target id the grouping never produced creates a fresh device (reachable from the
+CLI/JSON side only; the UI offers existing ids). `segment_count` is clamped to
+`SEGMENT_COUNT_RANGE` (2..=15) at the pipeline boundary, and is recorded in the
+diagnostics bundle rather than the frozen §5 `Parameters` block.
+
+Overrides are applied to the manifest *before* candidates are built, so a moved file
+flows into placement — including the §4.4 same-device-overlap invariant, which is
+exactly what lets a user resolve a `device_overlap` refusal (and honestly earn new ones).
+
+## D-029 — Settings persist via one localStorage JSON key
+
+The SundayRec pattern, not `tauri-plugin-store`: proven in the suite, zero new
+dependencies, and these are UI-tier preferences. Per-field validation on load — one bad
+field degrades to its default rather than discarding the rest. Every engine-related
+field defaults to `null` = "use the engine's default", which is what keeps §9's promise
+that advanced settings never change simple-mode behaviour.
+
+## D-030 — Engine errors localise by stable Display-prefix matching
+
+`app/src/errors.ts` maps the engine's thiserror Display strings (which are stable) onto
+dictionary keys by prefix. `cancelled` maps to a **notice**, never an error banner — the
+first build painted a red banner reading "cancelled" over the user's own deliberate
+action, erasing §7.4's distinction between "you stopped this" and "this broke". Unknown
+errors keep the raw text embedded: §7.5's honesty applies to failures too.
+
 ## D-009 — Dotfiles are skipped during the scan walk
 
 **Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no

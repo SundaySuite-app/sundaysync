@@ -2,9 +2,17 @@
 
 Per [`PLAN.md`](PLAN.md) §13.5, this file always reflects reality. Updated at every phase end.
 
-**Phases 0–6 accepted. 7–8 built and merged, awaiting a live run. Phase 9 owner-gated.**
+**Phases 0–6 accepted. 7–8 rebuilt in the UX round and verified launching live. Phase 9 owner-gated.**
 
-All merged to `main` via PR #4, CI green on ubuntu, macOS and Windows.
+The UX overhaul (branch `feat/ui-overhaul`) fixed two launch-blocking bugs found in
+review — the missing Tauri 2 capabilities file (dialogs/events/opener were ACL-denied)
+and drag-drop written against the Tauri 1 API (drops did nothing) — and rebuilt the app
+around a pre-sync sources view: scan-before-sync device summary, per-file device
+re-assign and reference choice, persisted settings, first-run onboarding, dark suite
+theme (D-026), localized errors with cancel-as-notice (D-030), and cache
+inspection/clearing (D-013 follow-through). All three §9 advanced gaps are closed:
+device re-assignment (D-028), segment count (D-028), and re-sync after re-grouping
+(D-027). `npm run tauri dev` compiles and the app launches and runs.
 
 Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 
@@ -17,8 +25,8 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 | 4 — Placement & drift | ✅ Accepted | §4.4 placement, §4.6 drift, full `sync()` pipeline, proptest invariants. 136 tests. |
 | 5 — FCPXML export | ✅ Accepted | §6 exporter, golden tests, **verified in DaVinci Resolve Studio 21.0.3.7** — frame-accurate, correct track layout, media relinked. |
 | 6 — CLI complete + real corpus | 🔶 CLI done, corpus pending | `sync`/`scan`/`bench` all implemented and working. **Corpus onboarding needs Richard's footage** — the harness is ready and waiting. |
-| 7 — Tauri app, simple mode | 🔶 Built, not yet run live | Drop zone, device summary, staged progress, lane view, export. Frontend builds; Rust shell compiles and lints. **Needs a real launch on hardware.** |
-| 8 — Advanced mode + diagnostics | 🔶 Built, not yet run live | Threshold, cache dir, reference override, diagnostics export (media-free JSON). |
+| 7 — Tauri app, simple mode | ✅ Built + launches | UX round: sources view before sync, real clip widths, phase machine, dark theme. Verified running via `tauri dev`. |
+| 8 — Advanced mode + diagnostics | ✅ Built + launches | Settings dialog: threshold, segment count, cache dir/size/clear, reference from sources view, device re-assign, diagnostics, onboarding replay. Settings persist (D-029). |
 | 9 — Release | ⬜ Not started | Needs signing certs, updater keys and a tag workflow — all owner-gated. |
 
 ## What Phase 0 actually delivered
