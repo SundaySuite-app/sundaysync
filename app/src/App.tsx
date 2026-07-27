@@ -1,55 +1,87 @@
 /**
  * SundaySync — docs/PLAN.md §9.
  *
- * Simple mode is the default and takes no configuration: drop media in, press Sync, get a
- * timeline out. Advanced mode is a toggle, and nothing in it changes what simple mode does.
+ * Composition and effects only: the phase machine lives in `state.ts`, strings in
+ * `i18n/`, persistence in `settings.ts`, error mapping in `errors.ts`. Simple mode is
+ * the whole surface until the user opens settings, and nothing in settings changes what
+ * simple mode does with an untouched configuration.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+
+import { BannerRegion } from "./components/Banner";
 import { DropZone } from "./components/DropZone";
-import { DeviceSummary } from "./components/DeviceSummary";
+import { EmptyState } from "./components/EmptyState";
+import { Onboarding } from "./components/Onboarding";
 import { ProgressBar } from "./components/ProgressBar";
 import { ResultView } from "./components/ResultView";
-import { AdvancedPanel } from "./components/AdvancedPanel";
-import { dictionaries, detectLang, type Lang } from "./i18n";
-import type { ProgressEvent, SyncResult } from "./types";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { SourcesView } from "./components/SourcesView";
+import { GearIcon } from "./components/icons";
+
+import { mapEngineError } from "./errors";
+import { detectLang, dictionaries, type Lang } from "./i18n";
+import { getSettings, saveSettings } from "./settings";
+import { initialState, reducer } from "./state";
+import type { ProgressEvent, ScanManifest, SyncOutcome } from "./types";
 
 export function App() {
-  const [lang, setLang] = useState<Lang>(detectLang);
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const [lang, setLang] = useState<Lang>(() => getSettings().lang ?? detectLang());
+  const [showSettings, setShowSettings] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => !getSettings().onboardingDone);
+  const [exportedPath, setExportedPath] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState("SundaySync");
   const t = dictionaries[lang];
 
-  const [inputs, setInputs] = useState<string[]>([]);
-  const [running, setRunning] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const [progress, setProgress] = useState<ProgressEvent | null>(null);
-  const [result, setResult] = useState<SyncResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [advanced, setAdvanced] = useState(false);
-  const [minPsr, setMinPsr] = useState<number | null>(null);
-  const [cacheDir, setCacheDir] = useState<string | null>(null);
-  const [reference, setReference] = useState<string | null>(null);
-  const [sidecarMissing, setSidecarMissing] = useState(false);
-
-  // Tell the user ffmpeg is missing before they drop 40 GB of media in, not after.
+  // Screen readers pronounce by the document language — a hardcoded lang="nb" reads
+  // English UI in a Norwegian voice.
   useEffect(() => {
-    invoke<string>("check_sidecar").catch(() => setSidecarMissing(true));
+    document.documentElement.lang = lang;
+  }, [lang]);
+
+  // ffmpeg check up front, so the warning shows before the user drops 40 GB in.
+  useEffect(() => {
+    invoke<string>("check_sidecar")
+      .then(() => dispatch({ type: "sidecar/checked", ok: true }))
+      .catch(() => dispatch({ type: "sidecar/checked", ok: false }));
   }, []);
 
+  // Progress events for the running sync.
   useEffect(() => {
-    const unlisten = listen<ProgressEvent>("sync:progress", (e) => setProgress(e.payload));
+    const unlisten = listen<ProgressEvent>("sync:progress", (e) =>
+      dispatch({ type: "sync/progress", progress: e.payload }),
+    );
     return () => {
       void unlisten.then((f) => f());
     };
   }, []);
 
+  // The scan effect: whenever the phase enters `scanning`, run scan_inputs for the
+  // current sequence number. A superseded scan's result is dropped by the reducer.
+  const phase = state.phase;
+  const scanSeq = state.scanSeq;
+  useEffect(() => {
+    if (phase.name !== "scanning") return;
+    const seq = scanSeq;
+    const inputs = phase.inputs;
+    invoke<ScanManifest>("scan_inputs", { inputs, cacheDir: getSettings().cacheDir })
+      .then((manifest) => dispatch({ type: "scan/done", seq, manifest }))
+      .catch((e) =>
+        dispatch({ type: "scan/failed", seq, error: mapEngineError(String(e), t) }),
+      );
+    // `t` is deliberately not a dependency: an error banner in yesterday's language is
+    // better than re-scanning the whole card dump because the user toggled languages.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase.name === "scanning" ? scanSeq : -1]);
+
   const addPaths = useCallback((paths: string[]) => {
-    setInputs((prev) => Array.from(new Set([...prev, ...paths])));
-    setResult(null);
-    setError(null);
+    setExportedPath(null);
+    dispatch({ type: "inputs/add", paths });
   }, []);
 
   const chooseFiles = useCallback(async () => {
@@ -63,141 +95,198 @@ export function App() {
   }, [addPaths]);
 
   const runSync = useCallback(async () => {
-    setRunning(true);
-    setCancelling(false);
-    setError(null);
-    setNotice(null);
-    setProgress(null);
+    setExportedPath(null);
+    dispatch({ type: "sync/start" });
+    const settings = getSettings();
     try {
-      const outcome = await invoke<{ result: SyncResult }>("run_sync", {
-        inputs,
-        minPsr,
-        cacheDir,
-        reference,
+      const outcome = await invoke<SyncOutcome>("run_sync", {
+        args: {
+          inputs: state.phase.name === "empty" ? [] : state.phase.inputs,
+          minPsr: settings.minPsr,
+          cacheDir: settings.cacheDir,
+          reference: state.reference,
+          deviceOverrides:
+            Object.keys(state.overrides).length > 0 ? state.overrides : null,
+          segmentCount: settings.segmentCount,
+        },
       });
-      setResult(outcome.result);
+      dispatch({ type: "sync/done", outcome });
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setRunning(false);
-      setCancelling(false);
-      setProgress(null);
+      dispatch({ type: "sync/failed", error: mapEngineError(String(e), t) });
     }
-  }, [inputs, minPsr, cacheDir, reference]);
+  }, [state.phase, state.reference, state.overrides, t]);
 
-  const cancel = useCallback(async () => {
-    setCancelling(true);
+  const cancelSync = useCallback(async () => {
+    dispatch({ type: "cancel/requested" });
     await invoke("cancel_sync");
   }, []);
 
   const exportTimeline = useCallback(async () => {
     const path = await save({
-      defaultPath: "sundaysync.fcpxml",
+      defaultPath: `${projectName.replace(/[/\\:]/g, "-") || "sundaysync"}.fcpxml`,
       filters: [{ name: "FCPXML", extensions: ["fcpxml"] }],
     });
     if (!path) return;
     try {
-      const clips = await invoke<number>("export_timeline", { path, project: "SundaySync" });
-      setNotice(`${t.exported(clips)}. ${t.exportHint}`);
+      const clips = await invoke<number>("export_timeline", { path, project: projectName });
+      setExportedPath(path);
+      dispatch({
+        type: "banner/set",
+        banner: { kind: "ok", text: `${t.exported(clips)}. ${t.exportHint}` },
+      });
     } catch (e) {
-      setError(String(e));
+      dispatch({
+        type: "banner/set",
+        banner: { kind: "error", text: mapEngineError(String(e), t).text },
+      });
     }
-  }, [t]);
+  }, [projectName, t]);
 
-  const exportDiagnostics = useCallback(async () => {
-    const path = await save({
-      defaultPath: "sundaysync-diagnostics.json",
-      filters: [{ name: "JSON", extensions: ["json"] }],
-    });
-    if (!path) return;
-    try {
-      await invoke("export_diagnostics", { path });
-      setNotice(t.diagnostics);
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [t]);
+  const notice = useCallback((kind: "ok" | "error", text: string) => {
+    dispatch({ type: "banner/set", banner: { kind, text } });
+  }, []);
 
-  const canSync = inputs.length > 0 && !running;
-  const placedFiles = useMemo(
-    () => (result ? result.placements.map((p) => p.file) : []),
-    [result],
-  );
+  const manifest =
+    phase.name === "sources" || phase.name === "syncing" || phase.name === "result"
+      ? phase.manifest
+      : phase.name === "scanning"
+        ? phase.previous
+        : null;
+  const deviceIds = manifest ? manifest.devices.map((d) => d.id) : [];
+  const overridesDirty = Object.keys(state.overrides).length > 0;
 
   return (
     <main className="app">
       <header className="app__header">
-        <h1>{t.appName}</h1>
+        <h1>
+          Sunday<span className="accent">Sync</span>
+        </h1>
         <div className="app__header-actions">
           <button
             type="button"
-            className="linklike"
-            onClick={() => setLang(lang === "nb" ? "en" : "nb")}
-            aria-label={t.language}
+            className="ghost"
+            onClick={() => {
+              const next: Lang = lang === "nb" ? "en" : "nb";
+              setLang(next);
+              saveSettings({ lang: next });
+            }}
           >
             {lang === "nb" ? "English" : "Norsk"}
           </button>
           <button
             type="button"
-            className="linklike"
-            onClick={() => setAdvanced((a) => !a)}
-            aria-pressed={advanced}
+            className="iconbtn"
+            onClick={() => setShowSettings(true)}
+            aria-label={t.settings}
           >
-            {advanced ? t.simple : t.advanced}
+            <GearIcon />
           </button>
         </div>
       </header>
 
-      {sidecarMissing && <p className="banner banner--error">{t.noFfmpeg}</p>}
-
-      <DropZone t={t} onFiles={chooseFiles} onFolder={chooseFolder} onDropPaths={addPaths} />
-
-      {inputs.length > 0 && !result && (
-        <p className="muted">
-          {inputs.length} {t.files}
+      {state.sidecarOk === false && !showOnboarding && (
+        <p className="banner banner--error" role="alert">
+          <span>{t.errSidecar}</span>
         </p>
       )}
 
-      {result && <DeviceSummary t={t} result={result} />}
+      <BannerRegion t={t} banner={state.banner} onDismiss={() => dispatch({ type: "banner/clear" })} />
 
-      {advanced && (
-        <AdvancedPanel
+      {phase.name === "empty" && (
+        <EmptyState t={t} onFiles={chooseFiles} onFolder={chooseFolder} onDropPaths={addPaths} />
+      )}
+
+      {phase.name !== "empty" && phase.name !== "syncing" && (
+        <DropZone t={t} compact onFiles={chooseFiles} onFolder={chooseFolder} onDropPaths={addPaths} />
+      )}
+
+      {phase.name === "scanning" && (
+        <p className="scanline">
+          <span className="scanline__spinner" aria-hidden="true" />
+          {t.scanningInputs}
+        </p>
+      )}
+
+      {(phase.name === "sources" || phase.name === "result") && manifest && (
+        <SourcesView
           t={t}
-          minPsr={minPsr}
-          onMinPsr={setMinPsr}
-          cacheDir={cacheDir}
-          onCacheDir={setCacheDir}
-          reference={reference}
-          onReference={setReference}
-          candidates={placedFiles}
-          onDiagnostics={exportDiagnostics}
+          manifest={manifest}
+          inputs={phase.inputs}
+          overrides={state.overrides}
+          reference={state.reference}
+          onRemoveRoot={(path) => dispatch({ type: "inputs/removeRoot", path })}
+          onClearAll={() => dispatch({ type: "inputs/clear" })}
+          onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+          onReference={(file) => dispatch({ type: "reference/set", file })}
         />
       )}
 
-      {running ? (
+      {phase.name === "syncing" ? (
         <div className="run">
-          <ProgressBar t={t} progress={progress} />
-          <button type="button" className="secondary" onClick={cancel} disabled={cancelling}>
-            {cancelling ? t.cancelling : t.cancel}
+          <ProgressBar t={t} progress={phase.progress} />
+          <button type="button" className="secondary" onClick={cancelSync} disabled={state.cancelling}>
+            {state.cancelling ? t.cancelling : t.cancel}
           </button>
         </div>
       ) : (
-        <button type="button" className="primary" onClick={runSync} disabled={!canSync}>
-          {t.syncButton}
-        </button>
+        phase.name !== "empty" &&
+        phase.name !== "scanning" && (
+          <div className="actions">
+            <button type="button" className="primary" onClick={runSync}>
+              {phase.name === "result" ? t.resyncButton : t.syncButton}
+              {(phase.name === "result" || overridesDirty) && <small>{t.resyncHint}</small>}
+            </button>
+          </div>
+        )
       )}
 
-      {error && <p className="banner banner--error">{error}</p>}
-      {notice && <p className="banner banner--ok">{notice}</p>}
-
-      {result && (
+      {phase.name === "result" && (
         <>
-          <ResultView t={t} result={result} />
-          <button type="button" className="primary" onClick={exportTimeline}>
-            {t.exportButton}
-          </button>
+          {phase.stale && (
+            <p className="banner banner--warn">
+              <span>{t.staleResult}</span>
+            </p>
+          )}
+          <ResultView
+            t={t}
+            outcome={phase.outcome}
+            stale={phase.stale}
+            deviceIds={deviceIds}
+            onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+          />
+          <div className="exportbar">
+            <label>
+              <span className="visually-hidden">{t.projectName}</span>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                aria-label={t.projectName}
+              />
+            </label>
+            <button type="button" className="primary" onClick={exportTimeline} disabled={phase.stale}>
+              {t.exportButton}
+            </button>
+            {exportedPath && (
+              <button type="button" className="secondary" onClick={() => revealItemInDir(exportedPath)}>
+                {t.revealInFinder}
+              </button>
+            )}
+          </div>
         </>
       )}
+
+      {showSettings && (
+        <SettingsPanel
+          t={t}
+          onClose={() => setShowSettings(false)}
+          onLangChange={(next) => setLang(next ?? detectLang())}
+          onShowOnboarding={() => setShowOnboarding(true)}
+          onNotice={notice}
+        />
+      )}
+
+      {showOnboarding && <Onboarding t={t} onDone={() => setShowOnboarding(false)} />}
     </main>
   );
 }
