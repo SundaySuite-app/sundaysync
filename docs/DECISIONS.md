@@ -513,6 +513,38 @@ looking for a setting that was never the problem.
 
 `scripts/resolve-verify.py` does this and is repeatable.
 
+## D-023 — The Tauri shell is its own workspace, outside the CI gate
+
+**Phase 7.** `app/src-tauri` is excluded from the root workspace and declares its own.
+§8.4 builds bundles on tags, not on every push, and pulling `webkit2gtk` and the rest of
+the Tauri tree into the per-push gate would cost minutes on every CI run for no coverage
+gain — the engine it wraps is already fully exercised headlessly.
+
+The shell is thin by design (§3): it moves work off the UI thread, throttles progress onto
+Tauri's event bus, and hands results over as JSON. Nothing worth testing lives in it.
+
+One detail worth keeping: **the 10 Hz progress throttle lives in the shell, not the
+engine** (§10). The engine reports every event and does not second-guess its consumer, so
+the CLI can still log all of them. The throttle also always lets a *stage change* through
+regardless of timing — the stage name is what the user is actually reading, and dropping
+the transition would leave the label stale until the next tick.
+
+## D-024 — Device labels are localised in the UI, closing the loop on D-007
+
+**Phase 7.** D-007 had the engine emit bare device labels (`"Balkong"`) rather than §4.5's
+literal `"Mappe: Balkong"`, on the grounds that the engine must not hardcode Norwegian when
+§9 requires a bilingual UI, and that the provenance is recoverable from the namespaced
+device id.
+
+The UI now does exactly that: `deviceLabel()` renders `folder-*` ids as "Mappe: Balkong" or
+"Folder: Balkong" depending on the active language, and leaves model- and filename-derived
+labels alone. The plan's intended wording is what a Norwegian user sees, with no language
+baked into the wire contract.
+
+The two dictionaries are type-linked (`en: Strings` where `Strings = typeof nb`), so adding
+a key to one and forgetting the other fails the build. A half-translated UI is worse than
+an untranslated one.
+
 ## D-009 — Dotfiles are skipped during the scan walk
 
 **Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no

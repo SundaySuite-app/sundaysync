@@ -2,7 +2,7 @@
 
 Per [`PLAN.md`](PLAN.md) §13.5, this file always reflects reality. Updated at every phase end.
 
-**Current phase: 5 — FCPXML export. Complete locally, verified against real Resolve.**
+**Current phase: 7–8 — Tauri app. Simple and advanced mode built; needs a live run on real hardware.**
 
 Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 
@@ -15,9 +15,9 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 | 4 — Placement & drift | ✅ Complete (locally green) | §4.4 placement, §4.6 drift, full `sync()` pipeline, proptest invariants. 136 tests. |
 | 5 — FCPXML export | ✅ Complete (locally green) | §6 exporter, golden tests, **verified in DaVinci Resolve Studio 21.0.3.7** — frame-accurate, correct track layout, media relinked. |
 | 6 — CLI complete + real corpus | 🔶 CLI done, corpus pending | `sync`/`scan`/`bench` all implemented and working. **Corpus onboarding needs Richard's footage** — the harness is ready and waiting. |
-| 7 — Tauri app, simple mode | ⬜ Not started | `app/` is an empty placeholder until here. |
-| 8 — Advanced mode + diagnostics | ⬜ Not started | |
-| 9 — Release | ⬜ Not started | |
+| 7 — Tauri app, simple mode | 🔶 Built, not yet run live | Drop zone, device summary, staged progress, lane view, export. Frontend builds; Rust shell compiles and lints. **Needs a real launch on hardware.** |
+| 8 — Advanced mode + diagnostics | 🔶 Built, not yet run live | Threshold, cache dir, reference override, diagnostics export (media-free JSON). |
+| 9 — Release | ⬜ Not started | Needs signing certs, updater keys and a tag workflow — all owner-gated. |
 
 ## What Phase 0 actually delivered
 

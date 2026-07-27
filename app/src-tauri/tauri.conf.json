@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SundaySync",
+  "version": "0.1.0",
+  "identifier": "app.sundaysuite.sundaysync",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "SundaySync",
+        "width": 1100,
+        "height": 780,
+        "minWidth": 720,
+        "minHeight": 560,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png"],
+    "copyright": "Richard Fossland",
+    "category": "Video",
+    "shortDescription": "Multicamera audio sync for church and event shoots",
+    "longDescription": "Drop in everything from a multicamera shoot and get a synchronized timeline as FCPXML for DaVinci Resolve. Free, local, no timecode required."
+  }
+}
