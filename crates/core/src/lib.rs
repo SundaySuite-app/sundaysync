@@ -15,12 +15,15 @@
 //!
 //! # Status
 //!
-//! **Phase 1.** Scan, probe and device grouping are implemented — see [`scan`]. The
-//! correlation stages behind [`sync`] are not, so `sync` still returns an empty,
-//! well-formed result. See docs/STATUS.md.
+//! **Phase 2.** Scan, probe, device grouping and analysis-audio extraction with
+//! caching are implemented — see [`scan`] and [`Extractor`]. The correlation stages
+//! behind [`sync`] are not, so `sync` still returns an empty, well-formed result.
+//! See docs/STATUS.md.
 
+pub mod cache;
 pub mod device;
 pub mod error;
+pub mod extract;
 pub mod probe;
 pub mod progress;
 pub mod rational;
@@ -29,7 +32,9 @@ pub mod result;
 pub mod scan;
 pub mod sidecar;
 
+pub use cache::{Cache, CacheKey};
 pub use error::{Error, Result};
+pub use extract::{AnalysisAudio, CachedAudio, ExtractError, Extractor};
 pub use probe::{AudioStream, Probed, VideoStream};
 pub use progress::{CancelToken, NoProgress, Progress, ProgressSink, Stage};
 pub use rational::Rational;

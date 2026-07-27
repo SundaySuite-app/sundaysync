@@ -15,6 +15,7 @@
 //! honestly reported as `decode_error`. Nothing else in the engine reads a clock.
 
 use crate::error::{Error, Result};
+use crate::progress::CancelToken;
 use std::ffi::OsStr;
 use std::io::Read;
 use std::path::PathBuf;
@@ -101,6 +102,8 @@ pub enum RunFailure {
     Spawn(String),
     /// Exceeded the timeout and was killed.
     TimedOut,
+    /// The user cancelled and the child was killed (§7.4).
+    Cancelled,
     /// Ran, but exited non-zero.
     Failed { code: Option<i32>, stderr: String },
 }
@@ -110,6 +113,7 @@ impl std::fmt::Display for RunFailure {
         match self {
             Self::Spawn(e) => write!(f, "could not spawn: {e}"),
             Self::TimedOut => write!(f, "timed out"),
+            Self::Cancelled => write!(f, "cancelled"),
             Self::Failed { code, stderr } => {
                 let first = stderr.lines().next().unwrap_or("").trim();
                 match code {
@@ -121,17 +125,28 @@ impl std::fmt::Display for RunFailure {
     }
 }
 
-/// Runs a command to completion, killing it if it exceeds `timeout`.
+/// Runs a command to completion, killing it if it exceeds `timeout` or if `cancel` is
+/// tripped.
 ///
 /// stdout and stderr are drained on dedicated threads. This matters more than it looks:
 /// polling `try_wait` while leaving the pipes unread deadlocks the moment a child
 /// writes more than the OS pipe buffer, and a malformed file is exactly what makes
 /// ffprobe verbose. The reader threads keep the pipes flowing so the timeout is the
 /// only thing that can stop us.
+///
+/// # Why cancellation belongs here and not only in the caller
+///
+/// §7.4 requires cancel to return within 2 s. Checking the token *between* files is not
+/// enough once Phase 2 starts decoding: extracting analysis audio from a two-hour
+/// service takes far longer than two seconds, so a token checked only at file
+/// boundaries would leave the user staring at an unresponsive Cancel button for the
+/// rest of the decode. The child has to be killed mid-flight, which only this loop can
+/// do.
 pub fn run<I, S>(
     bin: &std::path::Path,
     args: I,
     timeout: Duration,
+    cancel: &CancelToken,
 ) -> std::result::Result<Output, RunFailure>
 where
     I: IntoIterator<Item = S>,
@@ -153,13 +168,22 @@ where
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
+            Ok(Some(status)) => break Stop::Exited(status),
             Ok(None) => {
-                if Instant::now() >= deadline {
+                // Cancellation is checked first: when the user has asked to stop, that
+                // is the honest reason to report even if the deadline also just passed.
+                let stop = if cancel.is_cancelled() {
+                    Some(Stop::Cancelled)
+                } else if Instant::now() >= deadline {
+                    Some(Stop::TimedOut)
+                } else {
+                    None
+                };
+                if let Some(stop) = stop {
                     // Best-effort kill, then reap so we never leave a zombie behind.
                     let _ = child.kill();
                     let _ = child.wait();
-                    break None;
+                    break stop;
                 }
                 std::thread::sleep(POLL_INTERVAL);
             }
@@ -167,7 +191,8 @@ where
         }
     };
 
-    // On timeout, return WITHOUT joining the readers, and deliberately drop the output.
+    // On timeout OR cancellation, return WITHOUT joining the readers, and deliberately
+    // drop the output.
     //
     // Killing the child does not necessarily close the pipes: if it spawned its own
     // children, they inherit the write ends and can hold them open indefinitely.
@@ -181,9 +206,11 @@ where
     // The detached threads are harmless — each is blocked on a read that ends when the
     // pipe finally closes, and then exits and drops its handle. The output is discarded
     // regardless, since a timed-out probe has nothing trustworthy to say.
-    if status.is_none() {
-        return Err(RunFailure::TimedOut);
-    }
+    let status = match status {
+        Stop::Exited(status) => status,
+        Stop::TimedOut => return Err(RunFailure::TimedOut),
+        Stop::Cancelled => return Err(RunFailure::Cancelled),
+    };
 
     // The process exited on its own, so its pipes are closed and both joins return at
     // once. A panicking reader thread is treated as "no output" rather than propagated —
@@ -191,19 +218,25 @@ where
     let stdout = out_reader.join().unwrap_or_default();
     let stderr = String::from_utf8_lossy(&err_reader.join().unwrap_or_default()).into_owned();
 
-    match status {
-        // Unreachable: handled by the early return above.
-        None => Err(RunFailure::TimedOut),
-        Some(status) if status.success() => Ok(Output {
+    if status.success() {
+        Ok(Output {
             stdout,
             stderr,
             success: true,
-        }),
-        Some(status) => Err(RunFailure::Failed {
+        })
+    } else {
+        Err(RunFailure::Failed {
             code: status.code(),
             stderr,
-        }),
+        })
     }
+}
+
+/// Why the poll loop stopped watching the child.
+enum Stop {
+    Exited(std::process::ExitStatus),
+    TimedOut,
+    Cancelled,
 }
 
 fn drain<R: Read>(pipe: Option<R>) -> Vec<u8> {
@@ -225,6 +258,7 @@ mod tests {
             Path::new("definitely-not-a-real-binary-xyz"),
             ["--version"],
             PROBE_TIMEOUT,
+            &CancelToken::new(),
         );
         assert!(matches!(r, Err(RunFailure::Spawn(_))));
     }
@@ -238,6 +272,7 @@ mod tests {
             Path::new("/bin/sh"),
             ["-c", "sleep 30"],
             Duration::from_millis(150),
+            &CancelToken::new(),
         );
         assert_eq!(r.unwrap_err(), RunFailure::TimedOut);
         assert!(
@@ -263,6 +298,7 @@ mod tests {
             Path::new("/bin/sh"),
             ["-c", "sleep 300 & wait"],
             Duration::from_millis(150),
+            &CancelToken::new(),
         );
         assert_eq!(r.unwrap_err(), RunFailure::TimedOut);
         assert!(
@@ -283,10 +319,57 @@ mod tests {
             Path::new("/bin/sh"),
             ["-c", "yes 0123456789ABCDEF | head -c 400000"],
             Duration::from_secs(20),
+            &CancelToken::new(),
         )
         .unwrap();
         assert!(r.success);
         assert_eq!(r.stdout.len(), 400_000);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_kills_a_running_child_promptly() {
+        // §7.4: cancel must return within 2 s. Once Phase 2 started decoding, checking
+        // the token only between files was no longer enough — a two-hour service takes
+        // far longer than two seconds to extract, so the child must die mid-flight.
+        let cancel = CancelToken::new();
+        let flag = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            flag.cancel();
+        });
+
+        let start = Instant::now();
+        let r = run(
+            Path::new("/bin/sh"),
+            ["-c", "sleep 300"],
+            // A timeout far beyond the test's patience, so a pass can only mean
+            // cancellation stopped it — not that the deadline quietly did.
+            Duration::from_secs(600),
+            &cancel,
+        );
+        assert_eq!(r.unwrap_err(), RunFailure::Cancelled);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "cancel took {:?}, over the §7.4 budget",
+            start.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_is_reported_ahead_of_a_simultaneous_timeout() {
+        // When the user pressed Cancel, "cancelled" is the honest reason to show, even
+        // if the deadline lapsed in the same instant.
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        let r = run(
+            Path::new("/bin/sh"),
+            ["-c", "sleep 300"],
+            Duration::from_millis(0),
+            &cancel,
+        );
+        assert_eq!(r.unwrap_err(), RunFailure::Cancelled);
     }
 
     #[cfg(unix)]
@@ -296,6 +379,7 @@ mod tests {
             Path::new("/bin/sh"),
             ["-c", "echo trouble >&2; exit 3"],
             Duration::from_secs(10),
+            &CancelToken::new(),
         );
         match r.unwrap_err() {
             RunFailure::Failed { code, stderr } => {

@@ -77,13 +77,16 @@ pub fn scan(
             total,
         });
 
-        match probe::probe(sidecar, path) {
+        match probe::probe(sidecar, path, cancel) {
             // §4.1: no audio stream means nothing to correlate on.
             Ok(p) if !p.has_audio() => unsynced.push(Unsynced {
                 file: path.clone(),
                 reason: UnsyncedReason::NoAudio,
             }),
             Ok(p) => probed.push(p),
+            // A cancelled probe is not a broken file — reporting it as `decode_error`
+            // would slander the user's media for stopping the run.
+            Err(probe::ProbeError::Cancelled) => return Err(Error::Cancelled),
             Err(_) => unsynced.push(Unsynced {
                 file: path.clone(),
                 reason: UnsyncedReason::DecodeError,
@@ -325,6 +328,7 @@ mod tests {
                 path.as_os_str(),
             ],
             std::time::Duration::from_secs(60),
+            &CancelToken::new(),
         )
         .is_ok()
     }

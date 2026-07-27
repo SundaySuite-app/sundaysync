@@ -22,6 +22,9 @@ repository = "https://github.com/SundaySuite-app/sundaysync"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Cache keys (§4.2). Fast enough that hashing path+size+mtime is free next to the
+# decode it prevents; not used for anything security-sensitive.
+blake3 = "1"
 
 # Lints applied to every crate in the workspace. The `clippy::all` bump to `deny` is
 # what makes `cargo clippy -- -D warnings` in CI a real gate rather than advisory.
