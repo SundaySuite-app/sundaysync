@@ -9,7 +9,7 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 | Phase | State | Notes |
 | --- | --- | --- |
 | 0 — Skeleton | ✅ Accepted | Workspace, CI, lint gate, stub `sync()`, CLI. All four CI jobs green on run 30277454384. |
-| 1 — Probe & inventory | ✅ Complete (locally green) | ffprobe integration, device grouping, `scan` command. 49 tests. |
+| 1 — Probe & inventory | ✅ Complete (locally green) | ffprobe integration, device grouping, `scan` command. 50 tests. |
 | 2 — Extraction & cache | ⬜ Not started | |
 | 3 — Offset engine | ⬜ Not started | Build `fixturegen` first. **Read DECISIONS.md D-004 before starting.** |
 | 4 — Placement & drift | ⬜ Not started | |
@@ -44,6 +44,10 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
   are drained on dedicated threads — polling `try_wait` while leaving them unread
   deadlocks the moment a child outruns the OS pipe buffer, which a malformed file is
   exactly what triggers. Regression-tested with a 400 KB writer and a hung child.
+  **CI caught a real bug here** (D-010): a killed child does not close pipes its own
+  children inherited, so joining the readers on the timeout path could block
+  indefinitely — a 150 ms timeout returned after 30 s. Invisible on macOS, which execs
+  where Ubuntu's dash forks.
 - **Probe parsing** (`probe.rs`) — every ffprobe field read leniently, validated after.
   Handles cover art in MP3s (a "video stream" that is really a JPEG), degenerate `0/0`
   frame rates, multiple audio streams, and vendor make/model stutter.
@@ -66,7 +70,7 @@ Local (macOS, 2026-07-27) and on CI:
 ```
 cargo fmt --all --check                               ✅
 cargo clippy --workspace --all-targets -- -D warnings ✅
-cargo test --workspace                                ✅ 49 passed
+cargo test --workspace                                ✅ 50 passed
 cargo run -q -p sundaysync-cli -- sync --help         ✅
 cargo run -q -p sundaysync-cli -- scan <shoot>        ✅
 ```

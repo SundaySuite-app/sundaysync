@@ -160,6 +160,36 @@ the directory subset it already established while walking. An earlier version re
 it with `is_dir()`, which made grouping depend on disk state that can change mid-run and
 made the logic untestable without creating real directories per case.
 
+## D-010 — ⚠️ A killed child does not close its pipes; never join readers on the timeout path
+
+**Phase 1, found by CI.** The first version of `sidecar::run` polled `try_wait`, killed
+the child on timeout, then joined the stdout/stderr reader threads before returning. That
+is wrong, and wrong in a way that silently defeats the timeout.
+
+**Killing a process does not close pipes its own children inherited.** `sh -c "sleep 30"`
+under Ubuntu's dash forks `sleep`, which inherits the write end of our stdout pipe.
+Killing the shell leaves `sleep` holding it, so `read_to_end` — and therefore `join()` —
+blocks until the *grandchild* exits. A 150 ms timeout returned after **30.002 s**.
+
+The fix: on the timeout path, return immediately without joining, and discard the output
+(a timed-out probe has nothing trustworthy to say anyway). The detached threads are
+harmless — each is blocked on a read that ends when the pipe finally closes.
+
+**Two things worth remembering from this:**
+
+1. **It was invisible on the development machine.** macOS's `sh` *execs* `sleep` rather
+   than forking, so killing the child did close the pipe and the test passed locally. It
+   only failed on the ubuntu runner. This is the concrete justification for the
+   cross-platform CI jobs added in D-005 — they earned their keep on the very next phase.
+2. **The consequence was not limited to tests.** An unbounded wait here would have broken
+   §7.2 (a bad file cannot stall the run) and §7.4 (cancel returns within 2 s), because
+   both ultimately depend on `run()` actually returning when it says it will.
+
+Regression test: `a_grandchild_holding_the_pipe_cannot_extend_the_timeout`, which uses
+`sleep 300 & wait` to force the fork on *every* shell rather than relying on dash's
+behaviour. Verified to fail against the old code — it hangs past 45 s — and to pass in
+0.6 s against the fix.
+
 ## D-009 — Dotfiles are skipped during the scan walk
 
 **Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no

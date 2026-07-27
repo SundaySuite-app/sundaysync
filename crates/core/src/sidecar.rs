@@ -167,13 +167,32 @@ where
         }
     };
 
-    // The pipes close when the child dies, so both readers terminate either way. A
-    // panicking reader thread is treated as "no output" rather than propagated — this
-    // path must not be able to take the run down (§7.2).
+    // On timeout, return WITHOUT joining the readers, and deliberately drop the output.
+    //
+    // Killing the child does not necessarily close the pipes: if it spawned its own
+    // children, they inherit the write ends and can hold them open indefinitely.
+    // Joining here would then block for as long as the grandchild lives — reintroducing
+    // exactly the unbounded wait the timeout exists to prevent, and breaking §7.4's
+    // promise that cancel returns within 2 s.
+    //
+    // Caught by CI, not locally: Ubuntu's dash forks `sleep`, while macOS's sh execs it,
+    // so the bug was invisible on the development machine.
+    //
+    // The detached threads are harmless — each is blocked on a read that ends when the
+    // pipe finally closes, and then exits and drops its handle. The output is discarded
+    // regardless, since a timed-out probe has nothing trustworthy to say.
+    if status.is_none() {
+        return Err(RunFailure::TimedOut);
+    }
+
+    // The process exited on its own, so its pipes are closed and both joins return at
+    // once. A panicking reader thread is treated as "no output" rather than propagated —
+    // this path must not be able to take the run down (§7.2).
     let stdout = out_reader.join().unwrap_or_default();
     let stderr = String::from_utf8_lossy(&err_reader.join().unwrap_or_default()).into_owned();
 
     match status {
+        // Unreachable: handled by the early return above.
         None => Err(RunFailure::TimedOut),
         Some(status) if status.success() => Ok(Output {
             stdout,
@@ -224,6 +243,32 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_secs(5),
             "timeout did not fire promptly: {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_grandchild_holding_the_pipe_cannot_extend_the_timeout() {
+        // Regression test for a bug CI caught and the development machine could not:
+        // killing the child does not close the pipes if it spawned children of its own,
+        // and joining the reader threads then blocks for as long as the grandchild
+        // lives. The original version of this returned after 30 s despite a 150 ms
+        // timeout.
+        //
+        // `sleep 300 & wait` forces the fork on every shell — Ubuntu's dash forked
+        // anyway, but macOS's sh execs, which is exactly why the bug hid locally.
+        let start = Instant::now();
+        let r = run(
+            Path::new("/bin/sh"),
+            ["-c", "sleep 300 & wait"],
+            Duration::from_millis(150),
+        );
+        assert_eq!(r.unwrap_err(), RunFailure::TimedOut);
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "a surviving grandchild extended the timeout to {:?} — \
+             run() must not join the reader threads on the timeout path",
             start.elapsed()
         );
     }
