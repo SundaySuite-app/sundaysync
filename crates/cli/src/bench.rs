@@ -165,10 +165,9 @@ fn measure(
     .map_err(|e| format!("truth.json: {e}"))?;
 
     let request = SyncRequest {
-        inputs: vec![shoot.to_path_buf()],
         cache_dir: cache_dir.map(Path::to_path_buf),
-        reference_override: None,
         min_psr,
+        ..SyncRequest::new(vec![shoot.to_path_buf()])
     };
 
     let started = Instant::now();

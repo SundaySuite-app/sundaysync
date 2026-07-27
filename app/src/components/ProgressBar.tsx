@@ -1,42 +1,38 @@
 import type { Strings } from "../i18n";
+import { stageLabel } from "../i18n";
 import type { ProgressEvent } from "../types";
 
 /**
  * §9.3 — stage names, not a bare percentage.
  *
- * The engine reports its stage; showing it is what tells a user whether a long wait is
- * decoding (expected, slow) or correlating (also slow, but nearly done).
+ * Labels come from the type-linked dictionary via `stageLabel` — the first build kept a
+ * parallel translation table in this file and sniffed the language by comparing
+ * `t.cancel === "Avbryt"`, both of which are exactly what the dictionary exists to
+ * prevent.
  */
-const STAGE_LABELS: Record<string, { nb: string; en: string }> = {
-  Scanning: { nb: "Leser filer", en: "Reading files" },
-  Probing: { nb: "Undersøker media", en: "Inspecting media" },
-  Extracting: { nb: "Henter ut lyd", en: "Extracting audio" },
-  Correlating: { nb: "Sammenligner lyd", en: "Comparing audio" },
-  Placing: { nb: "Plasserer klipp", en: "Placing clips" },
-  MeasuringDrift: { nb: "Måler drift", en: "Measuring drift" },
-};
-
 export function ProgressBar({ t, progress }: { t: Strings; progress: ProgressEvent | null }) {
-  const isNorwegian = t.cancel === "Avbryt";
-  const label = progress
-    ? (STAGE_LABELS[progress.stage]?.[isNorwegian ? "nb" : "en"] ?? progress.stage)
-    : t.syncing;
-  const pct =
-    progress && progress.total > 0
-      ? Math.round((progress.completed / progress.total) * 100)
-      : null;
+  const label = progress ? stageLabel(t, progress.stage) : t.syncing;
+  const determinate = progress !== null && progress.total > 0;
+  const pct = determinate ? Math.round((progress.completed / progress.total) * 100) : null;
 
   return (
     <div className="progress">
-      <div className="progress__label">
+      <div className="progress__label" aria-live="polite">
         <span>{label}</span>
-        {progress && progress.total > 0 && (
+        {determinate && (
           <span className="muted">
             {progress.completed}/{progress.total}
           </span>
         )}
       </div>
-      <div className="progress__track">
+      <div
+        className="progress__track"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={determinate ? progress.total : undefined}
+        aria-valuenow={determinate ? progress.completed : undefined}
+      >
         <div
           className={`progress__fill${pct === null ? " progress__fill--indeterminate" : ""}`}
           style={pct === null ? undefined : { width: `${pct}%` }}

@@ -51,3 +51,13 @@ specify one. See DECISIONS.md D-013.
 `MIN_PSR = 15.0` was measured against generated fixtures (D-015). Real rooms, real mics and
 real congregations are not in that sample. Phase 6's corpus is what would make this claim
 trustworthy; until then, treat the threshold as provisional.
+
+## UI
+
+- **Dark theme only** (D-026). The light look was dropped along with its contrast bugs;
+  the suite's desktop apps are dark.
+- **Device re-assignment targets existing devices** from the UI. Creating a brand-new
+  device by name is reachable only via the CLI/JSON path (D-028).
+- **The app has no visual regression tests.** The engine is exhaustively tested; the UI
+  is verified by launch and by hand. vitest covers the reducer, error mapping and
+  settings logic.

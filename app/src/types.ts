@@ -1,8 +1,10 @@
 /**
- * The §5 `SyncResult` contract, as TypeScript.
+ * The §5 `SyncResult` contract plus the scan-manifest shapes, as TypeScript.
  *
- * Hand-written to mirror `crates/core/src/result.rs`. The serde spellings there are
- * asserted in Rust tests, so the two cannot drift without a test failing on the Rust side.
+ * Hand-written to mirror `crates/core/src/result.rs` and `crates/core/src/scan.rs`.
+ * The serde spellings there are asserted in Rust tests
+ * (`scan_manifest_serde_spelling_is_stable`, `unsynced_reasons_match_the_plan_spelling`),
+ * so the two sides cannot drift without a test failing on the Rust side.
  */
 
 export type DeviceKind = "video" | "audio";
@@ -58,6 +60,53 @@ export interface ProgressEvent {
   stage: string;
   completed: number;
   total: number;
+}
+
+// ---- Scan manifest (crates/core/src/scan.rs) --------------------------------------
+
+export interface AudioStream {
+  codec: string;
+  sample_rate: number;
+  channels: number;
+}
+
+export interface VideoStream {
+  codec: string;
+  width: number;
+  height: number;
+  /** `Rational` serialises as the string "25/1"; degenerate rates are null. */
+  fps: string | null;
+}
+
+export interface FileEntry {
+  file: string;
+  device: string;
+  duration_seconds: number;
+  format_name: string;
+  audio: AudioStream | null;
+  video: VideoStream | null;
+  creation_time: string | null;
+}
+
+export interface ScanManifest {
+  schema: number;
+  devices: Device[];
+  files: FileEntry[];
+  unsynced: Unsynced[];
+}
+
+// ---- Shell command payloads (app/src-tauri/src/lib.rs) ----------------------------
+
+export interface SyncOutcome {
+  result: SyncResult;
+  /** Per-file duration in seconds — what gives the result view real clip widths. */
+  durations: Record<string, number>;
+}
+
+export interface CacheStatus {
+  dir: string;
+  entries: number;
+  bytes: number;
 }
 
 export function basename(path: string): string {

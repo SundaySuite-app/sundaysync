@@ -1,20 +1,49 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Strings } from "../i18n";
-import { basename, type Placement, type SyncResult, type Warning } from "../types";
+import { formatDuration } from "../i18n";
+import { basename } from "../types";
+import type { Placement, SyncOutcome, UnsyncedReason, Warning } from "../types";
+import { CameraIcon, MicIcon } from "./icons";
+import { Dialog } from "./Dialog";
 
 /**
  * §9.4 — lanes per device, green/yellow clips, and a red shelf for refusals.
  *
- * Informational, not an editor: §9 is explicit that clips are not draggable in v1. The
- * colouring is PluralEyes' one genuinely loved feature, kept.
+ * Informational, not an editor: §9 is explicit that clips are not draggable in v1.
+ * Clip widths are REAL — `SyncOutcome.durations` is forwarded from the shell now, so
+ * the gap-to-next-clip estimate (and its apology comment) is gone.
+ *
+ * Every device renders, including ones with zero placed clips: a camera that synced
+ * nothing is exactly what §7.5 wants visible, not vanished.
  */
-export function ResultView({ t, result }: { t: Strings; result: SyncResult }) {
+export function ResultView({
+  t,
+  outcome,
+  stale,
+  deviceIds,
+  onOverride,
+}: {
+  t: Strings;
+  outcome: SyncOutcome;
+  stale: boolean;
+  deviceIds: string[];
+  onOverride: (file: string, device: string) => void;
+}) {
   const [selected, setSelected] = useState<Placement | null>(null);
+  const { result, durations } = outcome;
 
-  const span = Math.max(result.sequence.duration_seconds, 1);
-  const origin = Math.min(...result.placements.map((p) => p.offset_seconds), 0);
+  const { origin, span } = useMemo(() => {
+    if (result.placements.length === 0) return { origin: 0, span: 1 };
+    let min = Infinity;
+    let max = -Infinity;
+    for (const p of result.placements) {
+      min = Math.min(min, p.offset_seconds);
+      max = Math.max(max, p.offset_seconds + (durations[p.file] ?? 0));
+    }
+    return { origin: min, span: Math.max(max - min, 1) };
+  }, [result, durations]);
 
-  const reasonText: Record<string, string> = {
+  const reasonText: Record<UnsyncedReason, string> = {
     low_confidence: t.reasonLowConfidence,
     no_audio: t.reasonNoAudio,
     decode_error: t.reasonDecodeError,
@@ -22,39 +51,46 @@ export function ResultView({ t, result }: { t: Strings; result: SyncResult }) {
   };
 
   return (
-    <section className="result">
+    <section className={`result${stale ? " result--stale" : ""}`}>
+      <div className="result__meta">
+        <span>{t.sequenceMeta(result.sequence.fps, formatDuration(result.sequence.duration_seconds))}</span>
+      </div>
+
       {result.warnings.map((w, i) => (
         <p key={i} className="banner banner--warn">
-          {warningText(t, w)}
+          <span>{warningText(t, w)}</span>
         </p>
       ))}
 
       <div className="lanes">
         {result.devices.map((device) => {
           const clips = result.placements.filter((p) => p.device === device.id);
-          if (clips.length === 0) return null;
           const isReference = result.reference?.device === device.id;
           return (
             <div key={device.id} className="lane">
               <div className="lane__label">
-                <span className="lane__name">{deviceLabel(t, device.id, device.label)}</span>
-                {isReference && <span className="badge">{t.reference}</span>}
+                {device.kind === "video" ? <CameraIcon /> : <MicIcon />}
+                <span className="lane__name">{t.deviceLabel(device.id, device.label)}</span>
+                {isReference && <span className="badge badge--ref">{t.reference}</span>}
               </div>
               <div className="lane__track">
+                {clips.length === 0 && <span className="lane__empty">{t.emptyLane}</span>}
                 {clips.map((clip) => {
                   const left = ((clip.offset_seconds - origin) / span) * 100;
-                  const width = Math.max(estimateWidth(clip, result, span), 1.5);
+                  const width = ((durations[clip.file] ?? 0) / span) * 100;
+                  const name = basename(clip.file);
                   const hasWarnings = clip.warnings.length > 0;
                   return (
                     <button
                       key={clip.file}
                       type="button"
-                      className={`clip${hasWarnings ? " clip--warn" : " clip--ok"}`}
+                      className={`clip${hasWarnings ? " clip--warn" : ""}`}
                       style={{ left: `${left}%`, width: `${width}%` }}
                       onClick={() => setSelected(clip)}
-                      title={basename(clip.file)}
+                      aria-label={`${name}, ${t.offsetLabel} ${clip.offset_seconds.toFixed(1)} s`}
+                      title={name}
                     >
-                      <span className="clip__name">{basename(clip.file)}</span>
+                      <span className="clip__name">{name}</span>
                     </button>
                   );
                 })}
@@ -67,52 +103,113 @@ export function ResultView({ t, result }: { t: Strings; result: SyncResult }) {
       {result.unsynced.length > 0 && (
         <div className="shelf">
           <h2 className="shelf__title">{t.unsyncedTitle}</h2>
-          <ul>
-            {result.unsynced.map((u) => (
-              <li key={u.file}>
-                <span className="shelf__file">{basename(u.file)}</span>
-                <span className="muted"> — {reasonText[u.reason] ?? u.reason}</span>
-              </li>
-            ))}
-          </ul>
+          {result.unsynced.map((u) => (
+            <div key={u.file} className="shelf__row">
+              <span>{basename(u.file)}</span>
+              <span className="shelf__reason">— {reasonText[u.reason]}</span>
+              {/* The device_overlap fix path: move the clip and re-sync (D-027). */}
+              <label>
+                <span className="visually-hidden">
+                  {t.moveToDevice}: {basename(u.file)}
+                </span>
+                <select value="" onChange={(e) => e.target.value && onOverride(u.file, e.target.value)}>
+                  <option value="">{t.moveToDevice}</option>
+                  {deviceIds.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ))}
         </div>
       )}
 
       {selected && (
-        <div className="details">
-          <h3>{basename(selected.file)}</h3>
-          <dl>
-            <dt>Offset</dt>
-            <dd>{selected.offset_seconds.toFixed(3)} s</dd>
-            <dt>{t.confidence}</dt>
-            <dd>{(selected.confidence * 100).toFixed(0)} %</dd>
-            {selected.drift_ppm !== null && (
-              <>
-                <dt>Drift</dt>
-                <dd>{selected.drift_ppm.toFixed(1)} ppm</dd>
-              </>
-            )}
-          </dl>
-          {selected.warnings.map((w, i) => (
-            <p key={i} className="muted">
-              {warningText(t, w)}
-            </p>
-          ))}
-          <button type="button" className="linklike" onClick={() => setSelected(null)}>
-            ✕
-          </button>
-        </div>
+        <ClipDetail
+          t={t}
+          clip={selected}
+          minPsr={result.parameters.min_psr}
+          deviceIds={deviceIds}
+          onOverride={onOverride}
+          onClose={() => setSelected(null)}
+        />
       )}
     </section>
   );
 }
 
-/**
- * §4.5 labels are emitted bare so the engine never hardcodes one language (D-007). The
- * provenance is in the device id, so the localised prefix belongs here.
- */
-function deviceLabel(t: Strings, id: string, label: string): string {
-  return id.startsWith("folder-") ? t.folderLabel(label) : label;
+function ClipDetail({
+  t,
+  clip,
+  minPsr,
+  deviceIds,
+  onOverride,
+  onClose,
+}: {
+  t: Strings;
+  clip: Placement;
+  minPsr: number;
+  deviceIds: string[];
+  onOverride: (file: string, device: string) => void;
+  onClose: () => void;
+}) {
+  const name = basename(clip.file);
+  const provenance =
+    clip.chain.length === 0
+      ? t.directMatch
+      : t.viaChain(clip.chain.map((c) => basename(c)).join(" → "));
+
+  return (
+    <Dialog titleId="clip-detail-title" onClose={onClose} closeLabel={t.close}>
+      <h2 id="clip-detail-title">{name}</h2>
+      <dl className="detail-grid">
+        <dt>{t.offsetLabel}</dt>
+        <dd>{clip.offset_seconds.toFixed(3)} s</dd>
+        <dt>{t.confidence}</dt>
+        <dd>{(clip.confidence * 100).toFixed(0)} %</dd>
+        <dt>{t.psrLabel}</dt>
+        <dd>
+          {Number.isFinite(clip.psr)
+            ? t.psrVsThreshold(clip.psr.toFixed(1), minPsr.toFixed(0))
+            : "—"}
+        </dd>
+        {clip.drift_ppm !== null && (
+          <>
+            <dt>{t.driftLabel}</dt>
+            <dd>{clip.drift_ppm.toFixed(1)} ppm</dd>
+          </>
+        )}
+      </dl>
+      <p className="subtle">{provenance}</p>
+      {clip.projected_end_error_ms !== null && Math.abs(clip.projected_end_error_ms) >= 1 && (
+        <p className="subtle">{t.projectedEndError(clip.projected_end_error_ms)}</p>
+      )}
+      {clip.warnings.map((w, i) => (
+        <p key={i} className="muted">
+          {warningText(t, w)}
+        </p>
+      ))}
+      <hr className="sep" style={{ margin: "1rem 0" }} />
+      <label className="field">
+        <span>{t.moveToDevice}</span>
+        <select
+          value={clip.device}
+          onChange={(e) => {
+            onOverride(clip.file, e.target.value);
+            onClose();
+          }}
+        >
+          {deviceIds.map((id) => (
+            <option key={id} value={id}>
+              {id}
+            </option>
+          ))}
+        </select>
+      </label>
+    </Dialog>
+  );
 }
 
 function warningText(t: Strings, w: Warning): string {
@@ -125,22 +222,5 @@ function warningText(t: Strings, w: Warning): string {
       return t.mixedFps;
     case "frame_snap_residual":
       return t.frameSnap;
-    default:
-      return "";
   }
-}
-
-/**
- * Clip widths are approximated from the gap to the next clip, because `SyncResult` does
- * not carry per-file durations (§5 has no field for it, and adding one is a schema
- * change). Good enough for a proportional overview, which is all §9.4 asks of it.
- */
-function estimateWidth(clip: Placement, result: SyncResult, span: number): number {
-  const sameDevice = result.placements
-    .filter((p) => p.device === clip.device)
-    .map((p) => p.offset_seconds)
-    .sort((a, b) => a - b);
-  const next = sameDevice.find((o) => o > clip.offset_seconds);
-  const length = next ? next - clip.offset_seconds : span / 4;
-  return (length / span) * 100;
 }

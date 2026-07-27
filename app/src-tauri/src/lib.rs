@@ -30,14 +30,18 @@ struct ProgressEvent {
 /// the CLI can still log every event (see `progress.rs`).
 struct EventSink {
     app: AppHandle,
+    /// Which event channel this sink publishes on — `sync:progress` for the pipeline,
+    /// `scan:progress` for the pre-sync preview, so the frontend can tell them apart.
+    channel: &'static str,
     last: Mutex<std::time::Instant>,
     last_stage: Mutex<Option<Stage>>,
 }
 
 impl EventSink {
-    fn new(app: AppHandle) -> Self {
+    fn new(app: AppHandle, channel: &'static str) -> Self {
         Self {
             app,
+            channel,
             last: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1)),
             last_stage: Mutex::new(None),
         }
@@ -70,7 +74,7 @@ impl ProgressSink for EventSink {
         }
 
         let _ = self.app.emit(
-            "sync:progress",
+            self.channel,
             ProgressEvent {
                 stage: format!("{:?}", p.stage),
                 completed: p.completed,
@@ -90,12 +94,41 @@ struct LastRun {
 #[derive(Default)]
 struct AppState {
     cancel: Arc<Mutex<Option<CancelToken>>>,
+    /// The pre-sync scan gets its own slot: a re-scan supersedes the previous one
+    /// (the UI auto-scans on every input change), and cancelling a scan must never
+    /// touch a sync in flight.
+    scan_cancel: Arc<Mutex<Option<CancelToken>>>,
     last: Arc<Mutex<Option<LastRun>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct SyncOutcome {
     result: SyncResult,
+    /// Per-file duration in seconds. Forwarding this is what gives the result view
+    /// real proportional clip widths instead of the gap-to-next-clip guess the first
+    /// build shipped with. Serialises as `{ "/abs/path": 123.4 }`.
+    durations: BTreeMap<PathBuf, f64>,
+}
+
+/// The frontend's sync request, exactly as `invoke("run_sync", …)` sends it.
+///
+/// One struct argument rather than eight parameters: Tauri deserialises it from the
+/// same camelCased object either way, and clippy is right that eight positional
+/// arguments is how call sites quietly transpose two of them.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunSyncArgs {
+    inputs: Vec<PathBuf>,
+    #[serde(default)]
+    min_psr: Option<f64>,
+    #[serde(default)]
+    cache_dir: Option<PathBuf>,
+    #[serde(default)]
+    reference: Option<PathBuf>,
+    #[serde(default)]
+    device_overrides: Option<BTreeMap<PathBuf, String>>,
+    #[serde(default)]
+    segment_count: Option<usize>,
 }
 
 /// Runs a full sync. Blocking, so the frontend calls it off the UI thread.
@@ -103,24 +136,24 @@ struct SyncOutcome {
 fn run_sync(
     app: AppHandle,
     state: State<'_, AppState>,
-    inputs: Vec<PathBuf>,
-    min_psr: Option<f64>,
-    cache_dir: Option<PathBuf>,
-    reference: Option<PathBuf>,
+    args: RunSyncArgs,
 ) -> Result<SyncOutcome, String> {
     let cancel = CancelToken::new();
     if let Ok(mut slot) = state.cancel.lock() {
         *slot = Some(cancel.clone());
     }
 
+    let defaults = SyncRequest::new(Vec::new());
     let request = SyncRequest {
-        inputs,
-        cache_dir,
-        reference_override: reference,
-        min_psr: min_psr.unwrap_or(DEFAULT_MIN_PSR),
+        inputs: args.inputs,
+        cache_dir: args.cache_dir,
+        reference_override: args.reference,
+        min_psr: args.min_psr.unwrap_or(DEFAULT_MIN_PSR),
+        device_overrides: args.device_overrides.unwrap_or_default(),
+        segment_count: args.segment_count.unwrap_or(defaults.segment_count),
     };
 
-    let sink = EventSink::new(app);
+    let sink = EventSink::new(app, "sync:progress");
     let outcome = sync_with_durations(&request, &sink, &cancel);
 
     if let Ok(mut slot) = state.cancel.lock() {
@@ -132,13 +165,93 @@ fn run_sync(
             if let Ok(mut slot) = state.last.lock() {
                 *slot = Some(LastRun {
                     result: result.clone(),
-                    durations,
+                    durations: durations.clone(),
                 });
             }
-            Ok(SyncOutcome { result })
+            Ok(SyncOutcome { result, durations })
         }
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// Probe-only preview of a set of inputs — devices, files with metadata, and anything
+/// unusable — without decoding a single sample. This is what lets the sources view show
+/// the §9.2 device summary *before* the user commits to a sync.
+///
+/// A new call supersedes any scan still running (the UI re-scans on every input
+/// change); the superseded call returns `cancelled`, which the frontend ignores unless
+/// it belongs to the latest request.
+#[tauri::command(async)]
+fn scan_inputs(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    inputs: Vec<PathBuf>,
+    cache_dir: Option<PathBuf>,
+) -> Result<sundaysync_core::ScanManifest, String> {
+    let cancel = CancelToken::new();
+    if let Ok(mut slot) = state.scan_cancel.lock() {
+        if let Some(previous) = slot.replace(cancel.clone()) {
+            previous.cancel();
+        }
+    }
+
+    let sidecar = sundaysync_core::Sidecar::from_path().map_err(|e| e.to_string())?;
+    // Exclude the cache exactly as the pipeline does (D-020) — a user-configured cache
+    // inside a dropped folder must not appear as broken media in the preview either.
+    let exclude = cache_dir.or_else(|| sundaysync_core::Cache::default_dir().ok());
+
+    let sink = EventSink::new(app, "scan:progress");
+    let outcome =
+        sundaysync_core::scan::scan_detailed(&inputs, &sidecar, exclude.as_deref(), &sink, &cancel);
+
+    // Clear the slot only if it still holds OUR token: a newer scan may already have
+    // installed its own, and clearing that would orphan its cancel button. Our token
+    // being cancelled is exactly the signal that we were superseded.
+    if !cancel.is_cancelled() {
+        if let Ok(mut slot) = state.scan_cancel.lock() {
+            *slot = None;
+        }
+    }
+
+    outcome
+        .map(|(manifest, _)| manifest)
+        .map_err(|e| e.to_string())
+}
+
+/// Cache statistics for the settings screen (D-013: the cache grows ~169 MB per
+/// audio-hour and nothing evicts it — the user deserves to see the number).
+#[derive(Debug, Clone, Serialize)]
+struct CacheStatus {
+    dir: PathBuf,
+    entries: usize,
+    bytes: u64,
+}
+
+#[tauri::command]
+fn cache_status(dir: Option<PathBuf>) -> Result<CacheStatus, String> {
+    let dir = match dir {
+        Some(d) => d,
+        None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
+    };
+    let cache = sundaysync_core::Cache::new(dir.clone());
+    Ok(CacheStatus {
+        dir,
+        entries: cache.entry_count().map_err(|e| e.to_string())?,
+        bytes: cache.size_bytes().map_err(|e| e.to_string())?,
+    })
+}
+
+/// Clears the analysis cache, returning bytes freed. Foreign files are spared — the
+/// engine never deletes what it did not write.
+#[tauri::command]
+fn clear_cache(dir: Option<PathBuf>) -> Result<u64, String> {
+    let dir = match dir {
+        Some(d) => d,
+        None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
+    };
+    sundaysync_core::Cache::new(dir)
+        .clear()
+        .map_err(|e| e.to_string())
 }
 
 /// §7.4: cancel must take effect within 2 s. The engine kills in-flight ffmpeg children,
@@ -199,6 +312,7 @@ fn export_diagnostics(state: State<'_, AppState>, path: PathBuf) -> Result<(), S
         "arch": std::env::consts::ARCH,
         "ffmpeg": ffmpeg,
         "default_min_psr": DEFAULT_MIN_PSR,
+        "default_segment_count": sundaysync_core::correlate::SEGMENT_COUNT,
         "analysis_rate": sundaysync_core::ANALYSIS_RATE,
         "result": guard.as_ref().map(|l| &l.result),
     });
@@ -237,6 +351,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             run_sync,
             cancel_sync,
+            scan_inputs,
+            cache_status,
+            clear_cache,
             export_timeline,
             export_diagnostics,
             check_sidecar,

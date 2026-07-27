@@ -1,6 +1,7 @@
 //! The input side of the single `sync()` entry point — docs/PLAN.md §3.
 
 use crate::result::Parameters;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Internal analysis sample rate (§4.2).
@@ -39,6 +40,9 @@ pub const ANALYSIS_RATE: u32 = 12_000;
 pub const DEFAULT_MIN_PSR: f64 = 15.0;
 
 /// Everything one sync run needs.
+///
+/// `SyncRequest` is deliberately *not* part of the frozen §5 schema — `SCHEMA_VERSION`
+/// covers `SyncResult` only — so it can grow as the UI needs it to (D-028).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncRequest {
     /// Files and/or folders. Folders are walked recursively (§4.1); nothing is rejected
@@ -50,6 +54,17 @@ pub struct SyncRequest {
     /// Forces the reference track instead of the §4.4 heuristic. Advanced mode only.
     pub reference_override: Option<PathBuf>,
     pub min_psr: f64,
+    /// §9 advanced: move files to another device before placement.
+    ///
+    /// Keyed by the exact path the scan reported — no canonicalisation, because the UI
+    /// echoes scan output straight back. A key matching no scanned file is ignored: a
+    /// stale override left over after the user removed an input must not abort a run
+    /// (D-028). A target id the grouping never produced creates a fresh device.
+    pub device_overrides: BTreeMap<PathBuf, String>,
+    /// §9 advanced: correlation segment count. Clamped to
+    /// [`crate::correlate::SEGMENT_COUNT_RANGE`] at the pipeline boundary, so a wild
+    /// value from a config file degrades to the nearest sane one instead of erroring.
+    pub segment_count: usize,
 }
 
 impl SyncRequest {
@@ -60,6 +75,8 @@ impl SyncRequest {
             cache_dir: None,
             reference_override: None,
             min_psr: DEFAULT_MIN_PSR,
+            device_overrides: BTreeMap::new(),
+            segment_count: crate::correlate::SEGMENT_COUNT,
         }
     }
 

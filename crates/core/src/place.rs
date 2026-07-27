@@ -104,6 +104,7 @@ pub fn place(
     candidates: &[Candidate],
     override_path: Option<&Path>,
     min_psr: f64,
+    segment_count: usize,
     fps: f64,
     progress: &dyn ProgressSink,
     cancel: &CancelToken,
@@ -151,7 +152,7 @@ pub fn place(
         }
 
         let audio = candidate.audio.load()?;
-        match correlator.match_clip(audio.samples(), ref_audio.samples()) {
+        match correlator.match_clip(audio.samples(), ref_audio.samples(), segment_count) {
             Some(m) if m.psr >= min_psr => {
                 placements.push(build_placement(Resolved {
                     candidate,
@@ -209,7 +210,9 @@ pub fn place(
                     continue;
                 };
                 let anchor_audio = anchor.audio.load()?;
-                let Some(m) = correlator.match_clip(audio.samples(), anchor_audio.samples()) else {
+                let Some(m) =
+                    correlator.match_clip(audio.samples(), anchor_audio.samples(), segment_count)
+                else {
                     continue;
                 };
                 if m.psr < min_psr {
