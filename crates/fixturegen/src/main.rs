@@ -1,28 +1,60 @@
-//! `fixturegen` — deterministic synthetic test-media generator (docs/PLAN.md §8.1).
+//! `fixturegen` — generates a synthetic test shoot into a directory.
 //!
-//! Builds a whole multicamera shoot from a seed + spec: base audio cut into clips at
-//! known ground-truth offsets, then per device gain, EQ colouration, synthetic reverb,
-//! crowd noise at a set SNR, and clock drift. Emits tiny real media plus a `truth.json`.
-//! This is the backbone of CI — the accuracy gates in §8.2 are measured against it.
+//! Usage:
+//!   fixturegen <quick|full> <out-dir> [seed]
 //!
-//! **Phase 0.** Not implemented. Built first in Phase 3, before the GCC-PHAT engine it
-//! exists to validate.
-//!
-//! # Codec coverage is not optional
-//!
-//! A 3.000 s AAC/MP4 file decodes to 3.008 s — an 8 ms overshoot from AAC encoder
-//! priming, measured on ffmpeg 8.1.2 during project kickoff (docs/DECISIONS.md, D-004).
-//! The §8.2 accuracy gate is ±10 ms, so a systematic per-codec decoder delay would
-//! consume most of the error budget on its own, and would present as a plausible
-//! constant per-device offset rather than an obvious bug.
-//!
-//! Fixtures must therefore span **several codecs** — at minimum PCM/wav, AAC, and one
-//! long-GOP camera codec — not wav alone. A wav-only suite would pass CI green while
-//! the product mis-syncs every real camera.
+//! Deterministic: the same tier and seed always produce byte-identical media and an
+//! identical `truth.json` (§8.1).
 
-fn main() {
-    eprintln!(
-        "fixturegen is not implemented yet — it is built in Phase 3.\n\
-         See docs/PLAN.md §8.1 and docs/STATUS.md."
-    );
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use sundaysync_fixturegen::shoot::{self, Codec};
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let (tier, out) = match args.as_slice() {
+        [tier, out, ..] => (tier.as_str(), PathBuf::from(out)),
+        _ => {
+            eprintln!("usage: fixturegen <quick|full> <out-dir> [seed]");
+            return ExitCode::FAILURE;
+        }
+    };
+    // A fixed default so `fixturegen quick out/` is reproducible without ceremony.
+    let seed: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0x5EED);
+
+    let spec = match tier {
+        "quick" => shoot::quick_suite(seed),
+        "full" => shoot::full_suite(seed),
+        other => {
+            eprintln!("unknown tier `{other}` (expected quick or full)");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let dir = shoot::suite_dir(&out, &spec.name, seed);
+    let ffmpeg = Path::new("ffmpeg");
+    let mut truth = match shoot::emit(&spec, &dir, ffmpeg) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // §8.1: at least one file with no relationship to the event at all.
+    if let Err(e) = shoot::emit_uncorrelated(
+        &mut truth,
+        &dir,
+        "unrelated",
+        25.0,
+        seed,
+        Codec::Wav,
+        ffmpeg,
+    ) {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
+
+    println!("{} clips -> {}", truth.clips.len(), dir.display());
+    ExitCode::SUCCESS
 }

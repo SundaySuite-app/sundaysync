@@ -1,0 +1,31 @@
+name: Nightly accuracy
+
+# docs/PLAN.md §8.4: "nightly `full` suite". The full tier takes minutes and carries the
+# cases the per-push `quick` tier cannot afford — a 10-minute event, five devices, an MP4
+# camera file, 4 dB SNR under heavy reverb, drift in both directions.
+on:
+  schedule:
+    # 03:00 UTC — after any evening pushes, before the working day in Norway.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  full-suite:
+    name: Full accuracy suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      # `--ignored` is what selects the full tier; it is excluded from the push gate on
+      # purpose so a slow suite never becomes a reason to stop running CI.
+      - name: Full accuracy gate
+        run: cargo test -p sundaysync-core --test accuracy -- --ignored --nocapture
+        env:
+          SUNDAYSYNC_REQUIRE_FFMPEG: "1"

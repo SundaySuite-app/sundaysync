@@ -2,7 +2,7 @@
 
 Per [`PLAN.md`](PLAN.md) §13.5, this file always reflects reality. Updated at every phase end.
 
-**Current phase: 2 — Extraction & cache. ✅ ACCEPTED — CI green, PR #2 merged.**
+**Current phase: 3 — Offset engine. Complete locally, pending CI.**
 
 Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 
@@ -11,8 +11,8 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 | 0 — Skeleton | ✅ Accepted | Workspace, CI, lint gate, stub `sync()`, CLI. All four CI jobs green on run 30277454384. |
 | 1 — Probe & inventory | ✅ Accepted | ffprobe integration, device grouping, `scan` command. 50 tests. All four CI jobs green; PR #1 merged. |
 | 2 — Extraction & cache | ✅ Accepted | ffmpeg → 12 kHz mono f32 PCM, blake3-keyed cache, parallel decode. 71 tests. PR #2 merged. |
-| 3 — Offset engine | ⬜ Not started | Next. Build `fixturegen` first. **Read D-004 (codec delay) and D-011 (mmap/unsafe trade) before starting.** |
-| 4 — Placement & drift | ⬜ Not started | |
+| 3 — Offset engine | ✅ Complete (locally green) | `fixturegen` + GCC-PHAT. `MIN_PSR` calibrated to 15.0. 106 tests. **Read D-016 before Phase 4.** |
+| 4 — Placement & drift | ⬜ Not started | Next. **D-016 (drift vs the §8.2 gate) needs an owner decision — see below.** |
 | 5 — FCPXML export | ⬜ Not started | |
 | 6 — CLI complete + real corpus | ⬜ Not started | Needs corpus material from Richard. |
 | 7 — Tauri app, simple mode | ⬜ Not started | `app/` is an empty placeholder until here. |
@@ -80,6 +80,36 @@ sub-millisecond with zero ffmpeg processes, 46.9 KB per audio-second. See D-013 
 per-second figure matches the plan, but cache *growth over time* is unmanaged and needs a
 product decision before Phase 7's UI copy claims it is negligible.
 
+## What Phase 3 delivered
+
+- **`fixturegen`** (§8.1) — deterministic synthetic shoots from a seed: hand-rolled
+  xoshiro256** PRNG (no `rand`, whose stream may change across versions), broadband
+  speech/music/percussive master audio, and per-device gain, spectral tilt, reverb, noise
+  at a set SNR, and clock drift. Emits WAV/FLAC/AAC/MP4 plus `truth.json`. `quick` and
+  `full` tiers per §8.1.
+- **`correlate.rs`** (§4.3) — GCC-PHAT via `rustfft`, using **overlap-save** so memory
+  depends on segment length, never shoot length. A single transform over a 3-hour
+  reference would be a quarter-billion complex bins, against §7.7's 4 GB ceiling for the
+  whole run. PHAT survives the split: normalising each spectrum to unit magnitude keeps
+  blocks directly comparable. Segmentation, median offset, MAD consistency, PSR and
+  parabolic sub-sample interpolation all per §4.3.
+- **The accuracy harness** (`tests/accuracy.rs`) — generates fixtures, runs the real
+  extraction and correlation path, and asserts the §8.2 gates.
+
+### Measured
+
+| | |
+| --- | --- |
+| Correlator error on non-drifting clips | **−0.01 ms** |
+| AAC / MP4 systematic bias | **≤ 0.01 ms** (D-004 not reproduced) |
+| Real-match PSR range | 30.9 – 567 |
+| Unrelated-audio PSR range | 5.2 – 9.2 |
+| `quick` suite runtime | 9.8 s |
+
+Two findings worth reading in full: **D-014** (the fixture reverb produced a fake −5 ms
+per-codec bias that mimicked D-004 exactly) and **D-016** (uncorrected drift will exceed
+the §8.2 gate on long clips — needs an owner decision).
+
 ## Verification
 
 Local (macOS, 2026-07-27) and on CI:
@@ -87,7 +117,7 @@ Local (macOS, 2026-07-27) and on CI:
 ```
 cargo fmt --all --check                               ✅
 cargo clippy --workspace --all-targets -- -D warnings ✅
-cargo test --workspace                                ✅ 71 passed
+cargo test --workspace                                ✅ 106 passed
 cargo run -q -p sundaysync-cli -- sync --help         ✅
 cargo run -q -p sundaysync-cli -- scan <shoot>        ✅
 ```
@@ -100,10 +130,19 @@ All four CI jobs green on both phases — ubuntu (full gate), macOS, Windows, an
 
 ## Open items carried into later phases
 
-- **`DEFAULT_MIN_PSR = 5.0` is provisional**, taken from the plan's worked example, not
-  measured. §4.3 requires calibration against the synthetic suite in Phase 3.
-- **DECISIONS.md D-004** — per-codec decoder delay threatens the ±10 ms gate in §8.2.
-  Blocking input to the Phase 3 fixture design; fixtures must span multiple codecs.
+- **⚠️ DECISIONS.md D-016 — needs Richard's decision.** Uncorrected drift consumes the
+  whole ±10 ms budget on clips over ~8 minutes at 40 ppm. A 90-minute continuous recording
+  would land ~108 ms out. §4.6 defers correction to v2; §8.2 demands ±10 ms. One of the
+  three has to give, and picking is a plan change, not an implementation detail.
+- **`MIN_PSR = 15.0` is calibrated on synthetic material only** (D-015) and must be
+  re-validated against the real corpus in Phase 6.
+- **DECISIONS.md D-004 is unfalsified but not reproduced** — measured per-codec bias is
+  ≤ 0.01 ms through the ffmpeg decode path. Keep the multi-codec fixture coverage; the
+  cost is nil and it is the only thing that would catch a regression.
+- **Correlation cost scales with reference length.** ~10 blocks for a 10-minute reference;
+  a 3-hour service would be ~160 per segment. §10's 6-minute target assumes decode-bound,
+  which stops being true at that scale. The known fix is a decimated coarse search
+  followed by a narrow refine; deferred until the Phase 6 corpus shows whether it matters.
 - **Probing is still sequential.** The parallel pool now exists in `extract.rs`; moving
   probing onto it is a small, worthwhile follow-up (a shoot with several hung files
   currently costs 30 s each, serially).

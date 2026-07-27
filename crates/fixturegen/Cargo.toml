@@ -8,12 +8,18 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+name = "sundaysync_fixturegen"
+path = "src/lib.rs"
+
 [[bin]]
 name = "fixturegen"
 path = "src/main.rs"
 
+# Deliberately does NOT depend on sundaysync-core: fixture generation must not be
+# able to inherit a bug from the engine it exists to test. The dependency runs the
+# other way — core dev-depends on this for its accuracy harness.
 [dependencies]
-sundaysync-core = { path = "../core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

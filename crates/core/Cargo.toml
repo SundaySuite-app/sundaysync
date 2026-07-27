@@ -17,6 +17,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 blake3 = { workspace = true }
+rustfft = { workspace = true }
 
 # docs/PLAN.md §7.1: "No panics in `core`: `unwrap`/`expect` forbidden outside tests
 # (enforced with clippy lints in CI). All fallible paths return typed errors."
@@ -29,6 +30,11 @@ blake3 = { workspace = true }
 # that both sets `lints.workspace = true` and adds its own entries — it is all-or-
 # nothing. Keep the two `rust` entries and the `clippy::all` line in sync with the
 # workspace block in the root Cargo.toml.
+[dev-dependencies]
+# The §8.1 fixture generator, used by the accuracy harness in tests/. A dev-dependency
+# only: nothing shipped ever touches it.
+sundaysync-fixturegen = { path = "../fixturegen" }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"

@@ -58,6 +58,9 @@ jobs:
       # into a hard failure. ffmpeg is installed above, so if those tests ever start
       # skipping here it means the install broke — and a silent skip would otherwise
       # read as a green suite while the entire probe layer went untested.
+      # Includes the §8.1 `quick` accuracy suite, which generates fixtures and runs the
+      # real extraction + correlation path. The `full` tier is excluded here by
+      # `#[ignore]` and runs in nightly.yml.
       - name: Tests
         run: cargo test --workspace
         env:

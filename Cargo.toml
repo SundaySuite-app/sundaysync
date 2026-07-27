@@ -25,6 +25,9 @@ thiserror = "2"
 # Cache keys (§4.2). Fast enough that hashing path+size+mtime is free next to the
 # decode it prevents; not used for anything security-sensitive.
 blake3 = "1"
+# FFT for GCC-PHAT (§4.3). Pure Rust, no C dependency to bundle, and deterministic —
+# all three matter for a cross-platform desktop app whose output must be byte-stable.
+rustfft = "6"
 
 # Lints applied to every crate in the workspace. The `clippy::all` bump to `deny` is
 # what makes `cargo clippy -- -D warnings` in CI a real gate rather than advisory.
@@ -39,3 +42,13 @@ missing_debug_implementations = "warn"
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
+
+# The correlator is FFT-bound, and an unoptimised build makes the §8.1 "quick suite in
+# seconds" target impossible: the same accuracy run takes ~108 s under `cargo test`
+# defaults and ~10 s at opt-level 2. Debug assertions and overflow checks are kept, so
+# the invariants in §7.3 are still enforced during tests.
+[profile.test]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1

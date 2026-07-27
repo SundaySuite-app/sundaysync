@@ -259,6 +259,123 @@ tooltip §4.2 asks for should not flatly call this negligible without showing th
 number. Flagged rather than fixed here because sizing an eviction policy is a product
 decision, not an engineering one.
 
+## D-014 — ⚠️ The fixture reverb was lying, and it looked exactly like D-004
+
+**Phase 3.** The first accuracy run showed every AAC clip measuring **−5.01 ms**,
+consistently, across clips and seeds. That is precisely the signature D-004 predicted for
+per-codec decoder delay: a constant per-codec bias that looks like a plausible result. It
+would have been easy — and wrong — to write it up as confirmation and start compensating
+for it in the engine.
+
+FLAC also showed −1.24 ms. FLAC is lossless and has no decoder delay, which meant the
+codec explanation could not be the whole story. Isolating each transform separately gave:
+
+| transform | bias |
+| --- | --- |
+| none, gain, tilt, noise | 0.00 ms |
+| reverb 0.20 | 0.00 ms |
+| **reverb 0.55** | **−5.00 ms** |
+| **reverb 0.80** | **−5.00 ms** |
+
+The allpass delay in the fixture reverb is 5 ms, exactly. The reverb mixed
+`dry * (1 - mix) + wet * mix`, where `wet` came from a comb bank that *included* the
+direct sound and then through an allpass whose delayed term has unity gain against a
+−0.7 direct term. Above `mix ≈ 0.5` the 5 ms-delayed copy became the strongest correlated
+component in the signal. **The correlator was right; the fixture was wrong.**
+
+Fixed by making the model physical: the direct arrival is always present at unity and is
+always the loudest thing, with the tail (comb output *minus* the direct) summed on top.
+Raising `mix` now makes the correlator's job harder — the point of the parameter —
+without ever moving the true arrival. After the fix all transforms measure 0.00 ms bias,
+and AAC's real error is **−0.01 ms**.
+
+**The lesson is about method, not reverb.** A fixture suite is a measuring instrument, and
+a plausible-looking result that matches a hypothesis you already hold is exactly when to
+check the instrument. Had this shipped, the engine would have been "corrected" to
+compensate for a bias that does not exist in real media, breaking it on every real shoot
+to match a broken test.
+
+D-004 itself remains open and unfalsified — it is simply not what this was. Real per-codec
+delay, if any, is now measurably **≤ 0.01 ms** on AAC and MP4 through the ffmpeg decode
+path, which is two orders of magnitude inside the §8.2 budget.
+
+## D-015 — `MIN_PSR` calibrated to 15.0 (the plan's 5.0 was below the noise floor)
+
+**Phase 3.** §4.3 requires calibration "against the synthetic suite to achieve zero false
+positives while keeping false negatives < 5 %". Measured across five shoots (four `quick`
+seeds plus one `full`), 16 syncable clips and 10 deliberately uncorrelated files, spanning
+WAV, FLAC, AAC and MP4:
+
+| | |
+| --- | --- |
+| Lowest PSR on a real match | **30.9** |
+| Highest PSR on unrelated audio | **9.2** |
+| Separation | 3.4x |
+| Geometric midpoint | 16.9 |
+
+**The plan's worked example of 5.0 sits below the noise floor** — unrelated audio scores
+5.5–9.2 — and would have placed pure noise on the timeline. This was caught by the gate
+that asserts uncorrelated fixtures are refused, which is exactly why §8.1 insists the
+suite contain files with no correlation at all.
+
+Set to **15.0**: 1.6x above the worst false positive, 2.1x below the weakest true
+positive. Erring high is deliberate — §7.5 makes honest failure the core promise, so a
+false negative (visible on the unsynced shelf) is much cheaper than a false positive
+(a silently corrupted timeline).
+
+**Must be re-validated against the real corpus in Phase 6.** Synthetic material cannot
+prove a threshold for real rooms.
+
+## D-016 — ⚠️ Uncorrected drift will exceed the §8.2 gate on long clips — raise with Richard
+
+**Phase 3, measured.** On the `full` suite the correlator is essentially exact on
+non-drifting clips (**−0.01 ms**), and every residual error is accounted for, to the
+millisecond, by injected clock drift:
+
+| clip | drift | length | predicted (drift x length / 2) | measured |
+| --- | --- | --- | --- | --- |
+| cam-phone | 60 ppm | 300 s | 9.0 ms | **−9.51 ms** |
+| cam-stage | 40 ppm | 400 s | 8.0 ms | **−8.01 ms** |
+| cam-wide | −25 ppm | 280 s | 3.5 ms | **+3.34 ms** |
+
+The half-drift relationship follows from §4.3 taking the *median* of segment offsets,
+which estimates the offset at the clip's midpoint; error is therefore ±(total drift / 2),
+zero in the middle and worst at both ends.
+
+**This scales badly, and the plan's numbers collide.** §4.6 defers drift *correction* to
+v2, but §8.2 requires ≥95 % of clips within ±10 ms. Median placement holds that only while
+total drift stays under 20 ms — about **8 minutes** of clip at 40 ppm. A church camera
+recording a 90-minute service continuously at 40 ppm accumulates 216 ms, giving a ±108 ms
+error: outside ±10 ms, and outside the ±1 frame (40 ms) gate too.
+
+So one of these must give, and it is not my call to make (§13.2):
+
+1. **The gates assume short clips.** Fine if real cameras stop and restart often enough,
+   which the Phase 6 corpus can settle — but it should be stated, not assumed.
+2. **Place on the clip's start rather than the median.** Zero error at the start, full
+   drift by the end. Arguably the better fit for FCPXML, which positions a clip *by* its
+   start — but it contradicts §4.3's explicit "median offset is the estimate", so it is a
+   plan change, not an implementation detail.
+3. **Drift correction moves into v1**, contradicting §1.3 and §2.
+
+Nothing is blocked today: the `quick` and `full` suites both pass as written, because
+their clips are short enough. This is raised now because the Phase 6 corpus is where it
+will bite, and because the drift data §4.6 already requires is exactly what any of the
+three options needs.
+
+## D-017 — Test builds are optimised; the fixture generator does not depend on the engine
+
+**Phase 3.** Two small structural decisions:
+
+`[profile.test] opt-level = 2`. The correlator is FFT-bound, and an unoptimised build made
+§8.1's "quick suite in seconds" unreachable: the same accuracy run took **108 s** at cargo
+defaults and **9.8 s** optimised. Debug assertions and overflow checks are retained, so
+§7.3's invariants are still enforced during tests.
+
+`sundaysync-fixturegen` deliberately does **not** depend on `sundaysync-core`; core
+dev-depends on fixturegen instead. A measuring instrument that imports the thing it
+measures can inherit its bugs — and after D-014, that is not a theoretical concern.
+
 ## D-009 — Dotfiles are skipped during the scan walk
 
 **Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no
