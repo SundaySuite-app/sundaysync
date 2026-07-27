@@ -54,8 +54,14 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # SUNDAYSYNC_REQUIRE_FFMPEG turns the tests' "ffprobe unavailable, skipping" path
+      # into a hard failure. ffmpeg is installed above, so if those tests ever start
+      # skipping here it means the install broke — and a silent skip would otherwise
+      # read as a green suite while the entire probe layer went untested.
       - name: Tests
         run: cargo test --workspace
+        env:
+          SUNDAYSYNC_REQUIRE_FFMPEG: "1"
 
       # §11 Phase 0 acceptance criterion, asserted rather than assumed.
       - name: CLI help works
@@ -68,9 +74,11 @@ jobs:
   # child-process spawning, line endings — surfaces on the commit that caused it rather
   # than at the Phase 9 release build.
   #
-  # NOTE for Phase 1: no ffmpeg is installed here, because Phase 0's tests are pure. The
-  # moment a test shells out to ffmpeg/ffprobe, this job needs per-OS provisioning
-  # (brew / choco) or those tests must take a documented skip path on non-ubuntu.
+  # No ffmpeg is installed here, by choice. The probe tests detect its absence and skip
+  # with a printed SKIP line, while the ubuntu job above runs them for real with
+  # SUNDAYSYNC_REQUIRE_FFMPEG=1 so the skip can never hide a regression where it counts.
+  # This keeps these jobs to ~30 s instead of several minutes of brew/choco. Revisit if
+  # a platform-specific decode bug ever slips through. See docs/DECISIONS.md D-005.
   cross-platform:
     name: Build & test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

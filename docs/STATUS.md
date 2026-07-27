@@ -2,14 +2,14 @@
 
 Per [`PLAN.md`](PLAN.md) §13.5, this file always reflects reality. Updated at every phase end.
 
-**Current phase: 0 — Skeleton. ✅ ACCEPTED — CI green on ubuntu, macOS and Windows.**
+**Current phase: 1 — Probe & inventory. Complete locally, pending CI.**
 
 Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 
 | Phase | State | Notes |
 | --- | --- | --- |
 | 0 — Skeleton | ✅ Accepted | Workspace, CI, lint gate, stub `sync()`, CLI. All four CI jobs green on run 30277454384. |
-| 1 — Probe & inventory | ⬜ Not started | Next. **Must add per-OS ffmpeg to the cross-platform CI job, or a documented skip path — see DECISIONS.md D-005.** |
+| 1 — Probe & inventory | ✅ Complete (locally green) | ffprobe integration, device grouping, `scan` command. 49 tests. |
 | 2 — Extraction & cache | ⬜ Not started | |
 | 3 — Offset engine | ⬜ Not started | Build `fixturegen` first. **Read DECISIONS.md D-004 before starting.** |
 | 4 — Placement & drift | ⬜ Not started | |
@@ -38,6 +38,27 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
   `cargo audit` job. ffmpeg is installed on the runner already so Phase 1 needs no CI
   change.
 
+## What Phase 1 delivered
+
+- **Process-isolated ffprobe** (`sidecar.rs`) with the §4.1 30 s timeout. Output pipes
+  are drained on dedicated threads — polling `try_wait` while leaving them unread
+  deadlocks the moment a child outruns the OS pipe buffer, which a malformed file is
+  exactly what triggers. Regression-tested with a 400 KB writer and a hung child.
+- **Probe parsing** (`probe.rs`) — every ffprobe field read leniently, validated after.
+  Handles cover art in MP3s (a "video stream" that is really a JPEG), degenerate `0/0`
+  frame rates, multiple audio streams, and vendor make/model stutter.
+- **§4.5 device grouping** (`device.rs`) — folder → metadata → filename → signature,
+  per file (D-008). Pure function, no filesystem access.
+- **`scan` orchestration** (`scan.rs`) — recursive walk with a depth cap, dotfile
+  skipping (D-009), dedup, and correct bucketing into syncable vs. `no_audio` /
+  `decode_error`.
+- **`sundaysync scan`** prints the manifest as JSON.
+
+Verified end to end on a synthetic mixed shoot (2 camera folders + a recorder folder,
+plus a zero-byte file, a corrupt file, a video-only file and macOS dotfile litter):
+3 devices grouped by subfolder with correct kinds, 4 syncable files, 3 correctly-reasoned
+unsynced entries, dotfiles ignored.
+
 ## Verification
 
 Local (macOS, 2026-07-27) and on CI:
@@ -45,9 +66,13 @@ Local (macOS, 2026-07-27) and on CI:
 ```
 cargo fmt --all --check                               ✅
 cargo clippy --workspace --all-targets -- -D warnings ✅
-cargo test --workspace                                ✅ 18 passed
+cargo test --workspace                                ✅ 49 passed
 cargo run -q -p sundaysync-cli -- sync --help         ✅
+cargo run -q -p sundaysync-cli -- scan <shoot>        ✅
 ```
+
+Run the suite with `SUNDAYSYNC_REQUIRE_FFMPEG=1` to turn the "ffprobe unavailable" skip
+into a failure — that is how CI runs it on ubuntu (D-005).
 
 CI run 30277454384 — all four jobs green:
 
@@ -66,7 +91,10 @@ The stub emits well-formed schema-v1 JSON end to end.
   measured. §4.3 requires calibration against the synthetic suite in Phase 3.
 - **DECISIONS.md D-004** — per-codec decoder delay threatens the ±10 ms gate in §8.2.
   Blocking input to the Phase 3 fixture design; fixtures must span multiple codecs.
-- **DECISIONS.md D-005** — the macOS/Windows CI jobs install no ffmpeg. Fine while the
-  tests are pure; Phase 1 must add provisioning or a documented skip path.
+- **Probing is sequential.** Fine at ~30 ms per file, but a shoot with many hung files
+  could spend 30 s each. Phase 2 builds the parallel-decode infrastructure (§4.2,
+  `min(4, cores)`); probing should reuse it then.
+- **GoPro `.LRV` proxies** would appear as a phantom device — see D-009. Deliberately
+  left for the Phase 6 corpus to judge on real footage.
 - **DECISIONS.md D-002** — `crates/core/Cargo.toml` restates the workspace lints because
   cargo forbids mixing inheritance with additions. Keep them in sync by hand.

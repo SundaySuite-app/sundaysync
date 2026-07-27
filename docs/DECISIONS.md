@@ -99,10 +99,14 @@ minutes are therefore free:
   breakage (path handling, child-process spawning, line endings) on the commit that
   introduced it rather than at the Phase 9 release build.
 
-**Phase 1 must revisit this:** the cross-platform job installs no ffmpeg, which is fine
-only while the tests are pure. The first test that shells out to ffmpeg/ffprobe either
-needs per-OS provisioning (brew / choco) added here, or must take a documented skip path
-off ubuntu — SundayRec's device-independent test suite is the precedent for the latter.
+**Resolved in Phase 1** — the skip-path option, with a guard against the obvious failure
+mode. Tests needing ffprobe call a helper that skips (printing `SKIP: …`) when the binary
+is absent, *unless* `SUNDAYSYNC_REQUIRE_FFMPEG` is set, in which case the skip becomes an
+assertion failure. The ubuntu job sets it. So the probe suite runs for real on the
+platform with the full gate, a broken ffmpeg install there fails loudly instead of
+quietly skipping, macOS/Windows stay ~30 s instead of several minutes of brew/choco, and
+a contributor without ffmpeg can still run `cargo test`. Revisit if a platform-specific
+decode bug ever slips through.
 
 ## D-006 — Dependencies added in Phase 0
 
@@ -116,3 +120,55 @@ Per §13.3, one line each:
 
 No FFT, XML or hashing dependency yet — `rustfft`, `quick-xml` and `blake3` arrive with
 the phases that need them (3, 5 and 2 respectively).
+
+## D-007 — Device labels are bare values; the UI supplies the localised prefix
+
+**Phase 1.** §4.5 gives example labels "Sony A7 IV", **"Mappe: Balkong"**, "Zoom H6". The
+middle one is Norwegian, and §9 requires a bilingual (nb + en) UI — so emitting it from
+the engine would hardcode one language into the wire contract and leave the English UI
+showing Norwegian.
+
+`Device.label` therefore carries the bare value (`"Balkong"`), and the provenance is
+recoverable from `Device.id`, which is namespaced by the heuristic that produced it
+(`folder-balkong`, `model-sony-ilce-7m4`, `name-zoom`, `sig-h264-1920x1080-25-1`). The UI
+renders "Mappe: Balkong" or "Folder: Balkong" from the `folder-` prefix. No §5 schema
+change was needed.
+
+## D-008 — §4.5 heuristics are applied per file, not per shoot
+
+**Phase 1.** §4.5 lists four heuristics "in priority order" without saying whether the
+order picks one strategy for the whole input set or is a per-file fallback chain.
+Implemented as **per file**.
+
+A real shoot is mixed: three cameras that write a `model` tag plus a Zoom recorder that
+writes none is the typical case. A set-wide choice would observe "not every file has
+metadata", fall back to filenames for everything, and discard camera identities it
+already had. Keys are namespaced by heuristic so two files can never collide across
+strategies. Covered by `a_mixed_shoot_keeps_camera_identity_and_still_groups_the_recorder`.
+
+Two sub-decisions inside heuristic 1 (folders), both driven by realistic layouts:
+
+- The key is the first subdirectory **below** a dropped folder, not the dropped folder
+  itself. Dropping one `Opptak/` containing `Balkong/`, `Scene/`, `Zoom/` is how people
+  actually organise card dumps; keying on the drop root would collapse all three into
+  one device.
+- Files sitting *directly* in a single dropped folder do not group by it — the key would
+  be constant and carry no information — so they fall through to the filename heuristic.
+
+`device::group` is a pure function and does not touch the filesystem. The caller passes
+the directory subset it already established while walking. An earlier version re-derived
+it with `is_dir()`, which made grouping depend on disk state that can change mid-run and
+made the logic untestable without creating real directories per case.
+
+## D-009 — Dotfiles are skipped during the scan walk
+
+**Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no
+extension is ever consulted. But hidden files are skipped: `.DS_Store` and the
+AppleDouble `._C0001.MP4` companions macOS scatters across every camera card. These are
+filesystem metadata, not media, and probing them would fill the unsynced list with
+entries that look like real failures and bury the ones that are.
+
+**Known gap, deliberately not addressed in v1:** GoPro `.LRV` low-resolution proxies are
+genuine media with audio and would appear as a phantom extra device. Filtering them would
+mean rejecting by extension, which §4.1 forbids. Left for the Phase 6 corpus to judge on
+real footage rather than guessed at now.

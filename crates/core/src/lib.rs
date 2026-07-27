@@ -15,25 +15,31 @@
 //!
 //! # Status
 //!
-//! **Phase 0.** The `SyncResult` contract (§5) is defined in full and is stable; the
-//! pipeline behind it is not implemented. [`sync`] returns an empty, well-formed result.
-//! See docs/STATUS.md.
+//! **Phase 1.** Scan, probe and device grouping are implemented — see [`scan`]. The
+//! correlation stages behind [`sync`] are not, so `sync` still returns an empty,
+//! well-formed result. See docs/STATUS.md.
 
+pub mod device;
 pub mod error;
+pub mod probe;
 pub mod progress;
 pub mod rational;
 pub mod request;
 pub mod result;
+pub mod scan;
+pub mod sidecar;
 
 pub use error::{Error, Result};
+pub use probe::{AudioStream, Probed, VideoStream};
 pub use progress::{CancelToken, NoProgress, Progress, ProgressSink, Stage};
+pub use rational::Rational;
 pub use request::{SyncRequest, ANALYSIS_RATE, DEFAULT_MIN_PSR};
 pub use result::{
     Device, DeviceKind, Parameters, Placement, Reference, Sequence, SyncResult, Unsynced,
     UnsyncedReason, Warning, SCHEMA_VERSION,
 };
-
-use rational::Rational;
+pub use scan::{scan, FileEntry, ScanManifest};
+pub use sidecar::Sidecar;
 
 /// Fallback sequence frame rate when no video input established one (§6).
 ///
