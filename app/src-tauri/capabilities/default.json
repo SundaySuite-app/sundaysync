@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window. Without this file Tauri 2's ACL denies everything: the dialog plugin (both file pickers), event listen (the progress bar) and the opener (reveal in Finder) all silently fail — which is exactly what shipped in the first headless build.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "opener:default",
+    "opener:allow-reveal-item-in-dir"
+  ]
+}
