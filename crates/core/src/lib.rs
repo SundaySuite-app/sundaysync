@@ -21,6 +21,7 @@
 //! See docs/STATUS.md.
 
 pub mod cache;
+pub mod correlate;
 pub mod device;
 pub mod error;
 pub mod extract;
@@ -33,6 +34,7 @@ pub mod scan;
 pub mod sidecar;
 
 pub use cache::{Cache, CacheKey};
+pub use correlate::{ClipMatch, Correlator, Match, SegmentMatch};
 pub use error::{Error, Result};
 pub use extract::{AnalysisAudio, CachedAudio, ExtractError, Extractor};
 pub use probe::{AudioStream, Probed, VideoStream};

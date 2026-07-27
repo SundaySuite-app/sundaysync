@@ -13,11 +13,30 @@ pub const ANALYSIS_RATE: u32 = 12_000;
 
 /// Default accept threshold on the GCC-PHAT peak-to-sidelobe ratio (§4.3).
 ///
-/// PROVISIONAL. §4.3 requires this to be calibrated in Phase 3 against the synthetic
-/// suite for zero false positives with under 5 % false negatives; the value here is the
-/// plan's worked example, not a measured one. Do not treat it as tuned until Phase 3
-/// records the calibration in docs/DECISIONS.md.
-pub const DEFAULT_MIN_PSR: f64 = 5.0;
+/// **Calibrated in Phase 3**, as §4.3 requires, against the §8.1 synthetic suite: five
+/// shoots (four `quick` seeds plus one `full`), 16 syncable clips and 10 deliberately
+/// uncorrelated files, spanning WAV, FLAC, AAC and MP4.
+///
+/// | | |
+/// | --- | --- |
+/// | Lowest PSR on a real match | **30.9** |
+/// | Highest PSR on unrelated audio | **9.2** |
+/// | Separation | 3.4x |
+///
+/// 15.0 sits roughly at the geometric midpoint (16.9): 1.6x above the worst false
+/// positive observed and 2.1x below the weakest true positive. The plan's worked example
+/// of 5.0 was *below* the noise floor — unrelated audio scored 5.5–9.2 — and would have
+/// placed pure noise on the timeline.
+///
+/// Deliberately erring high. §7.5 makes "honest failure over silent wrongness" the
+/// product's core promise, so the asymmetry is intentional: a false negative puts a clip
+/// on the unsynced shelf where the user can see and fix it, while a false positive
+/// silently corrupts a timeline. §8.2 allows up to 5 % false negatives and zero false
+/// positives, and this threshold spends that budget in the right direction.
+///
+/// **Must be re-validated against the real corpus in Phase 6** (§8.3). Synthetic
+/// material cannot prove a threshold for real rooms.
+pub const DEFAULT_MIN_PSR: f64 = 15.0;
 
 /// Everything one sync run needs.
 #[derive(Debug, Clone, PartialEq)]
