@@ -1,46 +1,60 @@
-import { useCallback, useState } from "react";
+import { useEffect, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Strings } from "../i18n";
 
-/** §9.1 — the one thing on screen when the app opens. */
+/**
+ * §9.1 — the drop target.
+ *
+ * Real file paths come from the Tauri 2 webview drag-drop event, not from HTML5
+ * `dataTransfer`. The first build read `dataTransfer.files[].path` — a Tauri 1 pattern;
+ * in Tauri 2 the webview `File` object has no `path`, so drops silently did nothing at
+ * all. `dragDropEnabled: true` in tauri.conf.json routes the OS drop to this event.
+ *
+ * The listener is webview-global, so exactly one instance of this component should be
+ * mounted at a time (App keeps the full-size and compact variants exclusive).
+ */
 export function DropZone({
   t,
+  compact = false,
   onFiles,
   onFolder,
   onDropPaths,
 }: {
   t: Strings;
+  compact?: boolean;
   onFiles: () => void;
   onFolder: () => void;
   onDropPaths: (paths: string[]) => void;
 }) {
   const [over, setOver] = useState(false);
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setOver(false);
-      // Tauri surfaces real filesystem paths on the drop event; browsers do not, which is
-      // why the file pickers below remain the reliable route in a dev browser.
-      const paths = Array.from(e.dataTransfer.files)
-        .map((f) => (f as File & { path?: string }).path)
-        .filter((p): p is string => typeof p === "string");
-      if (paths.length > 0) onDropPaths(paths);
-    },
-    [onDropPaths],
-  );
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      switch (event.payload.type) {
+        case "over":
+          setOver(true);
+          break;
+        case "drop":
+          setOver(false);
+          if (event.payload.paths.length > 0) onDropPaths(event.payload.paths);
+          break;
+        default: // "leave"
+          setOver(false);
+      }
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, [onDropPaths]);
 
   return (
     <section
-      className={`dropzone${over ? " dropzone--over" : ""}`}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={handleDrop}
+      className={`dropzone${compact ? " dropzone--compact" : ""}${over ? " dropzone--over" : ""}`}
     >
-      <p className="dropzone__title">{t.dropTitle}</p>
-      <p className="dropzone__hint">{t.dropHint}</p>
+      <div>
+        <p className="dropzone__title">{compact ? t.dropMore : t.dropTitle}</p>
+        {!compact && <p className="dropzone__hint">{t.dropHint}</p>}
+      </div>
       <div className="dropzone__actions">
         <button type="button" className="secondary" onClick={onFiles}>
           {t.dropAction}
