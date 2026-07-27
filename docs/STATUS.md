@@ -2,7 +2,7 @@
 
 Per [`PLAN.md`](PLAN.md) §13.5, this file always reflects reality. Updated at every phase end.
 
-**Current phase: 2 — Extraction & cache. Complete locally, pending CI.**
+**Current phase: 2 — Extraction & cache. ✅ ACCEPTED — CI green, PR #2 merged.**
 
 Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 
@@ -10,8 +10,8 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 | --- | --- | --- |
 | 0 — Skeleton | ✅ Accepted | Workspace, CI, lint gate, stub `sync()`, CLI. All four CI jobs green on run 30277454384. |
 | 1 — Probe & inventory | ✅ Accepted | ffprobe integration, device grouping, `scan` command. 50 tests. All four CI jobs green; PR #1 merged. |
-| 2 — Extraction & cache | ✅ Complete (locally green) | ffmpeg → 12 kHz mono f32 PCM, blake3-keyed cache, parallel decode. 71 tests. |
-| 3 — Offset engine | ⬜ Not started | Build `fixturegen` first. **Read DECISIONS.md D-004 before starting.** |
+| 2 — Extraction & cache | ✅ Accepted | ffmpeg → 12 kHz mono f32 PCM, blake3-keyed cache, parallel decode. 71 tests. PR #2 merged. |
+| 3 — Offset engine | ⬜ Not started | Next. Build `fixturegen` first. **Read D-004 (codec delay) and D-011 (mmap/unsafe trade) before starting.** |
 | 4 — Placement & drift | ⬜ Not started | |
 | 5 — FCPXML export | ⬜ Not started | |
 | 6 — CLI complete + real corpus | ⬜ Not started | Needs corpus material from Richard. |
