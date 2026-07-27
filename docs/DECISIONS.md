@@ -545,6 +545,28 @@ The two dictionaries are type-linked (`en: Strings` where `Strings = typeof nb`)
 a key to one and forgetting the other fails the build. A half-translated UI is worse than
 an untranslated one.
 
+## D-025 — Verify locally against a PATH without ffmpeg
+
+**Phase 7, learned the slow way.** The macOS and Windows CI jobs deliberately have no
+ffmpeg (D-005). Three tests written in Phase 0 against the stub `sync()` still called it in
+Phase 4, when `sync()` had become the real pipeline — so they passed locally, passed on
+ubuntu, and failed on the two runners that matter for exactly this.
+
+The tests themselves were redundant by then: schema shape, byte-identical output and
+progress delivery are all asserted in `tests/accuracy.rs` against real media, which is a
+much stronger claim than the same assertions against an empty stub result. They were
+removed rather than guarded.
+
+**The habit worth keeping** is checking both environments before pushing, since the local
+machine always has ffmpeg:
+
+```
+SUNDAYSYNC_REQUIRE_FFMPEG=1 cargo test --workspace
+env PATH="/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.cargo/bin" cargo test --workspace
+```
+
+The second line is what CI's macOS and Windows jobs actually run.
+
 ## D-009 — Dotfiles are skipped during the scan walk
 
 **Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no

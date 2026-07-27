@@ -277,42 +277,34 @@ mod tests {
         assert!(matches!(r, Err(Error::Cancelled)));
     }
 
-    #[test]
-    fn stub_emits_a_well_formed_schema_v1_result() {
-        let r = sync(&req(), &NoProgress, &CancelToken::new()).unwrap();
-        assert_eq!(r.schema, SCHEMA_VERSION);
-        assert_eq!(r.parameters.analysis_rate, ANALYSIS_RATE);
-        assert_eq!(r.parameters.min_psr, DEFAULT_MIN_PSR);
-        assert_eq!(r.sequence.fps.to_string(), "25/1");
-    }
+    // The three stub-era tests that used to live here — schema shape, byte-identical
+    // output, and progress reaching the sink — now require a real pipeline run, and so a
+    // real ffmpeg. They moved to tests/accuracy.rs, where they are asserted against actual
+    // media rather than an empty result, and where the ffmpeg skip guard lives. Keeping
+    // ffmpeg-dependent tests here would have broken the macOS and Windows CI jobs, which
+    // deliberately have no ffmpeg (D-005).
+    //
+    // What stays below is everything that is still true without decoding anything.
 
     #[test]
-    fn output_is_byte_identical_across_runs() {
-        // §13.4: determinism is a test, not an aspiration. This assertion is trivial
-        // against the Phase 0 stub — it is here so it is already wired up and cannot be
-        // "forgotten" when Phase 3 makes it load-bearing.
-        let a = sync(&req(), &NoProgress, &CancelToken::new()).unwrap();
-        let b = sync(&req(), &NoProgress, &CancelToken::new()).unwrap();
+    fn request_parameters_reach_the_result_contract() {
+        // §5 records the parameters a result was produced under, and the CLI must not
+        // carry its own copy of a default that could drift from the engine's.
+        let mut request = SyncRequest::new(vec![PathBuf::from("/tmp/a.wav")]);
+        request.min_psr = 33.0;
+        let p = request.parameters();
+        assert_eq!(p.analysis_rate, ANALYSIS_RATE);
+        assert_eq!(p.min_psr, 33.0);
         assert_eq!(
-            serde_json::to_string(&a).unwrap(),
-            serde_json::to_string(&b).unwrap()
+            SyncRequest::new(vec![]).parameters().min_psr,
+            DEFAULT_MIN_PSR
         );
     }
 
     #[test]
-    fn progress_reaches_the_sink() {
-        use std::sync::Mutex;
-        struct Recorder(Mutex<Vec<Progress>>);
-        impl ProgressSink for Recorder {
-            fn report(&self, p: Progress) {
-                if let Ok(mut v) = self.0.lock() {
-                    v.push(p);
-                }
-            }
-        }
-        let rec = Recorder(Mutex::new(Vec::new()));
-        sync(&req(), &rec, &CancelToken::new()).unwrap();
-        let seen = rec.0.lock().unwrap();
-        assert_eq!(seen.first().map(|p| p.stage), Some(Stage::Scanning));
+    fn the_fallback_frame_rate_is_pal() {
+        // Audio-only runs still need a sequence rate, and these are Norwegian churches.
+        let fps = Rational::new(FALLBACK_FPS.0, FALLBACK_FPS.1).unwrap_or(Rational::ONE);
+        assert_eq!(fps.to_string(), "25/1");
     }
 }
