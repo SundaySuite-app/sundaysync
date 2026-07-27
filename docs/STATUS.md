@@ -2,7 +2,7 @@
 
 Per [`PLAN.md`](PLAN.md) §13.5, this file always reflects reality. Updated at every phase end.
 
-**Current phase: 3 — Offset engine. ✅ ACCEPTED — CI green, PR #3 merged.**
+**Current phase: 7–8 — Tauri app. Simple and advanced mode built; needs a live run on real hardware.**
 
 Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 
@@ -12,12 +12,12 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 | 1 — Probe & inventory | ✅ Accepted | ffprobe integration, device grouping, `scan` command. 50 tests. All four CI jobs green; PR #1 merged. |
 | 2 — Extraction & cache | ✅ Accepted | ffmpeg → 12 kHz mono f32 PCM, blake3-keyed cache, parallel decode. 71 tests. PR #2 merged. |
 | 3 — Offset engine | ✅ Accepted | `fixturegen` + GCC-PHAT. `MIN_PSR` calibrated to 15.0. 106 tests. PR #3 merged. **Read D-016 before Phase 4.** |
-| 4 — Placement & drift | ⬜ Not started | Next. **D-016 (drift vs the §8.2 gate) needs an owner decision — see below.** |
-| 5 — FCPXML export | ⬜ Not started | |
-| 6 — CLI complete + real corpus | ⬜ Not started | Needs corpus material from Richard. |
-| 7 — Tauri app, simple mode | ⬜ Not started | `app/` is an empty placeholder until here. |
-| 8 — Advanced mode + diagnostics | ⬜ Not started | |
-| 9 — Release | ⬜ Not started | |
+| 4 — Placement & drift | ✅ Complete (locally green) | §4.4 placement, §4.6 drift, full `sync()` pipeline, proptest invariants. 136 tests. |
+| 5 — FCPXML export | ✅ Complete (locally green) | §6 exporter, golden tests, **verified in DaVinci Resolve Studio 21.0.3.7** — frame-accurate, correct track layout, media relinked. |
+| 6 — CLI complete + real corpus | 🔶 CLI done, corpus pending | `sync`/`scan`/`bench` all implemented and working. **Corpus onboarding needs Richard's footage** — the harness is ready and waiting. |
+| 7 — Tauri app, simple mode | 🔶 Built, not yet run live | Drop zone, device summary, staged progress, lane view, export. Frontend builds; Rust shell compiles and lints. **Needs a real launch on hardware.** |
+| 8 — Advanced mode + diagnostics | 🔶 Built, not yet run live | Threshold, cache dir, reference override, diagnostics export (media-free JSON). |
+| 9 — Release | ⬜ Not started | Needs signing certs, updater keys and a tag workflow — all owner-gated. |
 
 ## What Phase 0 actually delivered
 
@@ -117,7 +117,7 @@ Local (macOS, 2026-07-27) and on CI:
 ```
 cargo fmt --all --check                               ✅
 cargo clippy --workspace --all-targets -- -D warnings ✅
-cargo test --workspace                                ✅ 106 passed
+cargo test --workspace                                ✅ 136 passed
 cargo run -q -p sundaysync-cli -- sync --help         ✅
 cargo run -q -p sundaysync-cli -- scan <shoot>        ✅
 ```

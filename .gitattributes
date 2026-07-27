@@ -1,0 +1,8 @@
+# Golden fixtures are compared byte for byte, so git must not touch their line endings.
+# Without this, a Windows checkout rewrites LF to CRLF and the golden test fails there and
+# only there — which is exactly what happened. `-text` disables all conversion.
+crates/core/tests/golden/** -text
+
+# Everything else: normalise to LF in the repository, so the same content does not commit
+# differently depending on who checked it out.
+* text=auto eol=lf

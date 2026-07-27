@@ -376,6 +376,197 @@ defaults and **9.8 s** optimised. Debug assertions and overflow checks are retai
 dev-depends on fixturegen instead. A measuring instrument that imports the thing it
 measures can inherit its bugs — and after D-014, that is not a theoretical concern.
 
+## D-018 — JSON round-trip is not bit-exact, and that is fine
+
+**Phase 4, measured.** `serde_json` serialises an f64 correctly, but its parser is not
+always correctly-rounded: over 200 000 values in the ±5000 s range, **9.7 %** come back
+differing by exactly one ULP. Worst case is 4.5e-13 s — 0.45 picoseconds, eleven orders of
+magnitude below a video frame.
+
+Not worth fighting, and not a risk: the engine never round-trips through JSON in the
+product path (the FCPXML exporter reads the in-memory struct), and §13.4's byte-equality
+check compares two engine runs that both serialise from memory. The property test asserts
+a 1 ns tolerance rather than bit equality, with the reason written down so nobody later
+"fixes" it by adding `arbitrary_precision` and slowing every serialisation down.
+
+Relevant if the v2 parking-lot item "project save/load of sync sessions" is ever built:
+a reloaded session will differ from the original in the last bit of some offsets.
+
+## D-019 — Drift precision needs lever arm; the ±5 ppm gate belongs to the full tier
+
+**Phase 4.** §8.2 requires drift estimates within ±5 ppm. Drift is a *slope*, so its
+precision depends on how much offset change the regression can see across a clip, against
+roughly 1.5 samples of per-segment measurement noise:
+
+| clip | span | offset change across segments | slope noise |
+| --- | --- | --- | --- |
+| `quick` cam-stage (60 s) | 40 s | 19 samples | ~8 % |
+| `full` cam-stage (400 s) | 380 s | 182 samples | ~0.8 % |
+| `full` cam-phone (300 s) | 280 s | 202 samples | ~0.7 % |
+
+So the ±5 ppm gate is asserted on the **full** tier, where it passes comfortably —
+injected −25/+40/+60 ppm measured as +24.75/−40.38/−58.69. The `quick` tier only checks
+that drift is detected with a plausible magnitude, because a 60 s clip cannot support a
+tighter claim honestly.
+
+This is not a weakened gate (§13.2): it is the same gate, asserted where the measurement
+is meaningful. A short clip's drift also matters less — 40 ppm over 60 s is 2.4 ms, well
+inside a frame.
+
+**Sign convention, recorded because v2 depends on it:** `drift_ppm` is
+`d(offset)/d(position in clip)`. A clip recorded on a slow clock is physically *longer*
+than reality, so matching content appears progressively earlier and the slope is
+**negative** — the opposite sign to "stretched by N ppm". v2 corrects by resampling by
+`1 / (1 + ppm * 1e-6)`; using `1 + ppm` would double the error instead of removing it.
+
+## D-020 — ⚠️ The scan must skip the analysis cache
+
+**Phase 4, found by the determinism test.** Two consecutive `sync()` runs over the same
+folder produced different results. The cause was a real product bug, not a flaky test:
+the cache directory sat inside the input folder, so the second run's scan walked it,
+found the `.f32` entries, failed to probe them, and reported **the user's own cache back
+to them as broken media**.
+
+The default cache lives in the OS cache location, so this does not bite by default — but
+§4.2 makes the directory user-settable and Phase 8 puts it in the UI, so a user pointing
+it at their media folder would hit it immediately, and the symptom (a growing list of
+mystery decode failures) gives no clue about the cause.
+
+Fixed by passing the cache directory to the scan as an excluded path. This is not
+extension filtering (§4.1 forbids that) — it is the engine declining to scan its own
+working directory.
+
+Worth noting what caught it: §13.4's byte-equality determinism check, on its first run
+against the full pipeline. It was written in Phase 0 as a trivially-true placeholder.
+
+## D-021 — FCPXML: hand-written, single format, no DTD
+
+**Phase 5.** Three deviations from §6, all small and all deliberate:
+
+**Written as a string, not through an XML library.** `quick-xml` was added and then
+removed: §8.4 wants golden tests comparing bytes, and hand-writing fixes element order,
+attribute order and indentation rather than leaving them to a library's formatting. The
+escaping actually needed is five characters.
+
+**One `<format>`, not one per geometry.** §6 asks for a format per unique
+(width, height, fps). `SyncResult` does not carry per-file resolution — §5 has no field
+for it — so adding this properly means threading probe geometry into the result, which is
+a §5 schema change and therefore not something to do in passing. The `mixed_fps` warning
+still fires. Resolve accepted the single-format document without complaint.
+
+**No DTD validation.** §6 asks for validation against "the bundled FCPXML DTD". Apple does
+not ship one with Resolve and none exists on a normal macOS install (checked). The tests
+assert structure, well-formedness and matched tags instead — and, more usefully, the real
+import in D-022 proves acceptance far better than a DTD would.
+
+One thing worth stating: **every time in the document is a whole multiple of the frame
+duration**, assets included. An earlier version left asset durations at exact seconds
+(`8400000/30000s`, not a multiple of 1001). Non-frame-aligned times are a common reason
+importers quietly round or reject a document.
+
+## D-022 — ✅ Verified against real DaVinci Resolve, and how to talk to it
+
+**Phase 5.** §11 lists manual Resolve verification as the acceptance criterion, and §13.6
+says anything learned about the importer gets written down immediately. Both done —
+this was verified for real, not deferred.
+
+Against **DaVinci Resolve Studio 21.0.3.7**, importing a timeline generated from a real
+three-file shoot (a 60 s recorder feed plus two cameras cut from it at 8 s and 20 s, each
+with different EQ and gain):
+
+| Clip | Resolve track | Read-back position | Truth |
+| --- | --- | --- | --- |
+| ZOOM0001.WAV (reference) | audio1 | 0.0 s | 0 s |
+| C0001.MP4 | video2 + audio2 | **8.0 s** | 8 s |
+| DSC_0042.MOV | video3 + audio3 | **20.0 s** | 20 s |
+
+Everything §8.4's checklist asks about:
+
+- **Import succeeds** — `ImportTimelineFromFile` returns a timeline object.
+- **Track layout is right.** Lane *n* becomes video track *n+1*: the primary storyline
+  (our full-length `<gap>`) occupies V1, so the first camera lands on V2. One track pair
+  per device, exactly as §6 intends.
+- **Offsets are exact** — frame-accurate on read-back.
+- **Relinking works** — the percent-encoded `file://` URLs resolved; clips carry real
+  names rather than showing offline.
+- **Frame rate carries** — the sequence imported as 25.0 fps.
+
+**Sub-frame audio remains untested** because nothing sub-frame is currently emitted;
+everything is frame-aligned. §6 says to accept frame precision rather than fight the
+importer, and that is where this sits.
+
+### Talking to Resolve from a script (the part that wastes an hour)
+
+The MCP server and the documented environment-variable route both failed with
+"could not connect". The cause is not the app: `RESOLVE_SCRIPT_API` points at
+`/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting`,
+**which does not exist on a normal macOS install**. The library that does exist is:
+
+```
+/Applications/DaVinci Resolve Studio.app/Contents/Libraries/Fusion/fusionscript.so
+```
+
+Appending that directory to `sys.path` and `import fusionscript` connects immediately, with
+Resolve simply running and no preference changed. The misleading part is that the failure
+looks exactly like "external scripting is disabled", which sends you into Preferences
+looking for a setting that was never the problem.
+
+`scripts/resolve-verify.py` does this and is repeatable.
+
+## D-023 — The Tauri shell is its own workspace, outside the CI gate
+
+**Phase 7.** `app/src-tauri` is excluded from the root workspace and declares its own.
+§8.4 builds bundles on tags, not on every push, and pulling `webkit2gtk` and the rest of
+the Tauri tree into the per-push gate would cost minutes on every CI run for no coverage
+gain — the engine it wraps is already fully exercised headlessly.
+
+The shell is thin by design (§3): it moves work off the UI thread, throttles progress onto
+Tauri's event bus, and hands results over as JSON. Nothing worth testing lives in it.
+
+One detail worth keeping: **the 10 Hz progress throttle lives in the shell, not the
+engine** (§10). The engine reports every event and does not second-guess its consumer, so
+the CLI can still log all of them. The throttle also always lets a *stage change* through
+regardless of timing — the stage name is what the user is actually reading, and dropping
+the transition would leave the label stale until the next tick.
+
+## D-024 — Device labels are localised in the UI, closing the loop on D-007
+
+**Phase 7.** D-007 had the engine emit bare device labels (`"Balkong"`) rather than §4.5's
+literal `"Mappe: Balkong"`, on the grounds that the engine must not hardcode Norwegian when
+§9 requires a bilingual UI, and that the provenance is recoverable from the namespaced
+device id.
+
+The UI now does exactly that: `deviceLabel()` renders `folder-*` ids as "Mappe: Balkong" or
+"Folder: Balkong" depending on the active language, and leaves model- and filename-derived
+labels alone. The plan's intended wording is what a Norwegian user sees, with no language
+baked into the wire contract.
+
+The two dictionaries are type-linked (`en: Strings` where `Strings = typeof nb`), so adding
+a key to one and forgetting the other fails the build. A half-translated UI is worse than
+an untranslated one.
+
+## D-025 — Verify locally against a PATH without ffmpeg
+
+**Phase 7, learned the slow way.** The macOS and Windows CI jobs deliberately have no
+ffmpeg (D-005). Three tests written in Phase 0 against the stub `sync()` still called it in
+Phase 4, when `sync()` had become the real pipeline — so they passed locally, passed on
+ubuntu, and failed on the two runners that matter for exactly this.
+
+The tests themselves were redundant by then: schema shape, byte-identical output and
+progress delivery are all asserted in `tests/accuracy.rs` against real media, which is a
+much stronger claim than the same assertions against an empty stub result. They were
+removed rather than guarded.
+
+**The habit worth keeping** is checking both environments before pushing, since the local
+machine always has ffmpeg:
+
+```
+SUNDAYSYNC_REQUIRE_FFMPEG=1 cargo test --workspace
+env PATH="/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.cargo/bin" cargo test --workspace
+```
+
+The second line is what CI's macOS and Windows jobs actually run.
+
 ## D-009 — Dotfiles are skipped during the scan walk
 
 **Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no

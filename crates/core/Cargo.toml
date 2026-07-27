@@ -34,6 +34,7 @@ rustfft = { workspace = true }
 # The §8.1 fixture generator, used by the accuracy harness in tests/. A dev-dependency
 # only: nothing shipped ever touches it.
 sundaysync-fixturegen = { path = "../fixturegen" }
+proptest = { workspace = true }
 
 [lints.rust]
 unsafe_code = "forbid"

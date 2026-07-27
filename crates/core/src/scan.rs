@@ -51,6 +51,25 @@ pub fn scan(
     progress: &dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<ScanManifest> {
+    scan_detailed(inputs, sidecar, None, progress, cancel).map(|(m, _)| m)
+}
+
+/// As [`scan`], but also returns the raw [`Probed`] records.
+///
+/// The full pipeline needs them for §4.4's reference selection and metadata check, and
+/// probing twice would double the ffprobe cost of every run for no benefit.
+/// `exclude` is a directory the walk must not descend into — in practice the analysis
+/// cache. Without it, pointing the cache inside a folder the user drops in makes the
+/// second run scan its own `.f32` entries, fail to probe them, and report the user's
+/// cache back to them as broken media. Found by the §13.4 determinism test, which is
+/// exactly the sort of bug it exists to catch. See docs/DECISIONS.md D-020.
+pub fn scan_detailed(
+    inputs: &[PathBuf],
+    sidecar: &Sidecar,
+    exclude: Option<&Path>,
+    progress: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<(ScanManifest, Vec<Probed>)> {
     if inputs.is_empty() {
         return Err(Error::NoInput);
     }
@@ -61,7 +80,7 @@ pub fn scan(
         total: inputs.len(),
     });
 
-    let (candidates, missing) = collect(inputs, cancel)?;
+    let (candidates, missing) = collect(inputs, exclude, cancel)?;
 
     let mut probed: Vec<Probed> = Vec::new();
     let mut unsynced: Vec<Unsynced> = missing;
@@ -107,6 +126,8 @@ pub fn scan(
     let dropped_dirs: Vec<PathBuf> = inputs.iter().filter(|p| p.is_dir()).cloned().collect();
     let devices = device::group(&probed, &dropped_dirs);
 
+    let probed_out = probed.clone();
+
     let mut files: Vec<FileEntry> = probed
         .into_iter()
         .map(|p| {
@@ -129,12 +150,15 @@ pub fn scan(
     files.sort_by(|a, b| a.file.cmp(&b.file));
     unsynced.sort_by(|a, b| a.file.cmp(&b.file));
 
-    Ok(ScanManifest {
-        schema: SCHEMA_VERSION,
-        devices,
-        files,
-        unsynced,
-    })
+    Ok((
+        ScanManifest {
+            schema: SCHEMA_VERSION,
+            devices,
+            files,
+            unsynced,
+        },
+        probed_out,
+    ))
 }
 
 /// Expands the inputs into a deduplicated, sorted candidate list.
@@ -142,7 +166,11 @@ pub fn scan(
 /// Returns the candidates plus `unsynced` entries for inputs that do not exist at all —
 /// a mistyped path must be visible in the output rather than silently dropped, or §7.3's
 /// "every input is accounted for" would quietly not hold.
-fn collect(inputs: &[PathBuf], cancel: &CancelToken) -> Result<(Vec<PathBuf>, Vec<Unsynced>)> {
+fn collect(
+    inputs: &[PathBuf],
+    exclude: Option<&Path>,
+    cancel: &CancelToken,
+) -> Result<(Vec<PathBuf>, Vec<Unsynced>)> {
     let mut files = Vec::new();
     let mut missing = Vec::new();
 
@@ -151,7 +179,7 @@ fn collect(inputs: &[PathBuf], cancel: &CancelToken) -> Result<(Vec<PathBuf>, Ve
             return Err(Error::Cancelled);
         }
         if input.is_dir() {
-            walk(input, 0, &mut files, cancel)?;
+            walk(input, 0, exclude, &mut files, cancel)?;
         } else if input.is_file() {
             files.push(input.clone());
         } else {
@@ -170,7 +198,16 @@ fn collect(inputs: &[PathBuf], cancel: &CancelToken) -> Result<(Vec<PathBuf>, Ve
     Ok((files, missing))
 }
 
-fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>, cancel: &CancelToken) -> Result<()> {
+fn walk(
+    dir: &Path,
+    depth: usize,
+    exclude: Option<&Path>,
+    out: &mut Vec<PathBuf>,
+    cancel: &CancelToken,
+) -> Result<()> {
+    if exclude.is_some_and(|e| dir == e) {
+        return Ok(());
+    }
     if depth >= MAX_DEPTH {
         return Ok(());
     }
@@ -191,7 +228,7 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>, cancel: &CancelToken) 
         // walk. Linked-in media is rare enough that ignoring links is the safe default.
         let Ok(meta) = entry.metadata() else { continue };
         if meta.is_dir() {
-            walk(&path, depth + 1, out, cancel)?;
+            walk(&path, depth + 1, exclude, out, cancel)?;
         } else if meta.is_file() {
             out.push(path);
         }
@@ -284,15 +321,19 @@ mod tests {
         fs::write(dir.join(".DS_Store"), b"junk").unwrap();
         fs::write(dir.join("._C0001.MP4"), b"appledouble").unwrap();
         fs::write(dir.join("real.bin"), b"x").unwrap();
-        let (found, _) = collect(&[dir], &CancelToken::new()).unwrap();
+        let (found, _) = collect(&[dir], None, &CancelToken::new()).unwrap();
         assert_eq!(found.len(), 1);
         assert!(found[0].ends_with("real.bin"));
     }
 
     #[test]
     fn a_nonexistent_input_is_reported_not_dropped() {
-        let (found, missing) =
-            collect(&[PathBuf::from("/no/such/file.mp4")], &CancelToken::new()).unwrap();
+        let (found, missing) = collect(
+            &[PathBuf::from("/no/such/file.mp4")],
+            None,
+            &CancelToken::new(),
+        )
+        .unwrap();
         assert!(found.is_empty());
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].reason, UnsyncedReason::DecodeError);
@@ -303,7 +344,7 @@ mod tests {
         let dir = scratch("dedup");
         let file = dir.join("a.bin");
         fs::write(&file, b"x").unwrap();
-        let (found, _) = collect(&[dir.clone(), file], &CancelToken::new()).unwrap();
+        let (found, _) = collect(&[dir.clone(), file], None, &CancelToken::new()).unwrap();
         assert_eq!(found.len(), 1);
     }
 

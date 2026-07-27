@@ -24,3 +24,8 @@ dist/
 .idea/
 *.swp
 .claude/
+
+# Frontend build output and deps (app/)
+app/node_modules/
+app/dist/
+app/src-tauri/target/

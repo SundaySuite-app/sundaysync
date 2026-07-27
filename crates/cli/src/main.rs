@@ -6,11 +6,13 @@
 //!
 //! **Phase 1.** `sync` and `scan` exist; `bench` arrives in Phase 6.
 
+mod bench;
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use sundaysync_core::{
-    scan, sync, CancelToken, Error, NoProgress, Progress, ProgressSink, Sidecar, SyncRequest,
+    scan, CancelToken, Error, NoProgress, Progress, ProgressSink, Sidecar, SyncRequest,
     DEFAULT_MIN_PSR,
 };
 
@@ -48,10 +50,40 @@ enum Command {
         #[arg(long, default_value_t = DEFAULT_MIN_PSR, value_name = "RATIO")]
         min_psr: f64,
 
+        /// Write an FCPXML timeline for DaVinci Resolve to this path, in addition to
+        /// printing the sync map as JSON.
+        #[arg(long, value_name = "FILE")]
+        export: Option<PathBuf>,
+
+        /// Project name recorded inside the exported FCPXML.
+        #[arg(long, default_value = "SundaySync", value_name = "NAME")]
+        project: String,
+
         /// Report progress to stderr. JSON still goes to stdout, so the output stays
         /// pipeable.
         #[arg(long, short)]
         verbose: bool,
+    },
+
+    /// Benchmark the engine against a corpus of shoots with known ground truth.
+    ///
+    /// Each subdirectory of CORPUS is one shoot containing media plus a `truth.json`
+    /// recording each file's true offset. Reports accuracy and timing per shoot and
+    /// exits non-zero if any shoot fails the §8.2 gates — so a regression is a build
+    /// failure rather than something noticed later.
+    Bench {
+        /// Directory of shoots. Each subdirectory needs a `truth.json`.
+        #[arg(required = true, value_name = "CORPUS")]
+        corpus: PathBuf,
+
+        /// Directory for the analysis cache. A warm cache makes re-runs fast; pass a
+        /// throwaway path to measure cold performance.
+        #[arg(long, value_name = "DIR")]
+        cache_dir: Option<PathBuf>,
+
+        /// Minimum peak-to-sidelobe ratio for a match to be accepted.
+        #[arg(long, default_value_t = DEFAULT_MIN_PSR, value_name = "RATIO")]
+        min_psr: f64,
     },
 
     /// Probe media and print the inventory — devices, files, and anything unusable —
@@ -87,6 +119,8 @@ fn main() -> ExitCode {
             cache_dir,
             reference,
             min_psr,
+            export,
+            project,
             verbose,
         } => {
             let request = SyncRequest {
@@ -95,8 +129,40 @@ fn main() -> ExitCode {
                 reference_override: reference,
                 min_psr,
             };
-            emit(sync(&request, sink(verbose).as_ref(), &cancel))
+            let outcome =
+                sundaysync_core::sync_with_durations(&request, sink(verbose).as_ref(), &cancel);
+            match outcome {
+                Ok((result, durations)) => {
+                    if let Some(path) = export {
+                        match sundaysync_core::export_fcpxml(&result, &durations, &project) {
+                            Ok(exported) => {
+                                if let Err(e) = std::fs::write(&path, exported.xml) {
+                                    eprintln!("error: could not write {}: {e}", path.display());
+                                    return ExitCode::FAILURE;
+                                }
+                                eprintln!(
+                                    "wrote {} ({} clips)",
+                                    path.display(),
+                                    exported.clips.len()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("error: {e}");
+                                return ExitCode::FAILURE;
+                            }
+                        }
+                    }
+                    emit(Ok(result))
+                }
+                Err(e) => emit::<sundaysync_core::SyncResult>(Err(e)),
+            }
         }
+
+        Command::Bench {
+            corpus,
+            cache_dir,
+            min_psr,
+        } => bench::run(&corpus, cache_dir.as_deref(), min_psr, &cancel),
 
         Command::Scan { inputs, verbose } => {
             // Resolved up front so a missing ffmpeg is one clear message, rather than
