@@ -2,7 +2,7 @@
 
 Per [`PLAN.md`](PLAN.md) §13.5, this file always reflects reality. Updated at every phase end.
 
-**Current phase: 3 — Offset engine. Complete locally, pending CI.**
+**Current phase: 3 — Offset engine. ✅ ACCEPTED — CI green, PR #3 merged.**
 
 Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 
@@ -11,7 +11,7 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 | 0 — Skeleton | ✅ Accepted | Workspace, CI, lint gate, stub `sync()`, CLI. All four CI jobs green on run 30277454384. |
 | 1 — Probe & inventory | ✅ Accepted | ffprobe integration, device grouping, `scan` command. 50 tests. All four CI jobs green; PR #1 merged. |
 | 2 — Extraction & cache | ✅ Accepted | ffmpeg → 12 kHz mono f32 PCM, blake3-keyed cache, parallel decode. 71 tests. PR #2 merged. |
-| 3 — Offset engine | ✅ Complete (locally green) | `fixturegen` + GCC-PHAT. `MIN_PSR` calibrated to 15.0. 106 tests. **Read D-016 before Phase 4.** |
+| 3 — Offset engine | ✅ Accepted | `fixturegen` + GCC-PHAT. `MIN_PSR` calibrated to 15.0. 106 tests. PR #3 merged. **Read D-016 before Phase 4.** |
 | 4 — Placement & drift | ⬜ Not started | Next. **D-016 (drift vs the §8.2 gate) needs an owner decision — see below.** |
 | 5 — FCPXML export | ⬜ Not started | |
 | 6 — CLI complete + real corpus | ⬜ Not started | Needs corpus material from Richard. |
