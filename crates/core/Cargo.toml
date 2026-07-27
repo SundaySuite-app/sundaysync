@@ -1,0 +1,38 @@
+[package]
+name = "sundaysync-core"
+description = "The entire SundaySync engine: probe, analysis-audio extraction, GCC-PHAT offset estimation, placement, drift measurement and FCPXML export. Pure Rust, no GUI and no Tauri dependency."
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# This crate intentionally depends on NOTHING from Tauri, and never touches a webview,
+# a display or the wall clock. Everything the engine does is a deterministic function of
+# (input paths, file contents, parameters) — docs/PLAN.md §3, "Determinism". That is what
+# lets CI assert byte-identical `SyncResult` JSON across two runs from Phase 3 onward.
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# docs/PLAN.md §7.1: "No panics in `core`: `unwrap`/`expect` forbidden outside tests
+# (enforced with clippy lints in CI). All fallible paths return typed errors."
+#
+# The in-test carve-out lives in the workspace-root clippy.toml. `unwrap_used` /
+# `expect_used` are scoped to THIS crate only — a panic here takes down a user's
+# 8-hour sync run; a panic in the CLI just ends a process that was about to exit anyway.
+#
+# The workspace lints are restated rather than inherited because cargo rejects a crate
+# that both sets `lints.workspace = true` and adds its own entries — it is all-or-
+# nothing. Keep the two `rust` entries and the `clippy::all` line in sync with the
+# workspace block in the root Cargo.toml.
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"

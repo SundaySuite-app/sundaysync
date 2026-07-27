@@ -1,0 +1,73 @@
+name: CI
+
+# docs/PLAN.md §8.4: lint + clippy + the `quick` fixture suite on every push. The
+# per-platform Tauri bundles are a Phase 9 concern and will live in release.yml; there
+# is no frontend to lint until Phase 7, so this workflow is Rust-only for now.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, clippy & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The engine shells out to ffmpeg/ffprobe for every probe and every audio
+      # extraction (§4.1, §4.2). Installed from apt here rather than bundled as a
+      # sidecar: CI only needs *a* working ffmpeg, while the shipped app bundles its own
+      # per-platform binary (§10).
+      #
+      # NOTE for Phase 3: the runner's ffmpeg version is not pinned, and codec decoder
+      # delay is a live accuracy risk (docs/DECISIONS.md D-004). If fixture ground truth
+      # ever starts failing only in CI, suspect an ffmpeg version difference here before
+      # suspecting the engine.
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      # `-D warnings` is what turns the lint config into a gate. In particular it is
+      # what enforces §7.1's ban on `unwrap`/`expect` in crates/core outside tests —
+      # verified to actually fire, not merely configured.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      # §11 Phase 0 acceptance criterion, asserted rather than assumed.
+      - name: CLI help works
+        run: cargo run -q -p sundaysync-cli -- sync --help
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit

@@ -1,0 +1,26 @@
+# Rust build output
+target/
+
+# Real footage benchmark sets (docs/PLAN.md §8.3). Whole services with all cameras —
+# gigabytes, and not ours to publish. Lives on Richard's machine/NAS; the frozen
+# truth.json per set is the only thing worth version-controlling, and it travels with
+# the corpus rather than with the repo.
+corpus/
+
+# Analysis-PCM cache, if ever pointed inside the repo during development.
+*.f32
+
+# ffmpeg sidecar binaries (fetched per-platform from Phase 7, never committed)
+app/src-tauri/binaries/
+
+# Node / Tauri (from Phase 7)
+node_modules/
+dist/
+
+# Editor / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.claude/

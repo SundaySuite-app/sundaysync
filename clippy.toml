@@ -1,0 +1,11 @@
+# docs/PLAN.md §7.1: `unwrap`/`expect` are forbidden in `crates/core` OUTSIDE tests.
+#
+# The `unwrap_used` / `expect_used` lints are enabled in crates/core/Cargo.toml; these
+# two switches are the half that carves out the exception. Without them the lints fire
+# on every `assert_eq!(x.unwrap(), ...)` in the test modules and the only way to keep CI
+# green would be sprinkling `#[allow]` through the tests — which would also mask real
+# violations in production paths. clippy.toml is workspace-global (there is no
+# per-crate form), which is why it lives at the root even though the lints do not.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

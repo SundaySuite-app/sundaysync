@@ -1,0 +1,38 @@
+[workspace]
+# Three crates, one hard rule: `core` is the entire engine and knows nothing about a
+# GUI. `cli` and (from Phase 7) the Tauri shell in `app/` are both thin callers of the
+# single `sundaysync_core::sync()` entry point — see docs/PLAN.md §3. Keeping the
+# engine GUI-free is what makes the accuracy gates in §8.2 testable at all: CI runs the
+# whole sync pipeline headlessly with no webview and no display.
+members = ["crates/core", "crates/cli", "crates/fixturegen"]
+resolver = "2"
+
+# Shared metadata + dependency versions. Pinning versions here (rather than per crate)
+# keeps `core` and its two consumers from drifting onto different serde/clap majors,
+# which would silently break the `SyncResult` wire contract that docs/PLAN.md §5
+# declares to be the stable boundary between engine, CLI, UI and exporter.
+[workspace.package]
+version = "0.1.0"
+authors = ["Richard Fossland"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/SundaySuite-app/sundaysync"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# Lints applied to every crate in the workspace. The `clippy::all` bump to `deny` is
+# what makes `cargo clippy -- -D warnings` in CI a real gate rather than advisory.
+#
+# NOTE: `unwrap_used` / `expect_used` (docs/PLAN.md §7.1, "No panics in core") are NOT
+# set here — they are denied only in `crates/core`, because the CLI's argument handling
+# and fixturegen's dev-tool code are allowed to be blunt about impossible states. The
+# stability promise is about the engine.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }

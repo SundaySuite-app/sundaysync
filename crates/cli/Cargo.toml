@@ -1,0 +1,26 @@
+[package]
+name = "sundaysync-cli"
+description = "Command-line front end for the SundaySync engine. Used by CI, by the benchmark suite, and by power users."
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The binary is `sundaysync`; the package is `sundaysync-cli` to match the
+# `sundaysync-core` naming (and SundayRec's `sundayrec-core` precedent). See
+# docs/DECISIONS.md — docs/PLAN.md §11 writes the Phase 0 acceptance command as
+# `cargo run -p cli`, which is `cargo run -p sundaysync-cli` here.
+[[bin]]
+name = "sundaysync"
+path = "src/main.rs"
+
+[dependencies]
+sundaysync-core = { path = "../core" }
+serde_json = { workspace = true }
+# Argument parsing. `derive` keeps the command surface declared next to the types it
+# fills, so `--help` output and the parsed struct cannot drift apart.
+clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true
