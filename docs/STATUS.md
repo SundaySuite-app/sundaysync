@@ -2,15 +2,15 @@
 
 Per [`PLAN.md`](PLAN.md) §13.5, this file always reflects reality. Updated at every phase end.
 
-**Current phase: 1 — Probe & inventory. Complete locally, pending CI.**
+**Current phase: 1 — Probe & inventory. ✅ ACCEPTED — CI green, PR #1 merged.**
 
 Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 
 | Phase | State | Notes |
 | --- | --- | --- |
 | 0 — Skeleton | ✅ Accepted | Workspace, CI, lint gate, stub `sync()`, CLI. All four CI jobs green on run 30277454384. |
-| 1 — Probe & inventory | ✅ Complete (locally green) | ffprobe integration, device grouping, `scan` command. 50 tests. |
-| 2 — Extraction & cache | ⬜ Not started | |
+| 1 — Probe & inventory | ✅ Accepted | ffprobe integration, device grouping, `scan` command. 50 tests. All four CI jobs green; PR #1 merged. |
+| 2 — Extraction & cache | ⬜ Not started | Next. Builds the `min(4, cores)` parallel infrastructure; probing should move onto it. |
 | 3 — Offset engine | ⬜ Not started | Build `fixturegen` first. **Read DECISIONS.md D-004 before starting.** |
 | 4 — Placement & drift | ⬜ Not started | |
 | 5 — FCPXML export | ⬜ Not started | |
@@ -78,16 +78,8 @@ cargo run -q -p sundaysync-cli -- scan <shoot>        ✅
 Run the suite with `SUNDAYSYNC_REQUIRE_FFMPEG=1` to turn the "ffprobe unavailable" skip
 into a failure — that is how CI runs it on ubuntu (D-005).
 
-CI run 30277454384 — all four jobs green:
-
-| Job | Result |
-| --- | --- |
-| Lint, clippy & test (ubuntu) | ✅ |
-| Build & test (macos-latest) | ✅ |
-| Build & test (windows-latest) | ✅ |
-| Dependency audit (`cargo audit`) | ✅ |
-
-The stub emits well-formed schema-v1 JSON end to end.
+All four CI jobs green on both phases — ubuntu (full gate), macOS, Windows, and
+`cargo audit`. Phase 0: run 30277454384. Phase 1: PR #1, merged as `5b0bdf9`.
 
 ## Open items carried into later phases
 
