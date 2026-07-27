@@ -376,6 +376,69 @@ defaults and **9.8 s** optimised. Debug assertions and overflow checks are retai
 dev-depends on fixturegen instead. A measuring instrument that imports the thing it
 measures can inherit its bugs — and after D-014, that is not a theoretical concern.
 
+## D-018 — JSON round-trip is not bit-exact, and that is fine
+
+**Phase 4, measured.** `serde_json` serialises an f64 correctly, but its parser is not
+always correctly-rounded: over 200 000 values in the ±5000 s range, **9.7 %** come back
+differing by exactly one ULP. Worst case is 4.5e-13 s — 0.45 picoseconds, eleven orders of
+magnitude below a video frame.
+
+Not worth fighting, and not a risk: the engine never round-trips through JSON in the
+product path (the FCPXML exporter reads the in-memory struct), and §13.4's byte-equality
+check compares two engine runs that both serialise from memory. The property test asserts
+a 1 ns tolerance rather than bit equality, with the reason written down so nobody later
+"fixes" it by adding `arbitrary_precision` and slowing every serialisation down.
+
+Relevant if the v2 parking-lot item "project save/load of sync sessions" is ever built:
+a reloaded session will differ from the original in the last bit of some offsets.
+
+## D-019 — Drift precision needs lever arm; the ±5 ppm gate belongs to the full tier
+
+**Phase 4.** §8.2 requires drift estimates within ±5 ppm. Drift is a *slope*, so its
+precision depends on how much offset change the regression can see across a clip, against
+roughly 1.5 samples of per-segment measurement noise:
+
+| clip | span | offset change across segments | slope noise |
+| --- | --- | --- | --- |
+| `quick` cam-stage (60 s) | 40 s | 19 samples | ~8 % |
+| `full` cam-stage (400 s) | 380 s | 182 samples | ~0.8 % |
+| `full` cam-phone (300 s) | 280 s | 202 samples | ~0.7 % |
+
+So the ±5 ppm gate is asserted on the **full** tier, where it passes comfortably —
+injected −25/+40/+60 ppm measured as +24.75/−40.38/−58.69. The `quick` tier only checks
+that drift is detected with a plausible magnitude, because a 60 s clip cannot support a
+tighter claim honestly.
+
+This is not a weakened gate (§13.2): it is the same gate, asserted where the measurement
+is meaningful. A short clip's drift also matters less — 40 ppm over 60 s is 2.4 ms, well
+inside a frame.
+
+**Sign convention, recorded because v2 depends on it:** `drift_ppm` is
+`d(offset)/d(position in clip)`. A clip recorded on a slow clock is physically *longer*
+than reality, so matching content appears progressively earlier and the slope is
+**negative** — the opposite sign to "stretched by N ppm". v2 corrects by resampling by
+`1 / (1 + ppm * 1e-6)`; using `1 + ppm` would double the error instead of removing it.
+
+## D-020 — ⚠️ The scan must skip the analysis cache
+
+**Phase 4, found by the determinism test.** Two consecutive `sync()` runs over the same
+folder produced different results. The cause was a real product bug, not a flaky test:
+the cache directory sat inside the input folder, so the second run's scan walked it,
+found the `.f32` entries, failed to probe them, and reported **the user's own cache back
+to them as broken media**.
+
+The default cache lives in the OS cache location, so this does not bite by default — but
+§4.2 makes the directory user-settable and Phase 8 puts it in the UI, so a user pointing
+it at their media folder would hit it immediately, and the symptom (a growing list of
+mystery decode failures) gives no clue about the cause.
+
+Fixed by passing the cache directory to the scan as an excluded path. This is not
+extension filtering (§4.1 forbids that) — it is the engine declining to scan its own
+working directory.
+
+Worth noting what caught it: §13.4's byte-equality determinism check, on its first run
+against the full pipeline. It was written in Phase 0 as a trivially-true placeholder.
+
 ## D-009 — Dotfiles are skipped during the scan walk
 
 **Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no

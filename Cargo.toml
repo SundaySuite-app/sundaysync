@@ -28,6 +28,9 @@ blake3 = "1"
 # FFT for GCC-PHAT (§4.3). Pure Rust, no C dependency to bundle, and deterministic —
 # all three matter for a cross-platform desktop app whose output must be byte-stable.
 rustfft = "6"
+# Property testing (§8.4). Generates adversarial clip layouts the hand-written cases
+# would not think of, which is exactly what the §7.3 invariants need.
+proptest = "1"
 
 # Lints applied to every crate in the workspace. The `clippy::all` bump to `deny` is
 # what makes `cargo clippy -- -D warnings` in CI a real gate rather than advisory.

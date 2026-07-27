@@ -270,6 +270,58 @@ fn full_suite_meets_the_accuracy_gates() {
     assert_gates(&rows);
 }
 
+/// §8.2: "Drift estimates within ±5 ppm of injected drift."
+///
+/// Asserted on the full tier only. Drift is a *slope*, so its precision depends on how
+/// much offset change the regression can see across a clip; the full tier's 300–400 s
+/// clips give 180–200 samples of change against ~1.5 samples of per-segment noise, while
+/// a 60 s clip gives 19. See docs/DECISIONS.md D-019.
+#[test]
+#[ignore = "full tier: nightly and pre-release only (§8.1)"]
+fn drift_is_measured_within_the_gate() {
+    let Some(sidecar) = require_ffmpeg() else {
+        return;
+    };
+    let root = scratch("drift-full");
+    let seed = 1u64;
+    let spec = shoot::full_suite(seed);
+    let dir = shoot::suite_dir(&root, &spec.name, seed);
+    let truth = shoot::emit(&spec, &dir, &sidecar.ffmpeg).expect("emit");
+
+    let request = sundaysync_core::SyncRequest {
+        inputs: vec![dir.clone()],
+        cache_dir: Some(dir.join("cache")),
+        reference_override: None,
+        min_psr: sundaysync_core::DEFAULT_MIN_PSR,
+    };
+    let result = sundaysync_core::sync(&request, &NoProgress, &CancelToken::new()).expect("sync");
+
+    println!("\n=== drift, full tier ===");
+    let mut checked = 0;
+    for p in &result.placements {
+        let name = p.file.file_name().unwrap().to_str().unwrap();
+        let Some(t) = truth.find(name) else { continue };
+        if t.drift_ppm.abs() < 1.0 {
+            continue;
+        }
+        let Some(measured) = p.drift_ppm else {
+            continue;
+        };
+        println!(
+            "  {name:<24} injected {:+6.1} ppm  measured {:+7.2} ppm",
+            t.drift_ppm, measured
+        );
+        assert!(
+            (measured.abs() - t.drift_ppm.abs()).abs() <= 5.0,
+            "{name}: injected {:+.1} ppm, measured {:+.2} ppm — outside the ±5 ppm gate",
+            t.drift_ppm,
+            measured
+        );
+        checked += 1;
+    }
+    assert!(checked >= 2, "only {checked} drifting clips were checked");
+}
+
 /// Determinism at the level that matters: the same fixtures must measure identically.
 #[test]
 fn measurements_are_reproducible() {
@@ -323,4 +375,159 @@ fn no_codec_carries_a_systematic_offset() {
             "{codec} shows a systematic {mean:+.2} ms bias — see docs/DECISIONS.md D-004"
         );
     }
+}
+
+// ---- Full pipeline (Phase 4) ------------------------------------------------------
+
+/// The whole engine, end to end, over a synthetic shoot.
+///
+/// Everything above measures the correlator in isolation. This runs the real
+/// `sync()` — scan, probe, group, extract, correlate, place, drift — and checks the
+/// §8.2 gates plus the §7.3 invariant on the actual `SyncResult` a user would get.
+#[test]
+fn the_full_pipeline_places_a_synthetic_shoot_correctly() {
+    let Some(sidecar) = require_ffmpeg() else {
+        return;
+    };
+    let root = scratch("pipeline");
+    let seed = 11u64;
+    let spec = shoot::quick_suite(seed);
+    let dir = shoot::suite_dir(&root, &spec.name, seed);
+    let mut truth = shoot::emit(&spec, &dir, &sidecar.ffmpeg).expect("emit");
+    shoot::emit_uncorrelated(
+        &mut truth,
+        &dir,
+        "unrelated",
+        25.0,
+        seed,
+        Codec::Wav,
+        &sidecar.ffmpeg,
+    )
+    .expect("emit uncorrelated");
+
+    let request = sundaysync_core::SyncRequest {
+        inputs: vec![dir.clone()],
+        cache_dir: Some(dir.join("cache")),
+        reference_override: None,
+        min_psr: sundaysync_core::DEFAULT_MIN_PSR,
+    };
+    let result = sundaysync_core::sync(&request, &NoProgress, &CancelToken::new()).expect("sync");
+
+    println!("\n=== full pipeline ===");
+    println!(
+        "reference: {:?}",
+        result.reference.as_ref().map(|r| &r.file)
+    );
+    for p in &result.placements {
+        println!(
+            "  placed   {:<24} off={:9.3}s conf={:.2} drift={:?} warn={}",
+            p.file.file_name().unwrap().to_string_lossy(),
+            p.offset_seconds,
+            p.confidence,
+            p.drift_ppm.map(|d| (d * 10.0).round() / 10.0),
+            p.warnings.len()
+        );
+    }
+    for u in &result.unsynced {
+        println!(
+            "  refused  {:<24} {:?}",
+            u.file.file_name().unwrap().to_string_lossy(),
+            u.reason
+        );
+    }
+
+    // §4.4: the recorder feed is the longest file, so it must be the reference.
+    let reference = result.reference.as_ref().expect("a reference was chosen");
+    assert!(
+        reference.file.to_string_lossy().contains("recorder"),
+        "expected the recorder feed as reference, got {:?}",
+        reference.file
+    );
+
+    // Every real clip placed, uncorrelated audio refused.
+    let placed_names: Vec<String> = result
+        .placements
+        .iter()
+        .map(|p| p.file.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    for clip in truth.clips.iter().filter(|c| !c.uncorrelated) {
+        assert!(
+            placed_names.contains(&clip.file),
+            "{} was not placed",
+            clip.file
+        );
+    }
+    assert!(
+        !placed_names.iter().any(|n| n.starts_with("unrelated")),
+        "uncorrelated audio was placed on the timeline"
+    );
+    assert!(
+        result
+            .unsynced
+            .iter()
+            .any(|u| u.file.to_string_lossy().contains("unrelated")),
+        "the uncorrelated file should appear in unsynced"
+    );
+
+    // Offsets are relative to the reference, and must match truth.
+    let ref_truth = truth
+        .find(reference.file.file_name().unwrap().to_str().unwrap())
+        .expect("reference truth")
+        .offset_seconds;
+    for p in &result.placements {
+        let name = p.file.file_name().unwrap().to_str().unwrap();
+        let Some(t) = truth.find(name) else { continue };
+        if t.uncorrelated {
+            continue;
+        }
+        let expected = t.offset_seconds - ref_truth;
+        let error_ms = (p.offset_seconds - expected) * 1000.0;
+        assert!(
+            error_ms.abs() <= FRAME_MS,
+            "{name} placed {error_ms:.2} ms out, beyond one frame"
+        );
+    }
+
+    // §4.6: the drifting device reports drift, and the clean ones do not report much.
+    let drifting = result
+        .placements
+        .iter()
+        .find(|p| p.file.to_string_lossy().contains("cam-stage"))
+        .expect("cam-stage placed");
+    let ppm = drifting
+        .drift_ppm
+        .expect("drift measured on a 5-segment clip");
+    // Magnitude is checked loosely here and precisely in the full tier. A 60 s clip gives
+    // the regression only ~19 samples of offset change across its whole span, so the
+    // slope is inherently noisy; the full tier's 300–400 s clips give 180–200 samples and
+    // support §8.2's ±5 ppm gate properly. See docs/DECISIONS.md D-019.
+    assert!(
+        ppm.abs() > 10.0 && ppm.abs() < 90.0,
+        "cam-stage was built with 40 ppm drift, measured {ppm:.1}"
+    );
+
+    // §7.3: nothing lost, nothing double-reported.
+    //
+    // The expected set is every file in the directory, not just the media: `truth.json`
+    // was handed over too, and the engine correctly refuses it as a decode error.
+    // Accounting covers whatever the user actually dropped in.
+    let mut inputs: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(std::result::Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .collect();
+    inputs.sort();
+    assert!(
+        result.accounts_for(&inputs),
+        "a file was lost or double-reported"
+    );
+
+    // §13.4: byte-identical across runs, now over the whole pipeline.
+    let again = sundaysync_core::sync(&request, &NoProgress, &CancelToken::new()).expect("sync");
+    assert_eq!(
+        serde_json::to_string(&result).unwrap(),
+        serde_json::to_string(&again).unwrap(),
+        "the pipeline is not deterministic"
+    );
 }
