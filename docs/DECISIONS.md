@@ -86,7 +86,25 @@ different codecs, so this is the target scenario, not an edge case.
 3. If a per-codec constant offset is confirmed, decide explicitly whether to compensate
    in the extraction stage or to document it — and record that here.
 
-## D-005 — Dependencies added in Phase 0
+## D-005 — CI runs the full gate on ubuntu, plus a build/test pass on macOS and Windows
+
+**Phase 0.** §11's Phase 0 criterion reads "CI green on all three platforms' checks",
+while §8.4 specifies the per-push gate as an ubuntu runner with Win/mac bundles only on
+tags. Resolved in favour of the stricter reading, since the repo is public and Actions
+minutes are therefore free:
+
+- **ubuntu** — the full gate: `fmt`, `clippy -D warnings`, `cargo test`, and the §11
+  acceptance command, plus a separate `cargo audit` job.
+- **macOS + Windows** — `cargo test --workspace` only. Enough to catch platform-specific
+  breakage (path handling, child-process spawning, line endings) on the commit that
+  introduced it rather than at the Phase 9 release build.
+
+**Phase 1 must revisit this:** the cross-platform job installs no ffmpeg, which is fine
+only while the tests are pure. The first test that shells out to ffmpeg/ffprobe either
+needs per-OS provisioning (brew / choco) added here, or must take a documented skip path
+off ubuntu — SundayRec's device-independent test suite is the precedent for the latter.
+
+## D-006 — Dependencies added in Phase 0
 
 Per §13.3, one line each:
 

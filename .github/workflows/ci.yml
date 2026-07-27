@@ -61,6 +61,30 @@ jobs:
       - name: CLI help works
         run: cargo run -q -p sundaysync-cli -- sync --help
 
+  # §11 Phase 0 asks for "CI green on all three platforms' checks", while §8.4 specifies
+  # the per-push gate as an ubuntu runner (with Win/mac bundles on tags). This job
+  # reconciles the two cheaply: the full lint/test gate stays on ubuntu, and macOS +
+  # Windows get a compile-and-test pass so platform-specific breakage — path handling,
+  # child-process spawning, line endings — surfaces on the commit that caused it rather
+  # than at the Phase 9 release build.
+  #
+  # NOTE for Phase 1: no ffmpeg is installed here, because Phase 0's tests are pure. The
+  # moment a test shells out to ffmpeg/ffprobe, this job needs per-OS provisioning
+  # (brew / choco) or those tests must take a documented skip path on non-ubuntu.
+  cross-platform:
+    name: Build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
