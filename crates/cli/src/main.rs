@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use sundaysync_core::{
-    scan, sync, CancelToken, Error, NoProgress, Progress, ProgressSink, Sidecar, SyncRequest,
+    scan, CancelToken, Error, NoProgress, Progress, ProgressSink, Sidecar, SyncRequest,
     DEFAULT_MIN_PSR,
 };
 
@@ -47,6 +47,15 @@ enum Command {
         /// unsynced rather than placed speculatively.
         #[arg(long, default_value_t = DEFAULT_MIN_PSR, value_name = "RATIO")]
         min_psr: f64,
+
+        /// Write an FCPXML timeline for DaVinci Resolve to this path, in addition to
+        /// printing the sync map as JSON.
+        #[arg(long, value_name = "FILE")]
+        export: Option<PathBuf>,
+
+        /// Project name recorded inside the exported FCPXML.
+        #[arg(long, default_value = "SundaySync", value_name = "NAME")]
+        project: String,
 
         /// Report progress to stderr. JSON still goes to stdout, so the output stays
         /// pipeable.
@@ -87,6 +96,8 @@ fn main() -> ExitCode {
             cache_dir,
             reference,
             min_psr,
+            export,
+            project,
             verbose,
         } => {
             let request = SyncRequest {
@@ -95,7 +106,33 @@ fn main() -> ExitCode {
                 reference_override: reference,
                 min_psr,
             };
-            emit(sync(&request, sink(verbose).as_ref(), &cancel))
+            let outcome =
+                sundaysync_core::sync_with_durations(&request, sink(verbose).as_ref(), &cancel);
+            match outcome {
+                Ok((result, durations)) => {
+                    if let Some(path) = export {
+                        match sundaysync_core::export_fcpxml(&result, &durations, &project) {
+                            Ok(exported) => {
+                                if let Err(e) = std::fs::write(&path, exported.xml) {
+                                    eprintln!("error: could not write {}: {e}", path.display());
+                                    return ExitCode::FAILURE;
+                                }
+                                eprintln!(
+                                    "wrote {} ({} clips)",
+                                    path.display(),
+                                    exported.clips.len()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("error: {e}");
+                                return ExitCode::FAILURE;
+                            }
+                        }
+                    }
+                    emit(Ok(result))
+                }
+                Err(e) => emit::<sundaysync_core::SyncResult>(Err(e)),
+            }
         }
 
         Command::Scan { inputs, verbose } => {

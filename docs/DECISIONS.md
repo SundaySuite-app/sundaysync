@@ -439,6 +439,80 @@ working directory.
 Worth noting what caught it: §13.4's byte-equality determinism check, on its first run
 against the full pipeline. It was written in Phase 0 as a trivially-true placeholder.
 
+## D-021 — FCPXML: hand-written, single format, no DTD
+
+**Phase 5.** Three deviations from §6, all small and all deliberate:
+
+**Written as a string, not through an XML library.** `quick-xml` was added and then
+removed: §8.4 wants golden tests comparing bytes, and hand-writing fixes element order,
+attribute order and indentation rather than leaving them to a library's formatting. The
+escaping actually needed is five characters.
+
+**One `<format>`, not one per geometry.** §6 asks for a format per unique
+(width, height, fps). `SyncResult` does not carry per-file resolution — §5 has no field
+for it — so adding this properly means threading probe geometry into the result, which is
+a §5 schema change and therefore not something to do in passing. The `mixed_fps` warning
+still fires. Resolve accepted the single-format document without complaint.
+
+**No DTD validation.** §6 asks for validation against "the bundled FCPXML DTD". Apple does
+not ship one with Resolve and none exists on a normal macOS install (checked). The tests
+assert structure, well-formedness and matched tags instead — and, more usefully, the real
+import in D-022 proves acceptance far better than a DTD would.
+
+One thing worth stating: **every time in the document is a whole multiple of the frame
+duration**, assets included. An earlier version left asset durations at exact seconds
+(`8400000/30000s`, not a multiple of 1001). Non-frame-aligned times are a common reason
+importers quietly round or reject a document.
+
+## D-022 — ✅ Verified against real DaVinci Resolve, and how to talk to it
+
+**Phase 5.** §11 lists manual Resolve verification as the acceptance criterion, and §13.6
+says anything learned about the importer gets written down immediately. Both done —
+this was verified for real, not deferred.
+
+Against **DaVinci Resolve Studio 21.0.3.7**, importing a timeline generated from a real
+three-file shoot (a 60 s recorder feed plus two cameras cut from it at 8 s and 20 s, each
+with different EQ and gain):
+
+| Clip | Resolve track | Read-back position | Truth |
+| --- | --- | --- | --- |
+| ZOOM0001.WAV (reference) | audio1 | 0.0 s | 0 s |
+| C0001.MP4 | video2 + audio2 | **8.0 s** | 8 s |
+| DSC_0042.MOV | video3 + audio3 | **20.0 s** | 20 s |
+
+Everything §8.4's checklist asks about:
+
+- **Import succeeds** — `ImportTimelineFromFile` returns a timeline object.
+- **Track layout is right.** Lane *n* becomes video track *n+1*: the primary storyline
+  (our full-length `<gap>`) occupies V1, so the first camera lands on V2. One track pair
+  per device, exactly as §6 intends.
+- **Offsets are exact** — frame-accurate on read-back.
+- **Relinking works** — the percent-encoded `file://` URLs resolved; clips carry real
+  names rather than showing offline.
+- **Frame rate carries** — the sequence imported as 25.0 fps.
+
+**Sub-frame audio remains untested** because nothing sub-frame is currently emitted;
+everything is frame-aligned. §6 says to accept frame precision rather than fight the
+importer, and that is where this sits.
+
+### Talking to Resolve from a script (the part that wastes an hour)
+
+The MCP server and the documented environment-variable route both failed with
+"could not connect". The cause is not the app: `RESOLVE_SCRIPT_API` points at
+`/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting`,
+**which does not exist on a normal macOS install**. The library that does exist is:
+
+```
+/Applications/DaVinci Resolve Studio.app/Contents/Libraries/Fusion/fusionscript.so
+```
+
+Appending that directory to `sys.path` and `import fusionscript` connects immediately, with
+Resolve simply running and no preference changed. The misleading part is that the failure
+looks exactly like "external scripting is disabled", which sends you into Preferences
+looking for a setting that was never the problem.
+
+`scripts/resolve-verify.py` does this and is repeatable.
+
 ## D-009 — Dotfiles are skipped during the scan walk
 
 **Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no

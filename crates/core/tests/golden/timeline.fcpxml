@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.10">
+  <resources>
+    <format id="r0" name="SundaySyncFormat" frameDuration="1001/30000s" width="1920" height="1080" colorSpace="1-1-1 (Rec. 709)"/>
+    <asset id="a0" name="DSC 0042" start="0s" duration="8400392/30000s" hasVideo="1" hasAudio="1" audioSources="1" format="r0">
+      <media-rep kind="original-media" src="file:///opptak/Scene/DSC%200042.MOV"/>
+    </asset>
+    <asset id="a1" name="ZOOM0001" start="0s" duration="18000983/30000s" hasVideo="0" hasAudio="1" audioSources="1" format="r0">
+      <media-rep kind="original-media" src="file:///opptak/Lyd/ZOOM0001.WAV"/>
+    </asset>
+    <asset id="a2" name="C0001" start="0s" duration="9000992/30000s" hasVideo="1" hasAudio="1" audioSources="1" format="r0">
+      <media-rep kind="original-media" src="file:///opptak/Balkong/C0001.MP4"/>
+    </asset>
+  </resources>
+  <library>
+    <event name="SundaySync">
+      <project name="Gudstjeneste">
+        <sequence format="r0" duration="18098080/30000s" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+          <spine>
+            <gap name="SundaySync Timeline" offset="0s" duration="18098080/30000s" start="0s">
+              <asset-clip ref="a0" lane="2" offset="0/30000s" name="DSC 0042" duration="8400392/30000s" start="0s" format="r0"/>
+              <asset-clip ref="a1" lane="-1" offset="97097/30000s" name="ZOOM0001" duration="18000983/30000s" start="0s" format="r0"/>
+              <asset-clip ref="a2" lane="1" offset="472472/30000s" name="C0001" duration="9000992/30000s" start="0s" format="r0"/>
+            </gap>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

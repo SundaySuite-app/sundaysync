@@ -26,6 +26,7 @@ pub mod device;
 pub mod drift;
 pub mod error;
 pub mod extract;
+pub mod fcpxml;
 pub mod place;
 pub mod probe;
 pub mod progress;
@@ -40,6 +41,7 @@ pub use correlate::{ClipMatch, Correlator, Match, SegmentMatch};
 pub use drift::Drift;
 pub use error::{Error, Result};
 pub use extract::{AnalysisAudio, CachedAudio, ExtractError, Extractor};
+pub use fcpxml::{export as export_fcpxml, Export, ExportError};
 pub use place::{Candidate, Placed};
 pub use probe::{AudioStream, Probed, VideoStream};
 pub use progress::{CancelToken, NoProgress, Progress, ProgressSink, Stage};
@@ -73,6 +75,19 @@ pub fn sync(
     progress: &dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<SyncResult> {
+    sync_with_durations(request, progress, cancel).map(|(r, _)| r)
+}
+
+/// As [`sync`], but also returns each file's duration in seconds.
+///
+/// The FCPXML exporter needs durations to size clips, and the pipeline already knows them
+/// from the probe stage. Returning them separately avoids both a second ffprobe pass and
+/// adding a field to the §5 contract, which §0 treats as irreversible.
+pub fn sync_with_durations(
+    request: &SyncRequest,
+    progress: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<(SyncResult, std::collections::BTreeMap<PathBuf, f64>)> {
     if request.inputs.is_empty() {
         return Err(Error::NoInput);
     }
@@ -193,7 +208,12 @@ pub fn sync(
         ));
     }
 
-    Ok(result)
+    let durations = candidates
+        .iter()
+        .map(|c| (c.probed.path.clone(), c.probed.duration_seconds))
+        .collect();
+
+    Ok((result, durations))
 }
 
 /// §6: the sequence takes the most common camera frame rate; mixed input is allowed but
