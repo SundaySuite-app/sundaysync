@@ -123,7 +123,11 @@ fn measure(truth: &Truth, dir: &Path, sidecar: &Sidecar) -> Vec<Measured> {
         };
         let audio = cached.load().expect("clip audio");
 
-        let Some(m) = correlator.match_clip(audio.samples(), reference.samples()) else {
+        let Some(m) = correlator.match_clip(
+            audio.samples(),
+            reference.samples(),
+            sundaysync_core::correlate::SEGMENT_COUNT,
+        ) else {
             // No match at all is a legitimate outcome for the uncorrelated file; for a
             // real clip it is a failure the gate below will catch.
             out.push(Measured {
@@ -289,10 +293,8 @@ fn drift_is_measured_within_the_gate() {
     let truth = shoot::emit(&spec, &dir, &sidecar.ffmpeg).expect("emit");
 
     let request = sundaysync_core::SyncRequest {
-        inputs: vec![dir.clone()],
         cache_dir: Some(dir.join("cache")),
-        reference_override: None,
-        min_psr: sundaysync_core::DEFAULT_MIN_PSR,
+        ..sundaysync_core::SyncRequest::new(vec![dir.clone()])
     };
     let result = sundaysync_core::sync(&request, &NoProgress, &CancelToken::new()).expect("sync");
 
@@ -406,10 +408,8 @@ fn the_full_pipeline_places_a_synthetic_shoot_correctly() {
     .expect("emit uncorrelated");
 
     let request = sundaysync_core::SyncRequest {
-        inputs: vec![dir.clone()],
         cache_dir: Some(dir.join("cache")),
-        reference_override: None,
-        min_psr: sundaysync_core::DEFAULT_MIN_PSR,
+        ..sundaysync_core::SyncRequest::new(vec![dir.clone()])
     };
     let result = sundaysync_core::sync(&request, &NoProgress, &CancelToken::new()).expect("sync");
 
@@ -529,5 +529,79 @@ fn the_full_pipeline_places_a_synthetic_shoot_correctly() {
         serde_json::to_string(&result).unwrap(),
         serde_json::to_string(&again).unwrap(),
         "the pipeline is not deterministic"
+    );
+}
+
+/// §9 advanced: a device override flows through the whole pipeline — the moved clip
+/// lands under its new device in the result, the §7.3 accounting still holds, and the
+/// run stays deterministic.
+#[test]
+fn device_overrides_flow_through_the_full_pipeline() {
+    let Some(sidecar) = require_ffmpeg() else {
+        return;
+    };
+    let root = scratch("override-pipeline");
+    let seed = 13u64;
+    let spec = shoot::quick_suite(seed);
+    let dir = shoot::suite_dir(&root, &spec.name, seed);
+    shoot::emit(&spec, &dir, &sidecar.ffmpeg).expect("emit");
+
+    // Baseline: find which device the balcony camera's first clip grouped under.
+    let base_request = sundaysync_core::SyncRequest {
+        cache_dir: Some(dir.join("cache")),
+        ..sundaysync_core::SyncRequest::new(vec![dir.clone()])
+    };
+    let base =
+        sundaysync_core::sync(&base_request, &NoProgress, &CancelToken::new()).expect("sync");
+    let moved_file = base
+        .placements
+        .iter()
+        .find(|p| p.file.to_string_lossy().contains("cam-balcony_0001"))
+        .expect("balcony clip placed")
+        .file
+        .clone();
+    let target_device = base
+        .placements
+        .iter()
+        .find(|p| p.file.to_string_lossy().contains("cam-stage"))
+        .expect("stage clip placed")
+        .device
+        .clone();
+
+    // Move the balcony clip onto the stage camera's device and re-run (warm cache).
+    let mut request = base_request.clone();
+    request
+        .device_overrides
+        .insert(moved_file.clone(), target_device.clone());
+    let result = sundaysync_core::sync(&request, &NoProgress, &CancelToken::new()).expect("sync");
+
+    let moved = result
+        .placements
+        .iter()
+        .find(|p| p.file == moved_file)
+        .expect("moved clip still placed");
+    assert_eq!(moved.device, target_device, "override did not take");
+    let device = result
+        .devices
+        .iter()
+        .find(|d| d.id == target_device)
+        .expect("target device exists");
+    assert!(device.files.contains(&moved_file));
+
+    // §7.3 accounting still holds over the overridden run.
+    let mut inputs: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(std::result::Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .collect();
+    inputs.sort();
+    assert!(result.accounts_for(&inputs));
+
+    // Determinism holds with overrides in play (§3).
+    let again = sundaysync_core::sync(&request, &NoProgress, &CancelToken::new()).expect("sync");
+    assert_eq!(
+        serde_json::to_string(&result).unwrap(),
+        serde_json::to_string(&again).unwrap()
     );
 }

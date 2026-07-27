@@ -32,6 +32,13 @@ use rustfft::FftPlanner;
 pub const WHOLE_CLIP_LIMIT_SECONDS: f64 = 45.0;
 /// §4.3: otherwise take this many segments...
 pub const SEGMENT_COUNT: usize = 5;
+/// Bounds for a user-supplied segment count (§9 advanced).
+///
+/// Two is the formula's floor (`segment_starts` divides by `count - 1`); fifteen is a
+/// generosity ceiling — beyond it segments overlap heavily on any clip §4.3 would
+/// segment at all, and each extra segment is a full FFT pass over the reference.
+/// Requests outside the range are clamped at the pipeline boundary, not rejected.
+pub const SEGMENT_COUNT_RANGE: std::ops::RangeInclusive<usize> = 2..=15;
 /// ...of this length, spread across the clip.
 pub const SEGMENT_SECONDS: f64 = 20.0;
 /// §4.3: segment offsets disagreeing by more than this mark the clip inconsistent.
@@ -215,8 +222,16 @@ impl Correlator {
     }
 
     /// Matches a whole clip using the §4.3 segmentation rules.
-    pub fn match_clip(&mut self, clip: &[f32], reference: &[f32]) -> Option<ClipMatch> {
-        let starts = segment_starts(clip.len());
+    ///
+    /// `segment_count` is the §9 advanced knob; pass [`SEGMENT_COUNT`] for the default
+    /// behaviour. Callers are expected to have clamped it to [`SEGMENT_COUNT_RANGE`].
+    pub fn match_clip(
+        &mut self,
+        clip: &[f32],
+        reference: &[f32],
+        segment_count: usize,
+    ) -> Option<ClipMatch> {
+        let starts = segment_starts(clip.len(), segment_count);
         let seg_len = segment_length(clip.len());
 
         let mut segments = Vec::new();
@@ -273,16 +288,18 @@ pub fn segment_length(clip_samples: usize) -> usize {
 
 /// Segment start positions, "spread evenly across A (always including one near the start
 /// and one near the end)" (§4.3).
+///
+/// `count` below 2 is treated as 2 — the formula divides by `count - 1`, and a single
+/// mid-clip segment would silently drop the start/end coverage §4.3 requires.
 #[must_use]
-pub fn segment_starts(clip_samples: usize) -> Vec<usize> {
+pub fn segment_starts(clip_samples: usize, count: usize) -> Vec<usize> {
     let seg = segment_length(clip_samples);
     if seg >= clip_samples {
         return vec![0];
     }
+    let count = count.max(2);
     let span = clip_samples - seg;
-    (0..SEGMENT_COUNT)
-        .map(|i| span * i / (SEGMENT_COUNT - 1))
-        .collect()
+    (0..count).map(|i| span * i / (count - 1)).collect()
 }
 
 fn median(values: &mut [f64]) -> f64 {
@@ -516,16 +533,45 @@ mod tests {
         // Under 45 s: one whole-clip segment.
         let short = 30 * rate;
         assert_eq!(segment_length(short), short);
-        assert_eq!(segment_starts(short), vec![0]);
+        assert_eq!(segment_starts(short, SEGMENT_COUNT), vec![0]);
 
         // Over 45 s: five 20 s segments, first at the start and last at the end.
         let long = 120 * rate;
         assert_eq!(segment_length(long), 20 * rate);
-        let starts = segment_starts(long);
+        let starts = segment_starts(long, SEGMENT_COUNT);
         assert_eq!(starts.len(), SEGMENT_COUNT);
         assert_eq!(starts[0], 0);
         assert_eq!(starts[SEGMENT_COUNT - 1], long - 20 * rate);
         assert!(starts.windows(2).all(|w| w[0] < w[1]), "must be increasing");
+    }
+
+    #[test]
+    fn segment_count_is_configurable_and_spans_the_clip() {
+        // §9 advanced: more segments, same coverage guarantee — first at the start,
+        // last at the end, strictly increasing.
+        let rate = ANALYSIS_RATE as usize;
+        let long = 120 * rate;
+        for count in [2, 7, 15] {
+            let starts = segment_starts(long, count);
+            assert_eq!(starts.len(), count, "count {count}");
+            assert_eq!(starts[0], 0);
+            assert_eq!(starts[count - 1], long - 20 * rate);
+            assert!(starts.windows(2).all(|w| w[0] < w[1]), "count {count}");
+        }
+        // Below the floor is treated as the floor, not a panic or a lone segment.
+        assert_eq!(segment_starts(long, 0).len(), 2);
+        assert_eq!(segment_starts(long, 1).len(), 2);
+    }
+
+    #[test]
+    fn match_clip_honours_the_segment_count() {
+        let rate = ANALYSIS_RATE as usize;
+        let reference = noise(100 * rate, 21);
+        let lag = 4 * rate;
+        let clip = &reference[lag..lag + 60 * rate];
+        let m = Correlator::new().match_clip(clip, &reference, 3).unwrap();
+        assert_eq!(m.segments.len(), 3);
+        assert!((m.offset_samples - lag as f64).abs() < 2.0);
     }
 
     #[test]
@@ -534,7 +580,9 @@ mod tests {
         let reference = noise(200 * rate / 2, 8); // 100 s
         let lag = 7 * rate;
         let clip = &reference[lag..lag + 60 * rate];
-        let m = Correlator::new().match_clip(clip, &reference).unwrap();
+        let m = Correlator::new()
+            .match_clip(clip, &reference, SEGMENT_COUNT)
+            .unwrap();
 
         assert_eq!(m.segments.len(), SEGMENT_COUNT);
         assert!(
@@ -559,7 +607,9 @@ mod tests {
         let junk = noise(clip.len() - tail, 4242);
         clip[tail..].copy_from_slice(&junk);
 
-        let m = Correlator::new().match_clip(&clip, &reference).unwrap();
+        let m = Correlator::new()
+            .match_clip(&clip, &reference, SEGMENT_COUNT)
+            .unwrap();
         let worst = m
             .segments
             .iter()

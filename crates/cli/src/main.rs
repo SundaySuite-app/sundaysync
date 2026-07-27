@@ -124,10 +124,10 @@ fn main() -> ExitCode {
             verbose,
         } => {
             let request = SyncRequest {
-                inputs,
                 cache_dir,
                 reference_override: reference,
                 min_psr,
+                ..SyncRequest::new(inputs)
             };
             let outcome =
                 sundaysync_core::sync_with_durations(&request, sink(verbose).as_ref(), &cancel);

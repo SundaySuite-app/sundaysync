@@ -133,6 +133,92 @@ impl Cache {
         std::fs::metadata(self.entry_path(key)).is_ok_and(|m| m.len() > 0)
     }
 
+    /// Total bytes of finished entries (`*.f32`). A missing directory is 0, not an error
+    /// — an empty cache and an untouched one are the same thing to a settings screen.
+    pub fn size_bytes(&self) -> Result<u64> {
+        self.fold_entries(0u64, |acc, meta, name| {
+            if name.ends_with(".f32") {
+                acc + meta.len()
+            } else {
+                acc
+            }
+        })
+    }
+
+    /// Number of finished entries. Missing directory ⇒ 0.
+    pub fn entry_count(&self) -> Result<usize> {
+        self.fold_entries(
+            0usize,
+            |acc, _meta, name| {
+                if name.ends_with(".f32") {
+                    acc + 1
+                } else {
+                    acc
+                }
+            },
+        )
+    }
+
+    /// Removes every entry *and* any stale `.tmp` scratch file, returning bytes freed.
+    ///
+    /// Deliberately leaves the directory itself and any foreign file alone — never
+    /// delete what we did not write. Cheap insurance against a user pointing the cache
+    /// setting at, say, their Documents folder (D-013's settings UI makes that possible).
+    pub fn clear(&self) -> Result<u64> {
+        let mut freed = 0u64;
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(source) => {
+                return Err(Error::Io {
+                    path: self.dir.clone(),
+                    source,
+                })
+            }
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let ours = name.ends_with(".f32") || name.ends_with(".tmp");
+            if !ours {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            if std::fs::remove_file(entry.path()).is_ok() {
+                freed += meta.len();
+            }
+        }
+        Ok(freed)
+    }
+
+    /// Shared walk for the read-only statistics. Non-recursive on purpose: the cache
+    /// writes a flat directory, and recursing would count whatever a user's misdirected
+    /// cache path happens to contain.
+    fn fold_entries<T>(&self, init: T, f: impl Fn(T, &std::fs::Metadata, &str) -> T) -> Result<T> {
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(init),
+            Err(source) => {
+                return Err(Error::Io {
+                    path: self.dir.clone(),
+                    source,
+                })
+            }
+        };
+        let mut acc = init;
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            acc = f(acc, &meta, &name);
+        }
+        Ok(acc)
+    }
+
     pub fn ensure_dir(&self) -> Result<()> {
         std::fs::create_dir_all(&self.dir).map_err(|source| Error::Io {
             path: self.dir.clone(),
@@ -231,6 +317,43 @@ mod tests {
         let b = cache.temp_path(&key, 2);
         assert_ne!(a, b);
         assert_eq!(a.parent(), cache.entry_path(&key).parent());
+    }
+
+    #[test]
+    fn maintenance_on_a_missing_dir_is_zero_not_an_error() {
+        let cache = Cache::new(PathBuf::from("/no/such/cache/dir"));
+        assert_eq!(cache.size_bytes().unwrap(), 0);
+        assert_eq!(cache.entry_count().unwrap(), 0);
+        assert_eq!(cache.clear().unwrap(), 0);
+    }
+
+    #[test]
+    fn maintenance_counts_clears_and_spares_foreign_files() {
+        let dir = scratch("cache-maint");
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap();
+        fs::write(cache.dir().join("a.f32"), [0u8; 100]).unwrap();
+        fs::write(cache.dir().join("b.f32"), [0u8; 50]).unwrap();
+        fs::write(cache.dir().join("stale.tmp"), [0u8; 30]).unwrap();
+        // A file we did not write must never be deleted (D-013's settings UI lets the
+        // user point the cache anywhere, including somewhere that matters).
+        fs::write(cache.dir().join("readme.txt"), b"keep me").unwrap();
+
+        assert_eq!(
+            cache.entry_count().unwrap(),
+            2,
+            "tmp and foreign don't count"
+        );
+        assert_eq!(cache.size_bytes().unwrap(), 150, "entries only");
+
+        let freed = cache.clear().unwrap();
+        assert_eq!(freed, 180, "entries + stale tmp");
+        assert_eq!(cache.entry_count().unwrap(), 0);
+        assert!(
+            cache.dir().join("readme.txt").exists(),
+            "foreign file survived"
+        );
+        assert!(cache.dir().exists(), "the directory itself is kept");
     }
 
     #[test]

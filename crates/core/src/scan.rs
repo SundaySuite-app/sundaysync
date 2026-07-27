@@ -8,7 +8,7 @@ use crate::device;
 use crate::error::{Error, Result};
 use crate::probe::{self, AudioStream, Probed, VideoStream};
 use crate::progress::{CancelToken, Progress, ProgressSink, Stage};
-use crate::result::{Device, Unsynced, UnsyncedReason, SCHEMA_VERSION};
+use crate::result::{Device, DeviceKind, Unsynced, UnsyncedReason, SCHEMA_VERSION};
 use crate::sidecar::Sidecar;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -159,6 +159,90 @@ pub fn scan_detailed(
         },
         probed_out,
     ))
+}
+
+/// §9 advanced re-grouping: moves files between devices in a scanned manifest.
+///
+/// A pure manifest rewrite — no filesystem access, no re-probe — so the UI can preview
+/// the result instantly and the pipeline can apply it deterministically (the map is a
+/// `BTreeMap`, and device/file ordering is re-derived by id afterwards).
+///
+/// Semantics (D-028):
+/// - A key matching no scanned file is **ignored**: a stale override left after the user
+///   removed an input must not abort a run.
+/// - A target id the grouping never produced creates a fresh device. Its label is the
+///   id's human part (text after the first `-`), matching how [`crate::device`] builds
+///   ids; only reachable from the CLI/JSON side — the UI offers existing ids.
+/// - Each touched device's `kind` is recomputed from its members ("any video ⇒ Video",
+///   the same rule `device::group` applies), and devices left empty are dropped.
+pub fn apply_device_overrides(
+    manifest: &mut ScanManifest,
+    overrides: &std::collections::BTreeMap<PathBuf, String>,
+) {
+    if overrides.is_empty() {
+        return;
+    }
+
+    for (file, target_id) in overrides {
+        // Only files the scan actually produced can move.
+        let Some(entry) = manifest.files.iter_mut().find(|f| &f.file == file) else {
+            continue;
+        };
+        if &entry.device == target_id {
+            continue;
+        }
+
+        // Detach from the old device.
+        if let Some(old) = manifest.devices.iter_mut().find(|d| d.id == entry.device) {
+            old.files.retain(|f| f != file);
+        }
+
+        // Attach to the target, creating it if the id is new.
+        if let Some(target) = manifest.devices.iter_mut().find(|d| &d.id == target_id) {
+            target.files.push(file.clone());
+        } else {
+            let label = target_id
+                .split_once('-')
+                .map_or_else(|| target_id.clone(), |(_, rest)| rest.to_string());
+            manifest.devices.push(Device {
+                id: target_id.clone(),
+                label,
+                kind: DeviceKind::Audio, // recomputed below
+                files: vec![file.clone()],
+            });
+        }
+        entry.device = target_id.clone();
+    }
+
+    // Recompute kinds from membership, drop empties, restore the §5 orderings.
+    let has_video = |device: &Device| {
+        device.files.iter().any(|f| {
+            manifest
+                .files
+                .iter()
+                .find(|e| &e.file == f)
+                .is_some_and(|e| e.video.is_some())
+        })
+    };
+    let kinds: Vec<DeviceKind> = manifest
+        .devices
+        .iter()
+        .map(|d| {
+            if has_video(d) {
+                DeviceKind::Video
+            } else {
+                DeviceKind::Audio
+            }
+        })
+        .collect();
+    for (device, kind) in manifest.devices.iter_mut().zip(kinds) {
+        device.kind = kind;
+    }
+    manifest.devices.retain(|d| !d.files.is_empty());
+    manifest.devices.sort_by(|a, b| a.id.cmp(&b.id));
+    for device in &mut manifest.devices {
+        device.files.sort();
+    }
 }
 
 /// Expands the inputs into a deduplicated, sorted candidate list.
@@ -475,6 +559,160 @@ mod tests {
         assert!(m.files.iter().all(|f| !f.device.is_empty()));
         let zoom = m.devices.iter().find(|d| d.id == "name-zoom").unwrap();
         assert_eq!(zoom.files.len(), 1);
+    }
+
+    fn manifest_for_overrides() -> ScanManifest {
+        use crate::probe::{AudioStream, VideoStream};
+        use crate::rational::Rational;
+        let video = |path: &str| FileEntry {
+            file: PathBuf::from(path),
+            device: String::new(),
+            duration_seconds: 60.0,
+            format_name: "mov,mp4".into(),
+            audio: Some(AudioStream {
+                codec: "aac".into(),
+                sample_rate: 48_000,
+                channels: 2,
+            }),
+            video: Some(VideoStream {
+                codec: "h264".into(),
+                width: 1920,
+                height: 1080,
+                fps: Rational::new(25, 1),
+            }),
+            creation_time: None,
+        };
+        let audio = |path: &str| FileEntry {
+            video: None,
+            audio: Some(AudioStream {
+                codec: "pcm_s16le".into(),
+                sample_rate: 48_000,
+                channels: 1,
+            }),
+            ..video(path)
+        };
+        let mut a = video("/x/C0001.MP4");
+        a.device = "cam-a".into();
+        let mut b = video("/x/C0002.MP4");
+        b.device = "cam-a".into();
+        let mut z = audio("/x/ZOOM0001.WAV");
+        z.device = "rec".into();
+        ScanManifest {
+            schema: SCHEMA_VERSION,
+            devices: vec![
+                Device {
+                    id: "cam-a".into(),
+                    label: "A".into(),
+                    kind: DeviceKind::Video,
+                    files: vec![PathBuf::from("/x/C0001.MP4"), PathBuf::from("/x/C0002.MP4")],
+                },
+                Device {
+                    id: "rec".into(),
+                    label: "Zoom".into(),
+                    kind: DeviceKind::Audio,
+                    files: vec![PathBuf::from("/x/ZOOM0001.WAV")],
+                },
+            ],
+            files: vec![a, b, z],
+            unsynced: vec![],
+        }
+    }
+
+    #[test]
+    fn overrides_move_files_and_recompute_kind() {
+        let mut m = manifest_for_overrides();
+        let mut ov = std::collections::BTreeMap::new();
+        // Move a VIDEO file into the audio-only recorder device: the device must flip
+        // to Video ("any video ⇒ Video"), and cam-a keeps its other clip.
+        ov.insert(PathBuf::from("/x/C0002.MP4"), "rec".to_string());
+        apply_device_overrides(&mut m, &ov);
+
+        let rec = m.devices.iter().find(|d| d.id == "rec").unwrap();
+        assert_eq!(rec.files.len(), 2);
+        assert_eq!(rec.kind, DeviceKind::Video, "video member flips the kind");
+        let cam = m.devices.iter().find(|d| d.id == "cam-a").unwrap();
+        assert_eq!(cam.files, vec![PathBuf::from("/x/C0001.MP4")]);
+        let entry = m
+            .files
+            .iter()
+            .find(|f| f.file.ends_with("C0002.MP4"))
+            .unwrap();
+        assert_eq!(entry.device, "rec");
+    }
+
+    #[test]
+    fn overrides_drop_emptied_devices_and_create_new_ones() {
+        let mut m = manifest_for_overrides();
+        let mut ov = std::collections::BTreeMap::new();
+        ov.insert(
+            PathBuf::from("/x/ZOOM0001.WAV"),
+            "folder-balkong".to_string(),
+        );
+        apply_device_overrides(&mut m, &ov);
+
+        assert!(
+            !m.devices.iter().any(|d| d.id == "rec"),
+            "emptied device dropped"
+        );
+        let created = m.devices.iter().find(|d| d.id == "folder-balkong").unwrap();
+        assert_eq!(created.label, "balkong", "label is the id's human part");
+        assert_eq!(created.kind, DeviceKind::Audio);
+    }
+
+    #[test]
+    fn stale_and_noop_overrides_are_ignored() {
+        let mut m = manifest_for_overrides();
+        let before = m.clone();
+        let mut ov = std::collections::BTreeMap::new();
+        ov.insert(PathBuf::from("/gone/removed.mp4"), "rec".to_string()); // stale key
+        ov.insert(PathBuf::from("/x/C0001.MP4"), "cam-a".to_string()); // already there
+        apply_device_overrides(&mut m, &ov);
+        assert_eq!(m, before, "stale and no-op overrides must change nothing");
+
+        // And the empty map is the untouched fast path.
+        apply_device_overrides(&mut m, &std::collections::BTreeMap::new());
+        assert_eq!(m, before);
+    }
+
+    #[test]
+    fn overrides_are_deterministic_and_keep_the_orderings() {
+        let mut a = manifest_for_overrides();
+        let mut b = manifest_for_overrides();
+        let mut ov = std::collections::BTreeMap::new();
+        ov.insert(PathBuf::from("/x/C0001.MP4"), "rec".to_string());
+        ov.insert(PathBuf::from("/x/C0002.MP4"), "rec".to_string());
+        apply_device_overrides(&mut a, &ov);
+        apply_device_overrides(&mut b, &ov);
+        assert_eq!(
+            serde_json::to_string(&a).unwrap(),
+            serde_json::to_string(&b).unwrap()
+        );
+        assert!(
+            a.devices.windows(2).all(|w| w[0].id < w[1].id),
+            "sorted by id"
+        );
+    }
+
+    #[test]
+    fn scan_manifest_serde_spelling_is_stable() {
+        // The TS mirror in app/src/types.ts is hand-written against these names; this
+        // assertion is what keeps the two from drifting (same pattern as result.rs).
+        let m = manifest_for_overrides();
+        let json = serde_json::to_value(&m).unwrap();
+        let entry = &json["files"][0];
+        for key in [
+            "file",
+            "device",
+            "duration_seconds",
+            "format_name",
+            "audio",
+            "video",
+            "creation_time",
+        ] {
+            assert!(entry.get(key).is_some(), "missing key {key}");
+        }
+        assert!(entry["audio"].get("sample_rate").is_some());
+        assert!(entry["video"].get("fps").is_some());
     }
 
     #[test]

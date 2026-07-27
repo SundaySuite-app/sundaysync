@@ -103,13 +103,18 @@ pub fn sync_with_durations(
         Some(dir) => dir.clone(),
         None => cache::Cache::default_dir()?,
     };
-    let (manifest, probed) = scan::scan_detailed(
+    let (mut manifest, probed) = scan::scan_detailed(
         &request.inputs,
         &sidecar,
         Some(&cache_dir),
         progress,
         cancel,
     )?;
+
+    // §9 advanced re-grouping, applied before candidates are built so the overridden
+    // device flows into placement — including the §4.4 same-device-overlap invariant,
+    // which is exactly what lets a user resolve a `device_overlap` refusal (D-028).
+    scan::apply_device_overrides(&mut manifest, &request.device_overrides);
     let extractor = extract::Extractor::new(sidecar, cache::Cache::new(cache_dir));
 
     let syncable: Vec<PathBuf> = manifest.files.iter().map(|f| f.file.clone()).collect();
@@ -150,10 +155,18 @@ pub fn sync_with_durations(
         total: candidates.len(),
     });
 
+    // Clamped once, here at the boundary: a wild value from a config file degrades to
+    // the nearest sane one rather than erroring (§9 advanced must not brick simple mode).
+    let segment_count = request.segment_count.clamp(
+        *correlate::SEGMENT_COUNT_RANGE.start(),
+        *correlate::SEGMENT_COUNT_RANGE.end(),
+    );
+
     let placed = place::place(
         &candidates,
         request.reference_override.as_deref(),
         request.min_psr,
+        segment_count,
         fps.as_f64(),
         progress,
         cancel,
