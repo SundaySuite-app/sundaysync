@@ -6,6 +6,8 @@
 //!
 //! **Phase 1.** `sync` and `scan` exist; `bench` arrives in Phase 6.
 
+mod bench;
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -61,6 +63,27 @@ enum Command {
         /// pipeable.
         #[arg(long, short)]
         verbose: bool,
+    },
+
+    /// Benchmark the engine against a corpus of shoots with known ground truth.
+    ///
+    /// Each subdirectory of CORPUS is one shoot containing media plus a `truth.json`
+    /// recording each file's true offset. Reports accuracy and timing per shoot and
+    /// exits non-zero if any shoot fails the §8.2 gates — so a regression is a build
+    /// failure rather than something noticed later.
+    Bench {
+        /// Directory of shoots. Each subdirectory needs a `truth.json`.
+        #[arg(required = true, value_name = "CORPUS")]
+        corpus: PathBuf,
+
+        /// Directory for the analysis cache. A warm cache makes re-runs fast; pass a
+        /// throwaway path to measure cold performance.
+        #[arg(long, value_name = "DIR")]
+        cache_dir: Option<PathBuf>,
+
+        /// Minimum peak-to-sidelobe ratio for a match to be accepted.
+        #[arg(long, default_value_t = DEFAULT_MIN_PSR, value_name = "RATIO")]
+        min_psr: f64,
     },
 
     /// Probe media and print the inventory — devices, files, and anything unusable —
@@ -134,6 +157,12 @@ fn main() -> ExitCode {
                 Err(e) => emit::<sundaysync_core::SyncResult>(Err(e)),
             }
         }
+
+        Command::Bench {
+            corpus,
+            cache_dir,
+            min_psr,
+        } => bench::run(&corpus, cache_dir.as_deref(), min_psr, &cancel),
 
         Command::Scan { inputs, verbose } => {
             // Resolved up front so a missing ffmpeg is one clear message, rather than

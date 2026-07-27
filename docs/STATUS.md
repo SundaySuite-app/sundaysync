@@ -14,7 +14,7 @@ Repo: <https://github.com/SundaySuite-app/sundaysync> (public).
 | 3 — Offset engine | ✅ Accepted | `fixturegen` + GCC-PHAT. `MIN_PSR` calibrated to 15.0. 106 tests. PR #3 merged. **Read D-016 before Phase 4.** |
 | 4 — Placement & drift | ✅ Complete (locally green) | §4.4 placement, §4.6 drift, full `sync()` pipeline, proptest invariants. 136 tests. |
 | 5 — FCPXML export | ✅ Complete (locally green) | §6 exporter, golden tests, **verified in DaVinci Resolve Studio 21.0.3.7** — frame-accurate, correct track layout, media relinked. |
-| 6 — CLI complete + real corpus | 🔶 Partial | `sync --export` done. `bench` + corpus onboarding need Richard's footage. |
+| 6 — CLI complete + real corpus | 🔶 CLI done, corpus pending | `sync`/`scan`/`bench` all implemented and working. **Corpus onboarding needs Richard's footage** — the harness is ready and waiting. |
 | 7 — Tauri app, simple mode | ⬜ Not started | `app/` is an empty placeholder until here. |
 | 8 — Advanced mode + diagnostics | ⬜ Not started | |
 | 9 — Release | ⬜ Not started | |
