@@ -16,6 +16,7 @@ repository.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+blake3 = { workspace = true }
 
 # docs/PLAN.md §7.1: "No panics in `core`: `unwrap`/`expect` forbidden outside tests
 # (enforced with clippy lints in CI). All fallible paths return typed errors."

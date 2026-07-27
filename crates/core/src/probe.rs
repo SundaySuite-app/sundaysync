@@ -5,6 +5,7 @@
 //! a `.wav` may be anything. ffprobe is the only authority on what a file actually is,
 //! so every input is handed to it and the answer is believed.
 
+use crate::progress::CancelToken;
 use crate::rational::Rational;
 use crate::sidecar::{self, RunFailure, Sidecar, PROBE_TIMEOUT};
 use serde::{Deserialize, Serialize};
@@ -86,6 +87,8 @@ impl Probed {
 pub enum ProbeError {
     /// ffprobe ran but rejected the file, timed out, or could not be spawned.
     Unreadable(String),
+    /// The user cancelled while this file was being probed.
+    Cancelled,
     /// ffprobe succeeded but emitted JSON we could not understand — a version skew or a
     /// genuinely bizarre file. Treated as unreadable rather than fatal.
     Malformed(String),
@@ -95,6 +98,7 @@ impl std::fmt::Display for ProbeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unreadable(m) | Self::Malformed(m) => write!(f, "{m}"),
+            Self::Cancelled => write!(f, "cancelled"),
         }
     }
 }
@@ -103,7 +107,11 @@ impl std::fmt::Display for ProbeError {
 ///
 /// Never panics and never propagates a failure upward: an unreadable file is data, not
 /// an error condition (§7.2). The caller turns a `ProbeError` into an `unsynced` entry.
-pub fn probe(sidecar: &Sidecar, path: &Path) -> std::result::Result<Probed, ProbeError> {
+pub fn probe(
+    sidecar: &Sidecar,
+    path: &Path,
+    cancel: &CancelToken,
+) -> std::result::Result<Probed, ProbeError> {
     // `-v error` keeps the informational banner off stderr so what remains is a real
     // diagnostic worth showing the user.
     let args = [
@@ -116,12 +124,14 @@ pub fn probe(sidecar: &Sidecar, path: &Path) -> std::result::Result<Probed, Prob
         path.as_os_str(),
     ];
 
-    let output = sidecar::run(&sidecar.ffprobe, args, PROBE_TIMEOUT).map_err(|e| match e {
-        RunFailure::TimedOut => {
-            ProbeError::Unreadable(format!("ffprobe timed out after {PROBE_TIMEOUT:?}"))
-        }
-        other => ProbeError::Unreadable(other.to_string()),
-    })?;
+    let output =
+        sidecar::run(&sidecar.ffprobe, args, PROBE_TIMEOUT, cancel).map_err(|e| match e {
+            RunFailure::TimedOut => {
+                ProbeError::Unreadable(format!("ffprobe timed out after {PROBE_TIMEOUT:?}"))
+            }
+            RunFailure::Cancelled => ProbeError::Cancelled,
+            other => ProbeError::Unreadable(other.to_string()),
+        })?;
 
     from_json(path, &output.stdout)
 }

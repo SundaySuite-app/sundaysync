@@ -190,6 +190,75 @@ Regression test: `a_grandchild_holding_the_pipe_cannot_extend_the_timeout`, whic
 behaviour. Verified to fail against the old code — it hangs past 45 s — and to pass in
 0.6 s against the fix.
 
+## D-011 — Extraction returns cache handles, not audio; `AnalysisAudio` stays opaque
+
+**Phase 2.** §7.7 requires a memory ceiling independent of shoot length and mentions
+memory-mapping the analysis PCM. Two consequences for the API:
+
+`Extractor::extract_all` populates the cache and returns [`CachedAudio`] *handles*;
+samples are read on demand via `CachedAudio::load()`. Returning the audio itself would
+blow the ceiling on its own — measured at 46.9 KB/s, a twenty-hour day is ~3.4 GB before
+any FFT has allocated. §4.3 correlates one clip against the reference at a time, so that
+is all that ever needs to be resident.
+
+`AnalysisAudio` is opaque, exposing `samples() -> &[f32]`. It holds a `Vec<f32>` today.
+**Memory-mapping is deliberately deferred to Phase 3**, when the FFT access pattern is
+known and can say whether it is needed — and because `memmap2::Mmap::map` is `unsafe`,
+which collides with the `unsafe_code = "forbid"` lint set in Phase 0. Adopting mmap means
+relaxing that to `deny` plus a narrowly-scoped `#[allow]`. Making that trade now, before
+there is a measured reason, would be premature. The opaque type means the switch is an
+implementation detail rather than an API break.
+
+## D-012 — Cancellation had to move into `sidecar::run`
+
+**Phase 2.** §7.4 requires cancel to return within 2 s. Through Phase 1 that held for
+free: probing takes ~30 ms, so a token checked between files was indistinguishable from
+one checked continuously.
+
+Extraction breaks that. Decoding a two-hour service takes far longer than two seconds, so
+a token checked only at file boundaries would leave the Cancel button dead for the rest of
+the decode. `sidecar::run` therefore takes a `&CancelToken` and kills the child mid-flight,
+with a new `RunFailure::Cancelled`. Cancellation is checked *before* the deadline in the
+poll loop, so a user who cancelled is told "cancelled" rather than "timed out" even if
+both happened in the same instant.
+
+Threaded through `probe` as `ProbeError::Cancelled`, which `scan` maps to
+`Error::Cancelled` — deliberately **not** to `decode_error`, which would slander the
+user's media for the crime of stopping the run.
+
+## D-013 — Cache footprint: the per-second figure holds; the growth over time is unmanaged
+
+**Phase 2, measured.** §4.2 estimates "~48 KB/s ≈ 1–2 % of source size" and tells the UI
+to present this as a non-issue. Measured on 180 minutes of audio across 5 files:
+
+| | |
+| --- | --- |
+| Cache rate | **46.9 KB per audio-second** — confirms the plan's ~48 KB/s |
+| Cold extract | 7.1 s (peak concurrency 4, matching the §4.2 cap) |
+| Warm extract | sub-millisecond, 0 ffmpeg processes |
+| Cache for 3 h of audio | **518 MB** |
+
+**The ratio claim is fine for real camera footage** — at 25–100 Mbit/s, 46.9 KB/s is
+0.4–1.5 % of source, so a video-dominated shoot lands where the plan says. (An earlier
+check against a synthetic `testsrc` clip suggested ~35 %, but that is meaningless:
+`testsrc` compresses to roughly a hundredth of real sensor footage.)
+
+**Two caveats the plan's framing misses, both about audio-only inputs:**
+
+1. The ratio inverts for the recorder feed, which is usually the *longest* file and hence
+   usually the reference (§4.4). Against a WAV feed the cache is ~16 % of source; against
+   FLAC ~33 %; against a compressed `.m4a` feed it is **~290 %** — several times the
+   source it came from.
+2. **There is no eviction policy, and the plan does not mention one.** The cache grows by
+   ~169 MB per audio-hour and nothing ever removes it. A church syncing a weekly service
+   accumulates tens of GB over a year, silently.
+
+Neither blocks Phase 2, and neither is a correctness problem. Both are **inputs to Phase
+8** (advanced mode owns the cache directory setting) **and Phase 7's UI copy** — the
+tooltip §4.2 asks for should not flatly call this negligible without showing the actual
+number. Flagged rather than fixed here because sizing an eviction policy is a product
+decision, not an engineering one.
+
 ## D-009 — Dotfiles are skipped during the scan walk
 
 **Phase 1.** §4.1 says "reject nothing by extension", and that is honoured — no
