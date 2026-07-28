@@ -1,0 +1,87 @@
+# Build and publish downloadable test installers on a version tag.
+#
+# Cut a release:
+#   git tag vX.Y.Z && git push origin vX.Y.Z
+#
+# The tag triggers builds on macOS (Apple Silicon) and Windows, and publishes a
+# GitHub Release with the installers attached.
+#
+# ── STATUS: TEST BUILDS, deliberately unsigned ─────────────────────────────────
+# Phase 9 (PLAN §11) owns signing, notarization and the updater — all gated on
+# owner-held certificates and keys. Until then these artifacts are for testing:
+#
+#   macOS:   Gatekeeper will block the unsigned app. Right-click → Open (once),
+#            or: xattr -cr /Applications/SundaySync.app
+#   Windows: SmartScreen will warn. "More info" → "Run anyway".
+#
+# Testers also need ffmpeg on PATH (brew install ffmpeg / winget install ffmpeg)
+# — bundling the sidecar is likewise Phase 9 (§10). The app's onboarding checks
+# for it and says exactly this.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-latest is Apple Silicon. An Intel/universal build is a Phase 9
+          # follow-up (SundayRec's release does the same and grew universal later).
+          - platform: macos-latest
+          - platform: windows-latest
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./app/src-tauri -> target"
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      # tauri-action builds the bundle and attaches it to a draft-free prerelease.
+      # No signing secrets exist yet, so it produces unsigned installers (see header).
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: "SundaySync ${{ github.ref_name }} (test build)"
+          releaseBody: |
+            **Testbygg — usignert.** Se README for hva appen gjør.
+
+            **macOS:** Gatekeeper blokkerer usignerte apper. Høyreklikk → Åpne første gang,
+            eller kjør `xattr -cr /Applications/SundaySync.app`.
+            **Windows:** SmartScreen advarer — «Mer info» → «Kjør likevel».
+
+            **Krav:** ffmpeg på PATH (`brew install ffmpeg` / `winget install ffmpeg`).
+            Appen sjekker dette i introduksjonen og sier fra om det mangler.
+
+            ---
+            **Test build — unsigned.** macOS: right-click → Open the first time, or
+            `xattr -cr /Applications/SundaySync.app`. Windows: SmartScreen → "More info"
+            → "Run anyway". Requires ffmpeg on PATH; the app's onboarding checks for it.
+          prerelease: true
