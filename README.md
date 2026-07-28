@@ -6,9 +6,15 @@ press Sync, and get a synchronized timeline out as FCPXML for **DaVinci Resolve*
 No timecode required. No cloud, no accounts, no telemetry: everything runs locally, and
 it is free, like the rest of the Sunday suite.
 
-> **Status: Phase 0 of 9.** The engine is scaffolding — the result contract is defined
-> and stable, the pipeline behind it is not implemented yet. See
-> [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: engine complete and Resolve-verified; desktop app in test.**
+> Download a test build from the
+> [releases page](https://github.com/SundaySuite-app/sundaysync/releases) —
+> unsigned for now, so macOS needs right-click → Open the first time
+> (or `xattr -cr /Applications/SundaySync.app`), and Windows needs
+> SmartScreen's "More info" → "Run anyway". **Requires ffmpeg on PATH**
+> (`brew install ffmpeg` / `winget install ffmpeg`); the app's onboarding
+> checks and tells you. Details in [`docs/STATUS.md`](docs/STATUS.md) and
+> [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md).
 
 ## What it is for
 
