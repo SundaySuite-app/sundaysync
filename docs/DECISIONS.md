@@ -1152,9 +1152,13 @@ machine — the SundayRec "consent covers what is sent" rule.
 persists to JSON under the app data dir. `reqwest` is pinned to `native-tls` so the license
 allow-list (cargo-deny) stays satisfied.
 
-**Worker dependency (E8).** The shared Worker does **not yet** accept sundaysync payloads — its
-validator's key list is closed, so every sundaysync send is a permanent 400 until E8 ships the app
-dimension + sundaysync validator + tables. That is by design (client built in E7, Worker taught in
+**Worker dependency (E8).** The shared Worker does **not yet** accept sundaysync payloads until
+E8's branch merges and deploys. *(Amended same day, owner-directed:)* the client now posts to the
+app registry's **app-scoped door** — `POST /v1/apps/sundaysync/ingest` and
+`DELETE /v1/apps/sundaysync/install/:id` with the `x-write-key` header (`WRITE_KEY_SUNDAYSYNC`
+Worker-side) — matching the `audit/wire-seams` app-dimension foundation the owner chose as the
+shared layer, rather than the frozen legacy `/v1/ingest` alias (which means "sundayrec" and would
+400 this payload). That is by design (client built in E7, Worker taught in
 E8); the client logs the 400 locally and sends nothing in production until a release ships against a
 deployed Worker. **E8 status:** a Worker branch (`e8/sundaysync-app-dimension` in the sunday-telemetry
 repo) is built and tested but **parked, not merged, not deployed** — it collides with concurrent
