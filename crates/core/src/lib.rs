@@ -52,7 +52,7 @@ pub use result::{
     UnsyncedReason, Warning, SCHEMA_VERSION,
 };
 pub use scan::{scan, FileEntry, ScanManifest};
-pub use sidecar::Sidecar;
+pub use sidecar::{Sidecar, SidecarSource};
 use std::path::PathBuf;
 
 /// Fallback sequence frame rate when no video input established one (§6).
@@ -95,7 +95,13 @@ pub fn sync_with_durations(
         return Err(Error::Cancelled);
     }
 
-    let sidecar = Sidecar::from_path()?;
+    // The shell supplies its bundled pair (already verified); everyone else resolves
+    // from this machine. D-031.
+    let sidecar = request
+        .sidecar
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(Sidecar::from_path)?;
 
     // Resolved before scanning so the walk can skip it: a cache placed inside a dropped
     // folder would otherwise be scanned as media on the next run (D-020).

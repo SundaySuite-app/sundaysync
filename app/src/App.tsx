@@ -27,7 +27,7 @@ import { mapEngineError } from "./errors";
 import { detectLang, dictionaries, type Lang } from "./i18n";
 import { getSettings, saveSettings } from "./settings";
 import { initialState, reducer } from "./state";
-import type { ProgressEvent, ScanManifest, SyncOutcome } from "./types";
+import type { ProgressEvent, ScanManifest, SidecarStatus, SyncOutcome } from "./types";
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -46,7 +46,7 @@ export function App() {
 
   // ffmpeg check up front, so the warning shows before the user drops 40 GB in.
   useEffect(() => {
-    invoke<string>("check_sidecar")
+    invoke<SidecarStatus>("check_sidecar")
       .then(() => dispatch({ type: "sidecar/checked", ok: true }))
       .catch(() => dispatch({ type: "sidecar/checked", ok: false }));
   }, []);

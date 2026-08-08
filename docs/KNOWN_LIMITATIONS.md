@@ -40,6 +40,16 @@ the run is decode-bound, which stops being true at that scale. The known fix is 
 coarse search followed by a narrow refine. Deferred until the Phase 6 corpus shows whether
 it bites in practice.
 
+## The installer is large, because ffmpeg is inside it
+
+Since v0.1.2 the app ships its own ffmpeg and ffprobe (D-031), so there is **nothing to
+install alongside it** — the earlier "requires ffmpeg on PATH" instruction is gone, along
+with the bug where a GUI app could not see a perfectly good Homebrew install. The price is
+size: **~60 MB downloaded, ~135 MB installed** on macOS, of which 131 MB is the ffmpeg
+pair. That supersedes PLAN §10's "< 40 MB excluding ffmpeg" budget, which only ever
+described the part of the download the user did not have to think about. The app's own
+code is 10 MB.
+
 ## The analysis cache grows without bound
 
 Roughly 169 MB per hour of audio, and nothing removes it. A church syncing weekly will

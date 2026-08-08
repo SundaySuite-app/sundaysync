@@ -1,9 +1,11 @@
 {
   "name": "sundaysync",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
+    "ffmpeg": "node scripts/fetch-ffmpeg.mjs",
+    "pretauri": "node scripts/fetch-ffmpeg.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

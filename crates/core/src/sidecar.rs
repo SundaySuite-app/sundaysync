@@ -16,9 +16,10 @@
 
 use crate::error::{Error, Result};
 use crate::progress::CancelToken;
+use serde::Serialize;
 use std::ffi::OsStr;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -29,15 +30,33 @@ pub const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 /// ~30 ms ffprobe run, large enough not to spin a core.
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
+/// Where a resolved [`Sidecar`] came from.
+///
+/// Provenance, not configuration: the UI says "innebygd" or names the system binary, and
+/// a diagnostics bundle records which one actually ran. Deliberately **not** part of the
+/// frozen §5 schema — it never enters `SyncResult`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidecarSource {
+    /// Shipped inside the application bundle (D-031). Resolved by the Tauri shell, which
+    /// hands the pair down through [`crate::SyncRequest::sidecar`] — the engine itself
+    /// stays Tauri-free (D-023).
+    Bundled,
+    /// Found on the user's machine, via `PATH` or one of [`fallback_candidates`].
+    System,
+}
+
 /// Locations of the ffmpeg and ffprobe binaries.
 ///
-/// Bare command names resolve through `PATH`, which is what a development checkout and
-/// CI both want. Phase 7 will construct this with absolute paths to the bundled
-/// per-platform sidecars instead (§10) — hence the explicit constructor.
+/// Bare command names resolve through `PATH`, which is what a development checkout, the
+/// CLI and CI all want. The desktop app instead constructs this with absolute paths to
+/// the sidecars bundled next to the executable (D-031), via [`Sidecar::verified`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sidecar {
     pub ffmpeg: PathBuf,
     pub ffprobe: PathBuf,
+    /// Which of the two resolution routes produced these paths.
+    pub source: SidecarSource,
 }
 
 impl Default for Sidecar {
@@ -45,39 +64,118 @@ impl Default for Sidecar {
         Self {
             ffmpeg: PathBuf::from("ffmpeg"),
             ffprobe: PathBuf::from("ffprobe"),
+            source: SidecarSource::System,
         }
     }
 }
 
+/// Directories searched when bare `ffmpeg`/`ffprobe` do not resolve, in priority order.
+///
+/// # Why this list exists at all
+///
+/// macOS hands a GUI application a minimal environment — `PATH` is
+/// `/usr/bin:/bin:/usr/sbin:/sbin`, with none of the directories a shell's login profile
+/// would have added. A Homebrew ffmpeg lives in `/opt/homebrew/bin` (Apple Silicon) or
+/// `/usr/local/bin` (Intel), and MacPorts uses `/opt/local/bin`; none of them are visible
+/// to a double-clicked `.app`. The v0.1.0 release reported "ffmpeg was not found" on the
+/// owner's own machine, where ffmpeg was installed and worked perfectly from a terminal —
+/// the development build had only ever seen the terminal's inherited `PATH`.
+///
+/// Order is homebrew-arm, homebrew-intel, MacPorts: most-likely first, and stable so the
+/// resolution is reproducible rather than dependent on filesystem iteration order.
+/// Unix-only; on Windows a bare-name lookup already covers the installers people use.
+#[must_use]
+pub fn fallback_candidates() -> Vec<PathBuf> {
+    if cfg!(unix) {
+        vec![
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/opt/local/bin"),
+        ]
+    } else {
+        Vec::new()
+    }
+}
+
+/// `<bin> -version` exits 0 — the cheapest proof this is a real, runnable executable for
+/// this architecture, rather than a name that merely exists on disk.
+fn runnable(bin: &Path) -> bool {
+    Command::new(bin)
+        .arg("-version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Bare name first (the `PATH` lookup), then each [`fallback_candidates`] directory.
+fn resolve_one(name: &str) -> Option<PathBuf> {
+    let bare = PathBuf::from(name);
+    if runnable(&bare) {
+        return Some(bare);
+    }
+    fallback_candidates()
+        .into_iter()
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file() && runnable(candidate))
+}
+
 impl Sidecar {
+    /// A pair of paths, taken on trust. Use [`Sidecar::verified`] when the caller wants
+    /// the pair checked first.
     #[must_use]
     pub fn new(ffmpeg: PathBuf, ffprobe: PathBuf) -> Self {
-        Self { ffmpeg, ffprobe }
+        Self {
+            ffmpeg,
+            ffprobe,
+            source: SidecarSource::System,
+        }
     }
 
-    /// Resolves the binaries from `PATH` and verifies both actually run.
+    /// Resolves the binaries from the user's machine and verifies both actually run.
     ///
     /// Checked eagerly so a missing ffmpeg is one clear [`Error::SidecarUnavailable`]
     /// at startup, rather than every single input file failing with `decode_error` and
     /// the user concluding their whole shoot is corrupt.
+    ///
+    /// Resolution order per binary: the bare name (a `PATH` lookup), then each directory
+    /// in [`fallback_candidates`]. The fallback exists because macOS gives a GUI app a
+    /// minimal `PATH` that omits Homebrew — see that function's documentation for the
+    /// full diagnosis.
     pub fn from_path() -> Result<Self> {
-        let sidecar = Self::default();
-        for bin in [&sidecar.ffprobe, &sidecar.ffmpeg] {
-            let ok = Command::new(bin)
-                .arg("-version")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if !ok {
+        // ffprobe first: it is the binary the very first stage (§4.1) needs, so a
+        // half-installed toolchain names the part that would fail soonest.
+        let ffprobe = resolve_one("ffprobe").ok_or_else(|| unavailable("ffprobe"))?;
+        let ffmpeg = resolve_one("ffmpeg").ok_or_else(|| unavailable("ffmpeg"))?;
+        Ok(Self {
+            ffmpeg,
+            ffprobe,
+            source: SidecarSource::System,
+        })
+    }
+
+    /// Verifies an explicitly supplied pair — how the desktop shell hands the engine the
+    /// binaries bundled inside the application (D-031).
+    ///
+    /// Same `-version` check as [`Sidecar::from_path`], so a sidecar that was stripped by
+    /// a quarantine tool, damaged in transit or built for the wrong architecture fails
+    /// here with the offending path named, instead of at every input file.
+    pub fn verified(ffmpeg: PathBuf, ffprobe: PathBuf) -> Result<Self> {
+        for bin in [&ffprobe, &ffmpeg] {
+            if !runnable(bin) {
                 return Err(Error::SidecarUnavailable(format!(
-                    "`{}` could not be run — is ffmpeg installed and on PATH?",
+                    "`{}` could not be run",
                     bin.display()
                 )));
             }
         }
-        Ok(sidecar)
+        Ok(Self {
+            ffmpeg,
+            ffprobe,
+            source: SidecarSource::Bundled,
+        })
     }
 
     /// True if both binaries are runnable. For tests that must skip without ffmpeg.
@@ -85,6 +183,22 @@ impl Sidecar {
     pub fn is_available() -> bool {
         Self::from_path().is_ok()
     }
+}
+
+fn unavailable(name: &str) -> Error {
+    let searched = fallback_candidates()
+        .iter()
+        .map(|d| d.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let where_looked = if searched.is_empty() {
+        "PATH".to_string()
+    } else {
+        format!("PATH, {searched}")
+    };
+    Error::SidecarUnavailable(format!(
+        "`{name}` could not be run — searched {where_looked}. Is ffmpeg installed?"
+    ))
 }
 
 /// What a finished child process produced.
@@ -251,6 +365,69 @@ fn drain<R: Read>(pipe: Option<R>) -> Vec<u8> {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn fallback_candidates_are_the_gui_invisible_dirs_in_priority_order() {
+        // Asserted as a pure function rather than through `from_path`, because CI has
+        // none of these directories and the machine that has them has ffmpeg on PATH
+        // anyway — neither environment can observe the ordering by behaviour alone.
+        let dirs = fallback_candidates();
+        if cfg!(unix) {
+            assert_eq!(
+                dirs,
+                vec![
+                    PathBuf::from("/opt/homebrew/bin"),
+                    PathBuf::from("/usr/local/bin"),
+                    PathBuf::from("/opt/local/bin"),
+                ],
+                "homebrew-arm, homebrew-intel, MacPorts — most likely first, and stable"
+            );
+        } else {
+            assert!(dirs.is_empty(), "the GUI-PATH gap is a unix phenomenon");
+        }
+    }
+
+    #[test]
+    fn verified_rejects_paths_that_do_not_run() {
+        let err = Sidecar::verified(
+            PathBuf::from("/definitely/not/a/real/ffmpeg"),
+            PathBuf::from("/definitely/not/a/real/ffprobe"),
+        )
+        .unwrap_err();
+        // The failing path is named: a bundled sidecar that did not survive packaging
+        // must be diagnosable from the message alone.
+        assert!(
+            err.to_string().contains("/definitely/not/a/real/ffprobe"),
+            "expected the offending path in the error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn verified_marks_its_pair_bundled_and_from_path_marks_system() {
+        // `/bin/sh -version` is not a thing, so this uses whatever real binaries the
+        // machine has; skip where there are none, exactly like the accuracy harness.
+        let Ok(system) = Sidecar::from_path() else {
+            eprintln!("SKIP: no ffmpeg on this machine");
+            return;
+        };
+        assert_eq!(system.source, SidecarSource::System);
+
+        let bundled = Sidecar::verified(system.ffmpeg.clone(), system.ffprobe.clone()).unwrap();
+        assert_eq!(bundled.source, SidecarSource::Bundled);
+        assert_eq!(bundled.ffmpeg, system.ffmpeg);
+    }
+
+    #[test]
+    fn source_serialises_as_the_lowercase_word_the_ui_switches_on() {
+        assert_eq!(
+            serde_json::to_string(&SidecarSource::Bundled).unwrap(),
+            "\"bundled\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SidecarSource::System).unwrap(),
+            "\"system\""
+        );
+    }
 
     #[test]
     fn missing_binary_is_a_spawn_failure_not_a_panic() {

@@ -11,9 +11,9 @@ it is free, like the rest of the Sunday suite.
 > [releases page](https://github.com/SundaySuite-app/sundaysync/releases) —
 > unsigned for now, so macOS needs right-click → Open the first time
 > (or `xattr -cr /Applications/SundaySync.app`), and Windows needs
-> SmartScreen's "More info" → "Run anyway". **Requires ffmpeg on PATH**
-> (`brew install ffmpeg` / `winget install ffmpeg`); the app's onboarding
-> checks and tells you. Details in [`docs/STATUS.md`](docs/STATUS.md) and
+> SmartScreen's "More info" → "Run anyway". **ffmpeg is bundled** — nothing
+> to install alongside it (~60 MB download, ~135 MB installed; D-031), and
+> onboarding self-tests it. Details in [`docs/STATUS.md`](docs/STATUS.md) and
 > [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md).
 
 ## What it is for
@@ -40,7 +40,9 @@ docs/               PLAN.md (source of truth), DECISIONS.md, STATUS.md.
 
 ## Development
 
-Requires a stable Rust toolchain and `ffmpeg` + `ffprobe` on `PATH`.
+Requires a stable Rust toolchain and `ffmpeg` + `ffprobe` reachable — on `PATH`, or in
+`/opt/homebrew/bin`, `/usr/local/bin` or `/opt/local/bin` (D-031). The *shipped app*
+bundles its own; `npm run ffmpeg` in `app/` fetches the pair a bundle needs.
 
 ```bash
 cargo test --workspace

@@ -96,6 +96,62 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  # The Tauri shell (app/src-tauri) is its own workspace, excluded from the root one
+  # (D-023), so `cargo …--workspace` above never sees it. That meant the nine
+  # #[tauri::command] functions, the AppState lock handling and the EventSink throttle
+  # got zero clippy and zero tests on push — E2's stability explorer flagged it (F16) as
+  # the cheapest high-value gap. This job closes it: the shell now gets fmt + clippy +
+  # test on every push, which directly guards the sidecar-resolution work E1 added here.
+  shell:
+    name: Shell (app/src-tauri)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "app/src-tauri -> target"
+
+      # Tauri needs the system webview + GTK libs to compile on Linux. No ALSA here —
+      # unlike SundayRec, this shell has no audio backend of its own; ffmpeg is a sidecar.
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev
+
+      # `tauri-build` validates that every `externalBin` file exists — even for a plain
+      # `cargo clippy`/`test` that never bundles anything (a known suite gotcha). Fetching
+      # the real 130 MB ffmpeg pair on every push just to satisfy an existence check would
+      # be wasteful, so stub the two sidecars with the exact target-triple names the
+      # config expects. They are never executed by clippy or the shell's unit tests.
+      - name: Stub ffmpeg sidecars for the existence check
+        run: |
+          mkdir -p app/src-tauri/binaries
+          triple=x86_64-unknown-linux-gnu
+          for bin in ffmpeg ffprobe; do
+            printf '#!/bin/sh\nexit 0\n' > "app/src-tauri/binaries/$bin-$triple"
+            chmod +x "app/src-tauri/binaries/$bin-$triple"
+          done
+
+      - name: Format
+        working-directory: app/src-tauri
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        working-directory: app/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        working-directory: app/src-tauri
+        run: cargo test
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

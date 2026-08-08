@@ -640,3 +640,75 @@ entries that look like real failures and bury the ones that are.
 genuine media with audio and would appear as a phantom extra device. Filtering them would
 mean rejecting by extension, which §4.1 forbids. Left for the Phase 6 corpus to judge on
 real footage rather than guessed at now.
+
+## D-031 — ⚠️ ffmpeg is bundled; resolution order is bundled → PATH → GUI-fallback dirs
+
+**v0.2 stage E1.** The v0.1.0 test build told the owner "ffmpeg ble ikke funnet" on a
+machine where ffmpeg was installed and worked perfectly from a terminal.
+
+**The diagnosis.** macOS hands a GUI application a minimal environment. A double-clicked
+`.app` gets `PATH=/usr/bin:/bin:/usr/sbin:/sbin` — none of the directories a login shell's
+profile would have added. Homebrew installs ffmpeg into `/opt/homebrew/bin` (Apple
+Silicon) or `/usr/local/bin` (Intel), MacPorts into `/opt/local/bin`; a GUI app sees none
+of them. The development build had never shown the bug because `tauri dev` is launched
+from a terminal and inherits its `PATH`. **The lesson generalises to the whole suite: a
+desktop app must never assume the environment its developer's shell has.**
+
+**The fix has two halves.**
+
+1. *Hotfix.* `Sidecar::from_path` now resolves each binary as bare name (the `PATH`
+   lookup) first, then walks `fallback_candidates()` — `/opt/homebrew/bin`,
+   `/usr/local/bin`, `/opt/local/bin`, unix-only, in that fixed order. Ten lines that
+   unblock every current tester with an installed ffmpeg. Verified: with
+   `PATH=/usr/bin:/bin:/usr/sbin:/sbin` the CLI now resolves `/opt/homebrew/bin/ffmpeg`
+   and syncs, where before it aborted.
+2. *Bundling.* `app/scripts/fetch-ffmpeg.mjs` (ported from SundayRec, same pins) fetches
+   SHA-256-pinned static builds into `app/src-tauri/binaries/ffmpeg-<target-triple>`, and
+   `tauri.conf.json`'s `bundle.externalBin` puts them next to the app executable. The
+   shell resolves `current_exe()/../ffmpeg` first, verifies the pair, and only then falls
+   back to the user's machine. Nothing to install by hand.
+
+**Why the engine stays Tauri-free (D-023 upheld).** `crates/core` cannot ask where the
+application bundle is — that is a shell question. So `SyncRequest` gained
+`sidecar: Option<Sidecar>`: the shell resolves and verifies the bundled pair, and hands
+the engine two absolute paths. `None` keeps the old behaviour (resolve from this machine),
+which is what the CLI, the tests and `bench` use. `Sidecar` also gained a
+`source: SidecarSource` field — `Bundled` or `System` — pure provenance, shown in
+onboarding and the diagnostics bundle. Like `SyncRequest` itself, it is **not** part of
+the frozen §5 schema; it never enters `SyncResult` (D-028's rule, applied again).
+
+`check_sidecar` re-resolves on every call rather than reading the cached value, so
+onboarding's "check again" button tells the truth for a user who installs ffmpeg while the
+app is open. In `tauri dev` there are no binaries next to `target/debug/sundaysync-app`;
+that case is silent by design (the absent-file check happens before any verification), and
+only a *present but unusable* sidecar logs.
+
+**Licensing: GPL, unchanged from SundayRec.** The macOS/Linux builds come from
+[ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de) (release channel, signed and
+notarized by the publisher) and the Windows build from
+[gyan.dev](https://www.gyan.dev/ffmpeg/builds/) "essentials" — the same two sources, the
+same pinned 8.1.2, and the same obligations SundayRec already documents in its
+`docs/DISTRIBUTION.md`: both are `--enable-gpl --enable-version3`, nothing is
+`--enable-nonfree`, the GPL covers the redistributed binaries, and anyone handed an
+installer is entitled to the corresponding source — point them at the publisher's build
+page and ffmpeg's own 8.1.2 tarball. URLs are pinned to an exact build id, not "latest",
+so a rebuild a year from now fetches the same bytes; both the archive and the unpacked
+binary are SHA-256-pinned (`app/scripts/ffmpeg-checksums.json`), and a mismatch fails the
+build rather than shipping.
+
+**⚠️ The §10 installer budget is superseded.** §10 says "< 40 MB per platform *excluding*
+ffmpeg", which was always a number that hid the real download. Measured on this machine
+(aarch64-apple-darwin, 2026-08-08):
+
+| | v0.1.0 | v0.1.2 |
+| --- | --- | --- |
+| DMG | **3.8 MB** | **60.3 MB** |
+| `SundaySync.app` on disk | ~13 MB | **135 MB** |
+| of which ffmpeg + ffprobe | 0 | 131 MB |
+
+The app itself is 10 MB — comfortably inside the old budget. The other 125 MB is ffmpeg 8
+static builds, which are simply large (SundayRec measured the same ~131 MB pair; there is
+no small 8.x static build). **The honest number to quote from here on is ~60 MB
+downloaded, ~135 MB installed**, and it is also what a future updater ships per release.
+Deliberate trade: one 60 MB download beats a manual install step that half of testers get
+wrong and the other half hit this bug on.

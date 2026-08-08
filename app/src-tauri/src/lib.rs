@@ -10,10 +10,46 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use sundaysync_core::{
-    export_fcpxml, sync_with_durations, CancelToken, Progress, ProgressSink, Stage, SyncRequest,
-    SyncResult, DEFAULT_MIN_PSR,
+    export_fcpxml, sync_with_durations, CancelToken, Progress, ProgressSink, Sidecar,
+    SidecarSource, Stage, SyncRequest, SyncResult, DEFAULT_MIN_PSR,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+
+/// Where the bundled ffmpeg/ffprobe live, if this build has them.
+///
+/// Tauri 2 places `externalBin` sidecars **next to the app executable** and strips the
+/// target-triple suffix at bundle time, so `binaries/ffmpeg-aarch64-apple-darwin` in the
+/// source tree becomes `SundaySync.app/Contents/MacOS/ffmpeg` in the product.
+///
+/// Returns `None` when they are simply not there, which is the normal `tauri dev` case —
+/// nothing is fetched into `target/debug/`, and the PATH route covers development. Silent
+/// on purpose: an error log for the expected case trains people to ignore the log.
+fn bundled_pair() -> Option<(PathBuf, PathBuf)> {
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    let ffmpeg = dir.join(format!("ffmpeg{ext}"));
+    let ffprobe = dir.join(format!("ffprobe{ext}"));
+    (ffmpeg.is_file() && ffprobe.is_file()).then_some((ffmpeg, ffprobe))
+}
+
+/// Resolution order, D-031: **bundled → PATH → the GUI-invisible fallback dirs.**
+///
+/// The last two are the engine's own [`Sidecar::from_path`]; only the first is the
+/// shell's business, because only the shell knows where its own executable is (D-023
+/// keeps the engine Tauri-free, so it cannot look).
+fn resolve_sidecar() -> Result<Sidecar, String> {
+    if let Some((ffmpeg, ffprobe)) = bundled_pair() {
+        match Sidecar::verified(ffmpeg, ffprobe) {
+            Ok(sidecar) => return Ok(sidecar),
+            Err(e) => {
+                // Present but unusable — quarantined, truncated, wrong architecture.
+                // Worth saying out loud, unlike the absent case above.
+                eprintln!("bundled ffmpeg is unusable ({e}); falling back to the system one");
+            }
+        }
+    }
+    Sidecar::from_path().map_err(|e| e.to_string())
+}
 
 /// Progress as the frontend sees it.
 #[derive(Debug, Clone, Serialize)]
@@ -99,6 +135,26 @@ struct AppState {
     /// touch a sync in flight.
     scan_cancel: Arc<Mutex<Option<CancelToken>>>,
     last: Arc<Mutex<Option<LastRun>>>,
+    /// The ffmpeg/ffprobe pair every command decodes with, resolved once at startup
+    /// (D-031). `None` means resolution failed — a user who installs ffmpeg while the
+    /// app is open gets a fresh attempt from `check_sidecar` without restarting.
+    sidecar: Arc<Mutex<Option<Sidecar>>>,
+}
+
+impl AppState {
+    /// The stored sidecar, resolving and caching it if startup could not.
+    fn sidecar(&self) -> Result<Sidecar, String> {
+        if let Ok(slot) = self.sidecar.lock() {
+            if let Some(sidecar) = slot.as_ref() {
+                return Ok(sidecar.clone());
+            }
+        }
+        let resolved = resolve_sidecar()?;
+        if let Ok(mut slot) = self.sidecar.lock() {
+            *slot = Some(resolved.clone());
+        }
+        Ok(resolved)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -138,6 +194,10 @@ fn run_sync(
     state: State<'_, AppState>,
     args: RunSyncArgs,
 ) -> Result<SyncOutcome, String> {
+    // Resolved before the token is installed: a missing ffmpeg should not leave a cancel
+    // handle pointing at a run that never started.
+    let sidecar = state.sidecar()?;
+
     let cancel = CancelToken::new();
     if let Ok(mut slot) = state.cancel.lock() {
         *slot = Some(cancel.clone());
@@ -151,6 +211,7 @@ fn run_sync(
         min_psr: args.min_psr.unwrap_or(DEFAULT_MIN_PSR),
         device_overrides: args.device_overrides.unwrap_or_default(),
         segment_count: args.segment_count.unwrap_or(defaults.segment_count),
+        sidecar: Some(sidecar),
     };
 
     let sink = EventSink::new(app, "sync:progress");
@@ -188,6 +249,8 @@ fn scan_inputs(
     inputs: Vec<PathBuf>,
     cache_dir: Option<PathBuf>,
 ) -> Result<sundaysync_core::ScanManifest, String> {
+    let sidecar = state.sidecar()?;
+
     let cancel = CancelToken::new();
     if let Ok(mut slot) = state.scan_cancel.lock() {
         if let Some(previous) = slot.replace(cancel.clone()) {
@@ -195,7 +258,6 @@ fn scan_inputs(
         }
     }
 
-    let sidecar = sundaysync_core::Sidecar::from_path().map_err(|e| e.to_string())?;
     // Exclude the cache exactly as the pipeline does (D-020) — a user-configured cache
     // inside a dropped folder must not appear as broken media in the preview either.
     let exclude = cache_dir.or_else(|| sundaysync_core::Cache::default_dir().ok());
@@ -301,9 +363,13 @@ fn export_diagnostics(state: State<'_, AppState>, path: PathBuf) -> Result<(), S
         .lock()
         .map_err(|_| "internal state was poisoned".to_string())?;
 
-    let ffmpeg = sundaysync_core::Sidecar::from_path()
-        .map(|s| format!("{} / {}", s.ffmpeg.display(), s.ffprobe.display()))
-        .unwrap_or_else(|e| format!("unavailable: {e}"));
+    let (ffmpeg, ffmpeg_source) = match state.sidecar() {
+        Ok(s) => (
+            format!("{} / {}", s.ffmpeg.display(), s.ffprobe.display()),
+            source_word(s.source).to_string(),
+        ),
+        Err(e) => (format!("unavailable: {e}"), "none".to_string()),
+    };
 
     let report = serde_json::json!({
         "app": env!("CARGO_PKG_VERSION"),
@@ -311,6 +377,7 @@ fn export_diagnostics(state: State<'_, AppState>, path: PathBuf) -> Result<(), S
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
         "ffmpeg": ffmpeg,
+        "ffmpeg_source": ffmpeg_source,
         "default_min_psr": DEFAULT_MIN_PSR,
         "default_segment_count": sundaysync_core::correlate::SEGMENT_COUNT,
         "analysis_rate": sundaysync_core::ANALYSIS_RATE,
@@ -324,12 +391,39 @@ fn export_diagnostics(state: State<'_, AppState>, path: PathBuf) -> Result<(), S
     .map_err(|e| e.to_string())
 }
 
+/// What the onboarding self-test reports: which ffmpeg is in use, and from where.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SidecarStatus {
+    /// `"bundled"` or `"system"`.
+    source: String,
+    /// Absolute path to the ffmpeg binary, so the honest answer is showable.
+    path: String,
+}
+
+fn source_word(source: SidecarSource) -> &'static str {
+    match source {
+        SidecarSource::Bundled => "bundled",
+        SidecarSource::System => "system",
+    }
+}
+
 /// Whether ffmpeg is reachable, so the UI can say so before the user drops 40 GB of media.
+///
+/// **Re-resolves on every call** rather than reading the cached value: onboarding's "check
+/// again" button exists precisely for the user who installs ffmpeg while the app is open,
+/// and a cached failure would make that button lie. The freshly resolved pair replaces
+/// what the state holds, so the next sync uses what the check just proved.
 #[tauri::command]
-fn check_sidecar() -> Result<String, String> {
-    sundaysync_core::Sidecar::from_path()
-        .map(|s| s.ffmpeg.display().to_string())
-        .map_err(|e| e.to_string())
+fn check_sidecar(state: State<'_, AppState>) -> Result<SidecarStatus, String> {
+    let resolved = resolve_sidecar()?;
+    if let Ok(mut slot) = state.sidecar.lock() {
+        *slot = Some(resolved.clone());
+    }
+    Ok(SidecarStatus {
+        source: source_word(resolved.source).to_string(),
+        path: resolved.ffmpeg.display().to_string(),
+    })
 }
 
 /// The engine's default cache location, for advanced mode to display.
@@ -345,7 +439,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            app.manage(AppState::default());
+            // Resolved once, eagerly: the first sync should not pay for two `-version`
+            // spawns, and a failure here is not fatal — the state stays empty and every
+            // command (plus onboarding's re-check) tries again on demand.
+            let state = AppState::default();
+            match resolve_sidecar() {
+                Ok(sidecar) => {
+                    if let Ok(mut slot) = state.sidecar.lock() {
+                        *slot = Some(sidecar);
+                    }
+                }
+                Err(e) => eprintln!("ffmpeg could not be resolved at startup: {e}"),
+            }
+            app.manage(state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
