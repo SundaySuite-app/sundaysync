@@ -1,0 +1,54 @@
+# cargo-fuzz harness for the parsers fed by untrusted files (S-E3, docs/DECISIONS.md
+# D-032). Deliberately its OWN workspace (the empty `[workspace]` below), so the root
+# `cargo build/clippy/test --workspace` never descends here — exactly how `app/src-tauri`
+# is kept out of the per-push gate. cargo-fuzz requires this detachment anyway.
+[package]
+name = "sundaysync-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# The engine under test, with its fuzz-only door opened (probe::fuzz_from_json).
+sundaysync-core = { path = "../crates/core", features = ["fuzzing"] }
+# Optional so a plain stable `cargo build` compiles the targets as ordinary smoke-runner
+# binaries with no libFuzzer/C++ build. A cargo-fuzz run enables it: see fuzz/README.md.
+libfuzzer-sys = { version = "0.4", optional = true }
+
+[features]
+libfuzzer = ["dep:libfuzzer-sys"]
+
+# `fuzzing` is set by cargo-fuzz via RUSTFLAGS (`--cfg fuzzing`), not a Cargo feature, so
+# tell rustc it is expected — otherwise `-D warnings` trips the unexpected_cfgs lint on it.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
+# Release with debug info is what cargo-fuzz builds; harmless for the stable smoke build.
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "probe_from_json"
+path = "fuzz_targets/probe_from_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_iso8601_epoch"
+path = "fuzz_targets/parse_iso8601_epoch.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rational_parse"
+path = "fuzz_targets/rational_parse.rs"
+test = false
+doc = false
+bench = false

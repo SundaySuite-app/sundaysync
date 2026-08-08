@@ -21,13 +21,13 @@ jobs:
     name: Lint, clippy & test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # The engine shells out to ffmpeg/ffprobe for every probe and every audio
       # extraction (§4.1, §4.2). Installed from apt here rather than bundled as a
@@ -90,9 +90,9 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Test
         run: cargo test --workspace
 
@@ -106,11 +106,11 @@ jobs:
     name: Shell (app/src-tauri)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: "app/src-tauri -> target"
 
@@ -156,9 +156,60 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked
           cargo audit
+
+  # docs/V02-PROGRAM.md E3 / S-9a: license hygiene + duplicate-dependency visibility +
+  # RustSec advisory enforcement, on top of cargo audit above. Two `cargo deny check`
+  # invocations because app/src-tauri is its own workspace (D-023) with a much larger
+  # dependency tree (Tauri + webview plumbing) than the root engine/CLI workspace;
+  # cargo-deny walks up from cwd to find the single repo-root deny.toml, so both reuse
+  # it without --config. `-W unmaintained` is required, not cosmetic — see deny.toml's
+  # header comment for why (no in-file severity knob for that diagnostic; actual
+  # vulnerabilities stay hard errors regardless of this flag).
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: cargo deny check (root workspace)
+        run: cargo deny check -W unmaintained
+      - name: cargo deny check (app/src-tauri workspace)
+        working-directory: app/src-tauri
+        run: cargo deny check -W unmaintained
+
+  # docs/V02-PROGRAM.md E3 / S-9b: npm audit alongside cargo audit/deny above.
+  #
+  # `--omit=dev` gates the SHIPPED dependency tree, not the build/test tooling. This is a
+  # deliberate scoping decision (conductor, E3): the current advisories all live in the
+  # vitest → vite → esbuild/nanoid DEV chain (vitest-UI arbitrary-file-read, vite
+  # dev-server path traversal, nanoid loop) — none of it reaches the Tauri bundle a user
+  # runs, and `npm audit --omit=dev` reports zero. Their only fix is a semver-major
+  # vitest bump, tracked as a follow-up rather than blocking every push on tooling that
+  # never ships. A `high`-or-worse advisory in an ACTUAL runtime dependency still fails
+  # this job, which is the point. The full dev audit is run separately below, non-blocking,
+  # so the dev advisories stay visible.
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+      - name: npm audit (shipped dependencies)
+        working-directory: app
+        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit (dev tree, informational)
+        working-directory: app
+        run: npm audit --audit-level=high || true

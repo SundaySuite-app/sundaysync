@@ -1,0 +1,87 @@
+# cargo-deny configuration for SundaySync.
+#
+# Two workspaces exist in this repo: the root engine/CLI workspace (crates/core,
+# crates/cli, crates/fixturegen) and app/src-tauri, which is excluded from the root
+# workspace on purpose (docs/DECISIONS.md) and has its own, much larger dependency
+# tree (Tauri + webview plumbing). cargo-deny walks up from cwd to find this file, so
+# both are checked against this same config without needing --config:
+#
+#   cargo deny check -W unmaintained
+#   (cd app/src-tauri && cargo deny check -W unmaintained)
+#
+# The `-W unmaintained` flag is required, not optional: cargo-deny 0.20's advisories
+# config has no in-file severity knob for the "unmaintained" diagnostic (only a Scope
+# — which crates it applies to, not how loud it is), so "deny vulnerabilities, warn on
+# unmaintained" (docs/V02-PROGRAM.md E3 S-9a) has to be expressed as a CLI lint
+# override. Without it, `cargo deny check` in app/src-tauri fails today on transitive
+# unmaintained crates several hops deep in the Linux GTK/webkit2gtk stack
+# (proc-macro-error via glib-macros, the unic-* family via urlpattern) — none reachable
+# from sundaysync's own code, all upstream-of-tauri's choice, not ours to fix here.
+# Actual vulnerabilities (RUSTSEC advisories of type "vulnerability") stay hard errors
+# regardless of this flag — only the "unmaintained" diagnostic code is affected.
+#
+# docs/V02-PROGRAM.md E3 / S-9: cargo audit already runs in CI; this adds license
+# hygiene, duplicate-dependency visibility, and advisory enforcement for RustSec.
+#
+# Note on GPL: the shipped app bundles GPL-licensed ffmpeg/ffprobe *binaries* fetched
+# at build time (scripts/fetch-ffmpeg.mjs) as external sidecar processes invoked over
+# argv — they are not linked into the Rust binary and carry no Cargo dependency entry.
+# GPL is deliberately NOT in the crate license allow-list below; that list covers only
+# crates.io dependencies actually linked into the Rust code.
+
+[graph]
+# Check every target so we don't miss e.g. Windows-only deps in the Tauri workspace.
+all-features = true
+
+[advisories]
+# RustSec advisory database (https://github.com/rustsec/advisory-db).
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# A known, unpatched vulnerability must fail the build.
+yanked = "deny"
+ignore = [
+]
+
+[licenses]
+version = 2
+# Anything not explicitly allowed below fails the check. This is the exact union of
+# licenses `cargo deny list` resolves as REQUIRED (i.e. not satisfiable by an OR
+# alternative already in this list) across both workspaces, verified 2026-08-08:
+#   root workspace (crates/*):        MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception,
+#                                      BSD-2-Clause, CC0-1.0, Unicode-3.0
+#   app/src-tauri workspace:          adds BSD-3-Clause, Zlib, MPL-2.0
+# A few permissive-but-unused-today licenses seen via dual/tri-license OR expressions
+# (e.g. r-efi's "MIT OR Apache-2.0 OR LGPL-2.1-or-later", adler2's "0BSD OR MIT OR
+# Apache-2.0", memchr's "Unlicense OR MIT") resolve through MIT/Apache-2.0 above and
+# do NOT need entries here — cargo-deny only requires ONE side of an OR to be allowed.
+# GPL is deliberately absent: it covers only the external ffmpeg/ffprobe *binaries*
+# fetched at build time (scripts/fetch-ffmpeg.mjs) and run as sidecar processes, never
+# a linked Cargo dependency.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Duplicate transitive versions are noisy in any dependency tree this size (Tauri
+# alone pulls in several generations of windows-sys / syn / etc via unrelated
+# subtrees) and not worth failing the build over yet. Warn so drift is visible without
+# blocking CI; revisit as "deny" once the tree is actively pruned.
+multiple-versions = "warn"
+wildcards = "warn"
+deny = [
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

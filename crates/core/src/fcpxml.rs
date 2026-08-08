@@ -296,12 +296,36 @@ pub fn file_url(path: &Path) -> String {
     out
 }
 
+/// Escapes a string for inclusion in an XML attribute value (§6; S-3 / D-032).
+///
+/// Two jobs. First, the five XML metacharacters are escaped so a filename can never break
+/// out of the attribute it sits in — the injection guard, unchanged and load-bearing.
+///
+/// Second, XML-illegal control characters are stripped. XML 1.0 permits only tab, newline
+/// and carriage return below U+0020; every other C0 control (`0x00–0x08`, `0x0B`, `0x0C`,
+/// `0x0E–0x1F`) is forbidden *even as a numeric character reference*, so a single bell or
+/// NUL in a filename would otherwise yield a non-well-formed document Resolve rejects
+/// wholesale — the silent wrongness §7.5 forbids. Those bytes are dropped. The three legal
+/// whitespace controls are normalised to a plain space, matching how a parser flattens
+/// them inside an attribute value anyway, so a tab or newline in a name cannot introduce a
+/// line break into the attribute.
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            // Legal-but-whitespace controls: normalise to a space.
+            '\t' | '\n' | '\r' => out.push(' '),
+            // XML-illegal C0 controls: not representable at all — drop them.
+            c if (c as u32) < 0x20 => {}
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -533,6 +557,71 @@ mod tests {
             !e.xml.contains("Jerry's <cam>"),
             "raw markup leaked into the file"
         );
+    }
+
+    #[test]
+    fn the_five_injection_chars_are_escaped_and_nothing_breaks_out() {
+        // S-3: the injection guard is unchanged and must stay load-bearing. All five XML
+        // metacharacters map to their entities; no raw metacharacter from the name leaks.
+        let escaped = escape("a & b < c > d \" e ' f");
+        assert_eq!(escaped, "a &amp; b &lt; c &gt; d &quot; e &apos; f");
+        // The raw forms are gone (the entity ampersands are the only `&` left).
+        assert!(!escaped.contains('<'));
+        assert!(!escaped.contains('>'));
+        assert!(!escaped.contains('"'));
+        assert!(!escaped.contains('\''));
+    }
+
+    #[test]
+    fn illegal_control_characters_are_stripped_from_the_escaper() {
+        // S-3: a bell or NUL in a filename must not survive into the document — XML 1.0
+        // forbids these bytes even as a numeric reference, so one of them would make
+        // Resolve reject the whole file (silent wrongness, §7.5).
+        let out = escape("bell\x07nul\x00vt\x0bff\x0cesc\x1bok");
+        // No raw C0 control byte survives at all.
+        assert!(
+            !out.chars().any(|c| (c as u32) < 0x20),
+            "an illegal control byte survived escaping: {out:?}"
+        );
+        // The surrounding text is intact — the chars were dropped, not the words.
+        assert_eq!(out, "bellnulvtffescok");
+    }
+
+    #[test]
+    fn legal_whitespace_controls_normalise_to_spaces() {
+        // Tab/newline/CR are legal in XML but are flattened inside an attribute value; we
+        // normalise them so a name cannot smuggle a line break into an attribute.
+        let out = escape("a\tb\nc\rd");
+        assert_eq!(out, "a b c d");
+        assert!(!out.contains('\t') && !out.contains('\n') && !out.contains('\r'));
+    }
+
+    #[test]
+    fn a_control_char_filename_yields_a_document_with_no_raw_control_bytes() {
+        // The integration form of S-3: a placement whose filename mixes the five
+        // injection chars with illegal control chars must still render a document that
+        // carries no raw control byte anywhere — the property an XML parser checks first.
+        let (mut r, mut d) = sample();
+        let nasty = PathBuf::from("/media/ring\x07ing & <danger>\x00\x1f.mp4");
+        r.placements[1].file = nasty.clone();
+        d.insert(nasty, 35.0);
+        let e = export(&r, &d, "Bell\x07 & Whistle\x00").unwrap();
+
+        // Only the three legal whitespace controls may appear in a well-formed document;
+        // the writer itself emits `\n` between lines, which is legal.
+        let stray: Vec<u32> = e
+            .xml
+            .chars()
+            .map(|c| c as u32)
+            .filter(|&b| b < 0x20 && b != 0x09 && b != 0x0a && b != 0x0d)
+            .collect();
+        assert!(
+            stray.is_empty(),
+            "illegal control bytes reached the document: {stray:?}"
+        );
+        // And the markup from the name did not break out.
+        assert!(!e.xml.contains("<danger>"));
+        assert!(e.xml.contains("&amp;"));
     }
 
     #[test]

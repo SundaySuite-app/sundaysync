@@ -324,7 +324,17 @@ cache/telemetry retention verification, UNVERIFIED-list burn-down.
 - [x] **E2 Mapping — 2026-08-08.** Three explorers (security / stability / backend-perf),
       ~30 findings, backlog written into E3–E5 below. Convergent findings (flagged by two
       independent explorers) carry the highest confidence.
-- [ ] E3 Security hardening
+- [x] **E3 Security hardening — 2026-08-08.** S-1/S-2 ffmpeg/ffprobe protocol whitelist
+      (`-protocol_whitelist file` + `-i` guard) — proven to block the SSRF/local-file
+      vector via a test that forces `-f hls` and asserts ffprobe refuses `http`; S-3 FCPXML
+      control-char stripping; S-5 export path validation; S-6 diagnostics scrub
+      (basenames, labels→id, no username/absolute paths); S-7 cache marker; S-8 scan
+      MAX_FILES ceiling + in-loop cancel; S-4 strict local-only CSP (D-033); S-9 cargo-deny
+      (both workspaces) + npm-audit (shipped-deps gate, D-033) + all Actions SHA-pinned;
+      SECURITY.md; fuzz/ workspace (3 targets); hostile fixtures; resolve-verify.py
+      injection mode. Interrupted by an owner reboot mid-stage, resumed cleanly. 180 root +
+      5 shell + 27 vitest green; cargo-deny clean both workspaces; CSP builds + embeds.
+      One follow-up: vitest v4 bump to clear dev-tree audit noise.
 - [ ] E4 Engine stability
 - [ ] E5 Performance at scale (+ D-013 eviction decision)
 - [ ] E6 Drift correction (+ D-016 closure; owner sign-off on mechanism)

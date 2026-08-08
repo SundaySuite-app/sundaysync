@@ -114,6 +114,26 @@ pub fn probe(
 ) -> std::result::Result<Probed, ProbeError> {
     // `-v error` keeps the informational banner off stderr so what remains is a real
     // diagnostic worth showing the user.
+    //
+    // The three security flags before `-i` close the passive-input attack surface the E2
+    // threat model flagged (S-1/S-2, docs/DECISIONS.md D-032). §4.1 deliberately does not
+    // reject by extension, so a dropped "media" file may really be an HLS playlist or a
+    // `concat`/`ffconcat` script — and ffprobe, left to its defaults, would follow it:
+    //
+    //   * `-protocol_whitelist file` restricts every demuxer this probe engages to the
+    //     local `file` protocol only, so a nested `http(s)://` segment reference cannot
+    //     turn a passive probe into an outbound request (SSRF). This propagates to the
+    //     HLS demuxer's nested-protocol whitelist, verified to refuse `http` with
+    //     "Protocol 'http' not on whitelist 'file'".
+    //   * `-safe 1` pins the concat demuxer's safe mode on (it already defaults on, but a
+    //     future or system ffprobe with a looser default must not reopen the hole),
+    //     rejecting absolute and `file:`-protocol paths a concat script would otherwise
+    //     read — local-file disclosure. Verified harmless on ffprobe for wav/mp4/flac/aac.
+    //   * `-i` makes the path a flag *value* rather than a bare trailing positional, so a
+    //     file literally named `-show_data_hex` can no longer be parsed as an ffprobe
+    //     option (argument injection).
+    //
+    // The whitelist must precede `-i`, as it governs the input demuxer.
     let args = [
         "-v".as_ref(),
         "error".as_ref(),
@@ -121,6 +141,11 @@ pub fn probe(
         "json".as_ref(),
         "-show_format".as_ref(),
         "-show_streams".as_ref(),
+        "-protocol_whitelist".as_ref(),
+        "file".as_ref(),
+        "-safe".as_ref(),
+        "1".as_ref(),
+        "-i".as_ref(),
         path.as_os_str(),
     ];
 
@@ -202,6 +227,18 @@ pub(crate) fn from_json(path: &Path, json: &[u8]) -> std::result::Result<Probed,
         video,
         tags: format.tags.unwrap_or_default(),
     })
+}
+
+/// Fuzzing door onto [`from_json`] (the `fuzzing` feature only; docs/DECISIONS.md D-032).
+///
+/// `from_json` is `pub(crate)`, so the out-of-tree fuzz crate cannot see it. This gives it
+/// a public entry without widening the shipping API — the whole item is compiled out unless
+/// the `fuzzing` feature is on, which no shipping build enables. The property under test:
+/// no byte sequence may make the parser panic; it must only ever return `Some`/`None`.
+#[cfg(feature = "fuzzing")]
+#[must_use]
+pub fn fuzz_from_json(data: &[u8]) -> Option<Probed> {
+    from_json(Path::new("/fuzz"), data).ok()
 }
 
 // ---- ffprobe's JSON, as loosely as it can safely be read -------------------------
@@ -365,5 +402,167 @@ mod tests {
             Err(ProbeError::Malformed(_))
         ));
         assert!(matches!(parse("{}"), Err(ProbeError::Malformed(_))));
+    }
+
+    // ---- S-1/S-2 security regression: the passive-input attack surface -------------
+    //
+    // These exercise the real `probe()` child process, so they need a working ffprobe.
+    // On the ubuntu gate `SUNDAYSYNC_REQUIRE_FFMPEG=1` turns a skip into a failure, so
+    // the guard can never silently rot (D-005 pattern).
+
+    use crate::sidecar::Sidecar;
+
+    fn require_ffprobe() -> Option<Sidecar> {
+        match Sidecar::from_path() {
+            Ok(s) => Some(s),
+            Err(e) => {
+                assert!(
+                    std::env::var("SUNDAYSYNC_REQUIRE_FFMPEG").is_err(),
+                    "ffmpeg is required in this environment but was not found: {e}"
+                );
+                eprintln!("SKIP: ffprobe unavailable ({e})");
+                None
+            }
+        }
+    }
+
+    /// The committed adversarial corpus, `fixtures/hostile/` (D-032). Resolved from the
+    /// crate manifest so it is found regardless of the test's working directory.
+    fn hostile(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/hostile")
+            .join(name)
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("sundaysync-tests").join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_concat_script_cannot_disclose_a_local_file() {
+        // S-1: a dropped `.ffconcat` that references /etc/passwd must be refused, not
+        // followed. With the whitelist + safe mode, probing it fails cleanly; the
+        // sensitive file's contents never reach ffprobe's output.
+        let Some(sidecar) = require_ffprobe() else {
+            return;
+        };
+        let r = probe(
+            &sidecar,
+            &hostile("local-file-disclosure.ffconcat"),
+            &CancelToken::new(),
+        );
+        assert!(
+            matches!(r, Err(ProbeError::Unreadable(_) | ProbeError::Malformed(_))),
+            "hostile concat script must be refused, got {r:?}"
+        );
+    }
+
+    #[test]
+    fn an_hls_playlist_cannot_trigger_an_outbound_request() {
+        // S-1 (SSRF): a dropped `.m3u8` whose segments are remote URLs must not make
+        // ffprobe reach out. The `-protocol_whitelist file` flag confines every demuxer
+        // to the local file protocol, so the probe fails instead of fetching.
+        let Some(sidecar) = require_ffprobe() else {
+            return;
+        };
+        let r = probe(&sidecar, &hostile("ssrf.m3u8"), &CancelToken::new());
+        assert!(
+            matches!(r, Err(ProbeError::Unreadable(_) | ProbeError::Malformed(_))),
+            "hostile HLS playlist must be refused, got {r:?}"
+        );
+    }
+
+    #[test]
+    fn the_protocol_whitelist_reaches_the_nested_demuxer_protocol() {
+        // Mechanism-level proof that `-protocol_whitelist file` is what closes the SSRF
+        // vector: forcing the HLS demuxer on the hostile playlist, ffprobe's own stderr
+        // must report that `http` is refused *because it is not on the whitelist we set*.
+        // This is white-box (it forces `-f hls`, which the production probe does not), but
+        // it pins the flag's effect so a future arg-vector edit that drops it is caught.
+        let Some(sidecar) = require_ffprobe() else {
+            return;
+        };
+        let out = crate::sidecar::run(
+            &sidecar.ffprobe,
+            [
+                "-v".as_ref(),
+                "error".as_ref(),
+                "-f".as_ref(),
+                "hls".as_ref(),
+                "-protocol_whitelist".as_ref(),
+                "file".as_ref(),
+                "-i".as_ref(),
+                hostile("ssrf.m3u8").as_os_str(),
+            ],
+            PROBE_TIMEOUT,
+            &CancelToken::new(),
+        );
+        let stderr = match out {
+            Ok(o) => o.stderr,
+            Err(crate::sidecar::RunFailure::Failed { stderr, .. }) => stderr,
+            other => panic!("expected a demuxer error carrying stderr, got {other:?}"),
+        };
+        assert!(
+            stderr.contains("not on whitelist") && stderr.contains("http"),
+            "expected the whitelist to refuse http, stderr was: {stderr}"
+        );
+    }
+
+    #[test]
+    fn a_leading_dash_filename_is_not_parsed_as_a_flag() {
+        // S-2: a file literally named `-show_data_hex` used to be taken as an ffprobe
+        // flag (bare trailing positional). Now it is `-i`'s value, so it is treated as a
+        // path — which, being absent/undecodable, fails as an ordinary unreadable file
+        // rather than smuggling an option into the command.
+        let Some(sidecar) = require_ffprobe() else {
+            return;
+        };
+        let dir = scratch("probe-dashname");
+        let sneaky = dir.join("-show_data_hex");
+        std::fs::write(&sneaky, vec![0xABu8; 512]).unwrap();
+        let r = probe(&sidecar, &sneaky, &CancelToken::new());
+        assert!(
+            matches!(r, Err(ProbeError::Unreadable(_) | ProbeError::Malformed(_))),
+            "a dash-led filename must be handled as a path, got {r:?}"
+        );
+    }
+
+    #[test]
+    fn normal_media_still_probes_after_the_security_flags() {
+        // The critical regression check: the whitelist/safe/`-i` changes must not break a
+        // legitimate file. Encodes a real WAV with ffmpeg, then probes it.
+        let Some(sidecar) = require_ffprobe() else {
+            return;
+        };
+        let dir = scratch("probe-normal");
+        let wav = dir.join("tone.wav");
+        let made = crate::sidecar::run(
+            &sidecar.ffmpeg,
+            [
+                "-v".as_ref(),
+                "error".as_ref(),
+                "-f".as_ref(),
+                "lavfi".as_ref(),
+                "-i".as_ref(),
+                "sine=frequency=440:duration=1".as_ref(),
+                "-ar".as_ref(),
+                "8000".as_ref(),
+                "-y".as_ref(),
+                wav.as_os_str(),
+            ],
+            std::time::Duration::from_secs(60),
+            &CancelToken::new(),
+        )
+        .is_ok();
+        if !made {
+            eprintln!("SKIP: could not synthesise a WAV fixture");
+            return;
+        }
+        let p = probe(&sidecar, &wav, &CancelToken::new()).expect("normal wav must probe");
+        assert!(p.has_audio());
+        assert!(p.duration_seconds > 0.0);
     }
 }

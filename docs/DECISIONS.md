@@ -712,3 +712,131 @@ no small 8.x static build). **The honest number to quote from here on is ~60 MB
 downloaded, ~135 MB installed**, and it is also what a future updater ships per release.
 Deliberate trade: one 60 MB download beats a manual install step that half of testers get
 wrong and the other half hit this bug on.
+
+## D-032 — E3 security hardening: protocol whitelist, XML control-char stripping, diagnostics scrub
+
+**E3, from the E2 threat model.** The engine was already unusually defensive (no shell, no
+`unsafe`, symlinks not followed, device files skipped, cache delete scoped by suffix), so
+this stage is focused, not sprawling. The judgment calls:
+
+**S-1 — ffmpeg/ffprobe protocol whitelist (the one to fix first).** §4.1 rejects nothing
+by extension — a dropped "media" file is the product's explicit input — so a file that is
+really an HLS playlist or a `concat`/`ffconcat` script would make ffmpeg fetch remote URLs
+(SSRF, incl. the `169.254.169.254` cloud-metadata address) or read `file:///…` during
+probe/extract. Fix: `-protocol_whitelist file` before every `-i`, in both `probe.rs` and
+`extract.rs`. Measured against ffmpeg 8.1.2: the flag propagates to the HLS demuxer's
+nested-protocol layer, which then refuses `http` with *"Protocol 'http' not on whitelist
+'file'"* — the `probe.rs` test `the_protocol_whitelist_reaches_the_nested_demuxer_protocol`
+pins exactly that stderr. Modern ffmpeg already ships defensive defaults (concat `safe=1`,
+HLS nested whitelist `file,crypto,data`), but those are version/build-dependent and broader
+than we need; pinning `file` makes the guarantee explicit, minimal and stable across the
+bundled 8.1.2 and whatever system ffmpeg a user has on PATH.
+
+- **`-safe 1` is on `probe.rs` only, not `extract.rs`.** This is the non-obvious call.
+  ffprobe accepts `-safe 1` on any input (verified harmless on wav/mp4/flac/aac), so it is
+  added there to pin the concat demuxer's safe-mode on. **ffmpeg rejects it** as *"Option
+  safe not found"* on non-concat input, which would break every normal extraction — so it
+  is deliberately omitted from the extract vector. The concat demuxer's own `safe=1`
+  default already blocks unsafe names there, and the whitelist blocks the protocol vector.
+- **`extract.rs` needs `file` only, not `file,pipe`.** The decode writes to a temp *file*
+  (`-f f32le -y <temp>`), not `pipe:`, so `file` is the minimal set that keeps extraction
+  working — verified across containers.
+- **S-2 folded in:** the probe path was a bare trailing positional, so a file named
+  `-show_data_hex` parsed as a flag. It is now `-i`'s value in both stages.
+- Committed hostile corpus in `fixtures/hostile/` (tiny — bytes, not media) drives the
+  "attack is now blocked" tests through the real `probe`/`extract` code path.
+
+**S-3 — FCPXML escaper strips XML-illegal control chars.** The five injection chars were
+already escaped correctly (no breakout — kept), but C0 controls (`0x00–0x08`, `0x0B`,
+`0x0C`, `0x0E–0x1F`) passed through raw, so one bell or NUL in a filename yielded a
+non-well-formed document Resolve rejects wholesale (silent wrongness, §7.5). **Choice:
+drop** the illegal controls (they are not representable even as a numeric character
+reference in XML 1.0, so there is nothing to escape them *to*), and **normalise** the three
+legal whitespace controls (tab/newline/CR) to a single space, matching how a parser
+flattens them inside an attribute anyway.
+
+**S-5 — export path validation.** IPC arguments are trust-boundary data; the OS save dialog
+is a convention, not an enforced guard. `validate_export_path` rejects an existing-directory
+target and (for `export_timeline`) a path not ending in `.fcpxml`, so a hostile `invoke`
+cannot steer a raw `fs::write` onto an arbitrary writable file. Defense-in-depth behind the
+S-4 CSP.
+
+**S-6 — `export_diagnostics` is now actually media-free.** It claimed to be safe to send to
+support while embedding the full `SyncResult` — absolute paths (→ the macOS username under
+`/Users/…`), device/folder labels (often the church/service name) and every filename — plus
+the absolute ffmpeg path. `scrub_result` collapses every path to its bare basename, drops
+each device label to its neutral id (e.g. `folder-balkong`, the handle §4.5/D-028 already
+use), and the report omits the ffmpeg path entirely, keeping only `bundled`/`system`. Test
+asserts no `/Users/`, no surviving absolute path, and no raw label. Doc-comment corrected to
+describe what the bundle actually contains.
+
+**S-7 — `clear_cache` cache marker.** `dir` is caller-chosen (D-013), so `clear` could
+delete a user's unrelated `.tmp`/`.f32` in any named folder. `ensure_dir` now stamps a
+`.sundaysync-cache` marker (a dotfile — the scan's `is_hidden` skips it, `clear`'s suffix
+filter spares it), and `clear` refuses a *non-default* directory that lacks the marker
+(`Error::NotACacheDir`). The default dir stays frictionless (trusted unconditionally); a
+missing directory is still a no-op, not a refusal.
+
+**S-8 — scan width cap + cancel-in-loop.** `walk` had unbounded width and checked cancel
+only per-directory. **Ceiling: `MAX_FILES = 100_000`** — orders of magnitude past any real
+multi-camera service, so it can only fire on an obvious mis-drop (a home directory, a whole
+disk); on breach it returns `Error::TooManyFiles { limit }`, a loud honest refusal rather
+than a silent truncation that would violate §7.3. Cancel is now also checked *inside* the
+entry loop, so one huge directory is interruptible (§7.4). A wedged network-mount
+`read_dir`/`metadata` syscall remains uninterruptible — inherent to `std::fs`, documented in
+the code, not fixed here.
+
+**Fuzzing.** `cargo-fuzz` targets for `probe::from_json`, `place::parse_iso8601_epoch` and
+`Rational::parse` live in `fuzz/` — its own workspace, excluded from the root gates like
+`app/src-tauri`. The WAV *reader* the brief names does not exist (fixturegen only *writes*
+WAV; the engine reads back its own raw `f32le` cache), so it is not fuzzed — noted, not
+skipped by accident. `probe::from_json` is `pub(crate)`; a `fuzzing`-gated `fuzz_from_json`
+door exposes it without widening the shipping API. The targets dual-build: under cargo-fuzz
+(`--cfg fuzzing --features libfuzzer`, nightly) they are libFuzzer targets; on plain stable
+`cargo build` they are ordinary smoke-runner binaries over a few adversarial seeds, so the
+harness stays committed and verifiable here where cargo-fuzz/nightly are unavailable. Run
+instructions in `fuzz/README.md`.
+
+**New `Error` variants.** S-8 and S-7 needed fatal outcomes with no honest fit among the
+existing variants (`Invariant` means *engine bug*, which a user mis-drop is not), so
+`TooManyFiles { limit }` and `NotACacheDir { path }` were added to `error.rs` — additive
+only.
+
+**Stale docs fixed in passing (E2 explorer findings):** the `crates/core/src/lib.rs` module
+docstring called the pipeline a "Phase 2" stub with correlation unimplemented — corrected to
+describe the complete pipeline `sync` now runs. `extract.rs`'s memmap-deferral note cited
+D-012 (which is about cancellation); it should be **D-011**, now fixed.
+
+## D-033 — Strict local-only CSP, and the npm-audit gate scopes to shipped deps (E3)
+
+**E3, conductor.** Two hardening decisions that sit outside the two builder agents'
+file ownership.
+
+**CSP (closes S-4).** `tauri.conf.json` `security.csp` went from `null` to a strict,
+local-only policy: `default-src 'self'`, `script-src 'self'` (the production bundle has no
+inline/eval scripts and no `dangerouslySetInnerHTML` anywhere in `app/src`), `style-src
+'self' 'unsafe-inline'` (Vite injects a style tag and the app uses a few React inline
+`style={{}}` attributes), `img-src 'self' asset: data:`, `connect-src 'self' ipc:
+http://ipc.localhost` (Tauri 2 IPC), and `object-src/base-uri/frame-ancestors/form-action`
+locked down. No remote origin is reachable — the app is 100 % local, so a future XSS
+(a new dependency, an accidental `dangerouslySetInnerHTML`) can no longer reach the IPC
+command surface (which includes arbitrary-dir cache deletion and file writes).
+
+Verified the policy is **accepted by `tauri build` and embedded** both in the frontend
+bundle and compiled into the app binary. The one thing not verifiable headlessly is that
+the UI still *renders* under it — that is on the E11 owner smoke checklist (a blank window
+would be the failure mode). The policy is the community-standard tight CSP for a
+local-only Vite/React Tauri app, so the risk is low.
+
+**npm-audit gate (part of S-9b).** The CI `npm-audit` job runs `npm audit --omit=dev
+--audit-level=high` — it gates the **shipped** dependency tree, not the build/test tooling.
+Every current advisory lives in the `vitest → vite → esbuild/nanoid` dev chain
+(vitest-UI arbitrary-file-read, vite dev-server path traversal, nanoid loop); none reaches
+the Tauri bundle a user runs, and `npm audit --omit=dev` reports **0**. Their only fix is a
+semver-major vitest bump, tracked as a follow-up rather than blocking every push on tooling
+that never ships. A `high`-or-worse advisory in an actual runtime dependency still fails the
+job. A second, non-blocking `|| true` step runs the full dev audit so those advisories stay
+visible in the log.
+
+**Follow-up tracked:** bump `vitest` to v4 (breaking; re-verify the 27 vitest specs) to
+clear the dev-tree advisories at source.
