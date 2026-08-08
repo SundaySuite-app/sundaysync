@@ -234,7 +234,17 @@ fn measure(
             owned_cache_dir
         }
     };
-    let _ = Cache::new(cache_dir.clone()).clear();
+    // The "cold" figure below is only cold if this actually emptied the cache. `clear`
+    // refuses a directory it never stamped (S-7), and swallowing that turned a warm run
+    // into a number labelled cold — the exact confusion P-7 exists to remove. Not fatal:
+    // the accuracy comparison is unaffected, and a labelled-suspect timing beats no run.
+    if let Err(e) = Cache::new(cache_dir.clone()).clear() {
+        eprintln!(
+            "warning: could not clear {} before the cold pass ({e}) — \
+             the \"cold\" timing below is NOT cold",
+            cache_dir.display()
+        );
+    }
 
     let request = SyncRequest {
         cache_dir: Some(cache_dir),
@@ -546,8 +556,7 @@ impl RssSampler {
                     p.fetch_max(kb, std::sync::atomic::Ordering::Relaxed);
                 }
                 let mut waited = Duration::ZERO;
-                while waited < RSS_SAMPLE_INTERVAL
-                    && !s.load(std::sync::atomic::Ordering::Relaxed)
+                while waited < RSS_SAMPLE_INTERVAL && !s.load(std::sync::atomic::Ordering::Relaxed)
                 {
                     std::thread::sleep(RSS_STOP_SLICE);
                     waited += RSS_STOP_SLICE;

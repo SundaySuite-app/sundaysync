@@ -516,7 +516,9 @@ fn walk_capped(
         // follows links, but the kind is already in the directory entry `read_dir` handed
         // back on Linux and macOS, so this is the same answer for one fewer `lstat` per
         // entry — up to [`MAX_FILES`] syscalls saved on a pathological tree.
-        let Ok(kind) = entry.file_type() else { continue };
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
         if kind.is_dir() {
             let path = entry.path();
             walk_capped(&path, depth + 1, exclude, out, progress, cancel, max_files)?;
