@@ -480,10 +480,19 @@ cache/telemetry retention verification, UNVERIFIED-list burn-down.
       Resolve 21; closes D-016. PR #10.
 - [x] **E7 Consent + telemetry client — 2026-08-08.** Opt-in consent v1, anonymous bucketed
       payload, sends nothing until E8 deploys. PR #11.
-- [~] **E8 Worker side — built, owner-gated.** `e8/sundaysync-on-app-dimension` in
-      sunday-telemetry (validator conformed to the E7 client on the owner-chosen app
-      registry; client posts to the app-scoped door). Remaining: owner-sanctioned merge,
-      deploy, `WRITE_KEY_SUNDAYSYNC` mint, live verify.
+- [x] **E8 Worker side — DEPLOYED + LIVE-VERIFIED 2026-08-08 (owner-ordered).** The
+      SundayStage session landed the canonical app registry on the shared Worker's main
+      and deployed it; SundaySync's slots were then rebased onto it (`e8/sundaysync-slots`
+      → merged `532d2b1`): schema-sync validator conformed to the shipped E7 client,
+      migration 0007 applied to remote D1, table family generalised (SundayRec's emitted
+      SQL unchanged), purge + retention span both apps. 235/235 Worker tests green.
+      Live-verified in production: legacy SundayRec routes byte-identical (200/200/401),
+      `/v1/update/sundaysync/beta` 204, unknown app 404, unminted-key 401 →
+      **`WRITE_KEY_SUNDAYSYNC` minted** (Worker secret + mirrored as the repo's
+      `SUNDAYSYNC_TELEMETRY_KEY` for client baking), then a real payload ingested
+      (**202** + eventId) and deletion-by-id swept the whole sync family (**200** with
+      per-table receipt). The shipped beta.1 client has no baked endpoint and sends
+      nothing; the next tag bakes URL+key and completes the chain.
 - [x] **E9 Updater + beta ring — 2026-08-08.** App-scoped rings, NSIS-on-beta, signing
       pubkey placeholder (owner mints the real secret — see D-044's security note). PR #12.
 - [x] **E10 QA + corpus — 2026-08-08.** Playwright harness in CI (PR #13); real-corpus run
