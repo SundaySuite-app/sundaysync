@@ -840,3 +840,138 @@ visible in the log.
 
 **Follow-up tracked:** bump `vitest` to v4 (breaking; re-verify the 27 vitest specs) to
 clear the dev-tree advisories at source.
+
+## D-034 — E4 memory strategy: single-alloc load(), the per-run anchor cache, and memmap stays deferred
+
+**E4, stability.** §7.7's 4 GB RSS ceiling was untested and, on paper, breakable. Three
+changes bring the engine under it and one non-change is reaffirmed.
+
+`CachedAudio::load()` now allocates the `Vec<f32>` once at `file_len / 4` and streams the
+cache file through a 64 KiB scratch buffer. The previous form read a whole `Vec<u8>` and
+then `.collect()`ed a second full `Vec<f32>`, both resident at once — a transient ~8
+bytes/sample peak. On a long reference this was the actual gate-breaker: at 46.9 KB/s
+(D-004/D-013), a 20 h reference is ~3.38 GB of analysis audio, so the old load() spiked to
+~6.8 GB while decoding it into memory, before any FFT had allocated. The streamed form
+peaks at the samples vector plus one 64 KiB buffer.
+
+`place()` pass 2 previously re-loaded each anchor's cache file on every (clip, anchor) pair
+and linear-scanned `candidates` for durations inside the sort comparator and for each
+anchor lookup — O(n²) I/O and O(n²) scans. It now builds a `by_path` index once (O(1)
+lookups) and a lazily-filled per-run `anchor_cache` that reads each distinct anchor's cache
+file at most once and reuses it across all unresolved clips. The reference is not stored in
+the cache; it is reused in place from the single `ref_audio` load, so the dominant stream
+is never duplicated.
+
+Memory tension, resolved deliberately. Caching anchors resident raises pass-2 peak above
+the old drop-after-each-use behaviour, so the worst case matters. Peak resident RSS is
+`reference + anchors actually touched + one in-flight clip`. The largest-first order with
+early-exit on a strong match usually touches only a few big anchors, so the realistic
+church-service case (a ~2–3 h recorder reference ≈ 0.34–0.51 GB plus a handful of short
+camera clips) stays well under 1 GB. The adversarial bound is the E4 20 h / 200-file day:
+if nearly every clip is placed and one straggler forces a full-anchor pass 2, the touched
+set approaches the whole shoot's analysis audio — ~3.38 GB (F10 cites ~3.46 GB at 48 KB/s)
+— which is the same footprint §7.7 already contemplates. Adding the correlator's overlap-
+save working set (2²⁰-sample f32 blocks, tens of MB; the reference FFT is still recomputed
+per call until P-1 lands in E5) and program baseline (<0.2 GB) leaves peak ≈ 3.6 GB, under
+4 GB with ~0.4 GB of headroom. This is analytical; the RSS bench built alongside E4
+(fixturegen 20 h day + peak-RSS sampling, `crates/core/tests/memory_gate.rs`) is what
+proves it. If that bench ever shows a realistic 20 h day over 4 GB, the documented next
+step is a size-ceilinged, drop-after-last-use anchor cache — accepting bounded cache-file
+re-reads for the rare many-anchor pass 2 — deferred now because it trades a guaranteed
+bound for complexity the measured data has not yet justified.
+
+The same F9 fix rides in this path: on Windows `rename` errors when the destination exists,
+so two cold instances decoding one file made the loser emit a spurious `decode_error`. Same
+cache key ⇒ byte-identical audio, so an existing destination is a cache hit — drop the temp,
+no error. Unix atomic overwrite is unchanged.
+
+memmap (D-011) stays deferred. With the transient 2× copy gone and the anchor cache
+bounding pass 2, there is no acute pressure left for `memmap2::Mmap::map` to relieve. The
+case against it is unchanged and now stronger: it is `unsafe`, colliding with the
+`unsafe_code = "forbid"` lint (adopting it means relaxing to `deny` plus a scoped
+`#[allow]`); the f32le → f32 conversion still needs a full pass over the bytes, so a mapping
+buys no arithmetic; and a mapped cache file complicates the Windows cache-overwrite path
+(a mapping holds the file open, and F9's whole point is that a second instance may replace
+it). Revisit only if the E5 RSS bench shows the single-alloc + anchor-cache profile still
+exceeds 4 GB on a realistic day — which the arithmetic above says it does not.
+
+## D-035 — E4 robustness: lossless path hashing (F7) and a bounded runnable() (F11)
+
+**E4, stability.** Two independent correctness fixes with no bearing on the §5 schema.
+
+The cache key hashed `path.to_string_lossy()`, which maps every invalid byte to U+FFFD. Two
+distinct non-UTF-8 paths differing only in their invalid bytes therefore hashed identically
+and collided — the second file was served the first's cached analysis audio, a
+silent-wrongness bug (§7.5) rather than an honest failure. The key now hashes the lossless
+OS encoding: raw bytes on unix (`OsStrExt::as_bytes`), UTF-16 code units on Windows
+(`encode_wide`), and the lossy form only on targets with no OS-string accessor (where paths
+are UTF-8 anyway). Changing the encoding changes cache filenames, which costs one cold
+re-decode and nothing else — no on-disk state or fixture pins a specific `{hash}.f32` name.
+
+`runnable()` ran `<bin> -version` with a plain blocking `status()`, unlike `sidecar::run()`,
+which has the D-010/D-012 bounded poll loop. A bundled ffmpeg wedged on `-version`
+(quarantine limbo, a dead FUSE mount, a stalled network binary) would hang `check_sidecar`
+and the onboarding probe forever and uncancellably. `runnable()` now delegates to `run()`
+with a 10 s ceiling — generous for a `-version` that normally answers in ~30 ms — inheriting
+both the bounded wait and the D-010 rule that a killed child is never joined on its reader
+threads on the timeout path. A wedged binary is reported as not-runnable instead of
+hanging. (The frontend invoke-timeout half of F11/F14 is a separate, shell-side change; see
+D-036.)
+
+## D-036 — Uniform AppState poison policy, an inputs fingerprint on export, and a client-side invoke timeout (E4)
+
+**E4, shell+frontend.** Three stability fixes on the Tauri command surface (F1, F3, F6,
+F11-frontend/F14), none of which touch the engine (D-023).
+
+**Poison policy (F1).** The shell's `AppState` mutexes were handled inconsistently:
+`cancel_sync` took `if let Ok(slot) = lock()` and silently did nothing when the lock was
+poisoned — the one safety control disabled with no banner — while `export_*` surfaced an
+error. Every command now acquires its lock through one helper, `lock_state(slot, OnPoison)`.
+`OnPoison::Recover` recovers the guard via `PoisonError::into_inner` for the cancel-token
+slot, the scan-cancel slot, and the sidecar cache: a lock poisoned there means only that a
+prior thread panicked mid-update, and the `Option<_>` it holds is still safe to read or
+replace — cancel must fire regardless. `OnPoison::Reject` returns a clean "internal state
+was poisoned" error for the `LastRun` slot, where a half-written result must never be
+exported as a finished run. `store_last` recovers, overwrites wholesale, then calls
+`clear_poison()` so a healthy sync re-enables the Reject read path in export.
+
+**Scan-cancel identity (F3).** `scan_inputs` cleared "only our own token" by checking
+`is_cancelled()` outside the lock — a late-finishing scan could clear a newer scan's slot
+and leave the newer run uncancellable. The scan-cancel slot now holds `Arc<CancelToken>`,
+and the finishing scan clears the slot only when it still holds *its* Arc (`Arc::ptr_eq`
+under the lock).
+
+**Export inputs fingerprint (F6).** The frontend hides export behind `phase.stale`, but that
+is a UI convention, not a guard. `LastRun` is now stamped with a cheap deterministic
+`DefaultHasher` fingerprint of the sources that produced it — the source set (order/dup-
+independent), device overrides, and chosen reference, mirroring the frontend's staleness
+triggers. `export_timeline` recomputes it from the caller-supplied current sources and
+refuses on mismatch. `DefaultHasher`'s cross-version instability is irrelevant: store and
+compare happen in the same binary and session, never persisted.
+
+**Invoke timeout (F11-frontend/F14).** No `invoke` had a timeout; a no-cancel command
+(notably `check_sidecar`, spawning `ffmpeg -version`) could wedge the UI forever.
+`invokeWithTimeout` races `invoke` against a bound (10 s for `check_sidecar`) and rejects
+with a distinguishable, localised message mapped to a NOTICE — a timeout is recoverable, not
+a crash. It bounds only how long the UI waits; the backend call is not aborted (Tauri
+exposes no cancel token). `run_sync`/`scan_inputs` keep their real cancel path and get no
+short timeout.
+
+## D-037 — Process-global scratch nonce so two same-process Extractors never collide (E4)
+
+**E4, conductor integration.** E4's two-instance concurrency test surfaced a real bug
+distinct from F9. `Cache::temp_path` names a scratch file from `(cache key, process::id(),
+nonce)`, but the nonce was a per-`Extractor` `AtomicU64` starting at 0. Two `Extractor`s
+constructed in the *same* OS process (identical pid) therefore collided on the Nth file's
+`<key>.<pid>-<nonce>.tmp` path: one worker's `fs::rename` moved the shared temp out from
+under the other's still-running ffmpeg, which then failed its `fs::metadata` check with a
+spurious `decode_error` on a perfectly good file. This reproduces on POSIX, so it is not
+the Windows-rename issue F9 fixed. It is reachable in the real app: `sync_with_durations`
+builds a fresh `Extractor` on every call, so two overlapping `sync()` runs (a re-sync fired
+before the first finishes) hit it.
+
+Fix: the nonce is now a single process-global `static SCRATCH_NONCE: AtomicU64`
+(`crates/core/src/extract.rs`), unique across every `Extractor` in the process; the pid in
+`temp_path` still carries cross-process uniqueness. The previously `#[ignore]`d
+`two_extractors_in_one_process_*` test is un-ignored as a passing regression
+(`crates/core/tests/concurrency.rs`).

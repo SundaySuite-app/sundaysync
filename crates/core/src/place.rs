@@ -9,7 +9,7 @@
 use crate::correlate::Correlator;
 use crate::drift;
 use crate::error::{Error, Result};
-use crate::extract::CachedAudio;
+use crate::extract::{AnalysisAudio, CachedAudio};
 use crate::probe::Probed;
 use crate::progress::{CancelToken, Progress, ProgressSink, Stage};
 use crate::request::ANALYSIS_RATE;
@@ -175,6 +175,14 @@ pub fn place(
     // the camera beside it. §4.4 tries the largest placed clips first and stops early on
     // a strong match, because a longer anchor gives more material to correlate against.
     if !unresolved.is_empty() {
+        // P-6: index candidates by path once, so the anchor lookups below are O(1) instead
+        // of a `candidates.iter().find()` per (clip, anchor) pair, and the sort's duration
+        // comes from this index rather than a linear scan inside the comparator.
+        let by_path: HashMap<&Path, &Candidate> =
+            candidates.iter().map(|c| (c.path(), c)).collect();
+        let duration =
+            |path: &Path| -> f64 { by_path.get(path).map_or(0.0, |c| c.probed.duration_seconds) };
+
         let mut anchors: Vec<(PathBuf, f64, f64, Vec<String>)> = placements
             .iter()
             .map(|p| {
@@ -187,10 +195,20 @@ pub fn place(
             })
             .collect();
         anchors.sort_by(|a, b| {
-            duration_of(candidates, &b.0)
-                .total_cmp(&duration_of(candidates, &a.0))
+            duration(&b.0)
+                .total_cmp(&duration(&a.0))
                 .then_with(|| a.0.cmp(&b.0))
         });
+
+        // P-6/F10: a per-run cache of anchor analysis audio, filled lazily on first use and
+        // reused across every unresolved clip — so each distinct anchor's cache file is
+        // read at most once here, not re-loaded on every (clip, anchor) pair as before.
+        // The reference is deliberately *not* stored in it: it is already resident as
+        // `ref_audio` and is reused by reference, so the dominant (and only very-long)
+        // stream is never duplicated. Peak resident = reference + anchors actually touched
+        // + one in-flight clip; the largest-first order with early-exit usually touches
+        // only a few big anchors. See docs/DECISIONS.md D-034 for the memory argument.
+        let mut anchor_cache: HashMap<PathBuf, AnalysisAudio> = HashMap::new();
 
         let still_unresolved: Vec<&Candidate> = unresolved.clone();
         unresolved.clear();
@@ -206,12 +224,22 @@ pub fn place(
                 if anchor_path == candidate.path() {
                     continue;
                 }
-                let Some(anchor) = candidates.iter().find(|c| c.path() == anchor_path) else {
-                    continue;
+                let anchor_samples: &[f32] = if anchor_path == &ref_path {
+                    // The reference is already loaded once (above); reuse it in place.
+                    ref_audio.samples()
+                } else {
+                    use std::collections::hash_map::Entry;
+                    match anchor_cache.entry(anchor_path.clone()) {
+                        Entry::Occupied(e) => e.into_mut().samples(),
+                        Entry::Vacant(e) => {
+                            let Some(anchor) = by_path.get(anchor_path.as_path()) else {
+                                continue;
+                            };
+                            e.insert(anchor.audio.load()?).samples()
+                        }
+                    }
                 };
-                let anchor_audio = anchor.audio.load()?;
-                let Some(m) =
-                    correlator.match_clip(audio.samples(), anchor_audio.samples(), segment_count)
+                let Some(m) = correlator.match_clip(audio.samples(), anchor_samples, segment_count)
                 else {
                     continue;
                 };
@@ -325,13 +353,6 @@ fn build_placement(r: Resolved<'_>) -> Placement {
     }
 }
 
-fn duration_of(candidates: &[Candidate], path: &Path) -> f64 {
-    candidates
-        .iter()
-        .find(|c| c.path() == path)
-        .map_or(0.0, |c| c.probed.duration_seconds)
-}
-
 /// §4.4: "clips from one device must not overlap in time (cameras record sequentially).
 /// An overlap forces the lower-confidence clip to `unsynced`."
 ///
@@ -341,6 +362,14 @@ fn evict_device_overlaps(
     placements: &mut Vec<Placement>,
     candidates: &[Candidate],
 ) -> Vec<Unsynced> {
+    // P-6: one O(1) duration index, so the end-time lookups below are not a linear scan of
+    // `candidates` per compared pair.
+    let duration: HashMap<&Path, f64> = candidates
+        .iter()
+        .map(|c| (c.path(), c.probed.duration_seconds))
+        .collect();
+    let duration_of = |path: &Path| -> f64 { duration.get(path).copied().unwrap_or(0.0) };
+
     let mut by_device: HashMap<String, Vec<usize>> = HashMap::new();
     for (i, p) in placements.iter().enumerate() {
         by_device.entry(p.device.clone()).or_default().push(i);
@@ -362,8 +391,7 @@ fn evict_device_overlaps(
             if evict.contains(&first) || evict.contains(&second) {
                 continue;
             }
-            let end =
-                placements[first].offset_seconds + duration_of(candidates, &placements[first].file);
+            let end = placements[first].offset_seconds + duration_of(&placements[first].file);
             if end > placements[second].offset_seconds {
                 // Drop the one we believe less. Ties break on path so the outcome does
                 // not depend on iteration order.

@@ -7,8 +7,9 @@
 
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use sundaysync_core::{
     export_fcpxml, sync_with_durations, CancelToken, Progress, ProgressSink, Sidecar,
     SidecarSource, Stage, SyncRequest, SyncResult, DEFAULT_MIN_PSR,
@@ -120,10 +121,71 @@ impl ProgressSink for EventSink {
     }
 }
 
+/// What a command does when it finds an [`AppState`] mutex poisoned by a prior panic
+/// (docs/DECISIONS.md D-036). Every command acquires its locks through [`lock_state`] with
+/// one of these, so poison behaviour is uniform instead of the F1 mix where `cancel_sync`
+/// silently no-opped while `export_*` errored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnPoison {
+    /// Recover the guard via [`std::sync::PoisonError::into_inner`]. Safe for the cancel
+    /// token slot, the scan-cancel slot and the sidecar cache: a torn `Option<_>` there
+    /// still holds a value that is fine to read or replace, and — the F1 headline — the
+    /// one safety control (Cancel) must never be silently disabled because some earlier
+    /// thread happened to panic.
+    Recover,
+    /// Refuse with an error. Used for the `LastRun` slot, where a half-written result must
+    /// never be handed to export as if it were a finished run.
+    Reject,
+}
+
+/// The single lock-acquisition helper (D-036). See [`OnPoison`] for the policy.
+fn lock_state<T>(slot: &Mutex<T>, on_poison: OnPoison) -> Result<MutexGuard<'_, T>, String> {
+    match slot.lock() {
+        Ok(guard) => Ok(guard),
+        Err(poisoned) => match on_poison {
+            OnPoison::Recover => Ok(poisoned.into_inner()),
+            OnPoison::Reject => Err("internal state was poisoned".to_string()),
+        },
+    }
+}
+
+/// Message an export refusal starts with when the sources no longer match the stored run
+/// (F6). A stable prefix so `errors.ts` can localise it (D-030) the way it does the
+/// engine's own Display strings.
+const STALE_EXPORT_MSG: &str =
+    "the sources changed since this timeline was synced — run the sync again before exporting";
+
+/// A cheap, deterministic fingerprint of everything that makes a sync result stale (F6):
+/// the source set (order- and duplicate-independent), the manual device overrides, and the
+/// chosen reference. Mirrors exactly the frontend's `stale` triggers (inputs / overrides /
+/// reference — see `state.ts`), so a UI that shows a fresh result and a backend that agrees
+/// it is fresh compute the same number.
+///
+/// `DefaultHasher` is fine here despite its "not stable across Rust versions" caveat: the
+/// stored fingerprint and the one `export_timeline` compares it against are produced by the
+/// *same* binary in the same session, never persisted or compared across builds.
+fn inputs_fingerprint(
+    inputs: &[PathBuf],
+    overrides: &BTreeMap<PathBuf, String>,
+    reference: Option<&Path>,
+) -> u64 {
+    let mut sorted: Vec<&PathBuf> = inputs.iter().collect();
+    sorted.sort();
+    sorted.dedup();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    sorted.hash(&mut hasher);
+    overrides.hash(&mut hasher); // BTreeMap hashes its entries in key order — deterministic.
+    reference.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// The last successful run, kept so export can happen without re-syncing.
 struct LastRun {
     result: SyncResult,
     durations: BTreeMap<PathBuf, f64>,
+    /// Fingerprint of the sources that produced this run ([`inputs_fingerprint`]). Export
+    /// refuses when the caller's current sources hash to something else (F6).
+    inputs_hash: u64,
 }
 
 /// Shared cancellation handle, so the UI's Cancel button can reach a run in flight.
@@ -132,8 +194,9 @@ struct AppState {
     cancel: Arc<Mutex<Option<CancelToken>>>,
     /// The pre-sync scan gets its own slot: a re-scan supersedes the previous one
     /// (the UI auto-scans on every input change), and cancelling a scan must never
-    /// touch a sync in flight.
-    scan_cancel: Arc<Mutex<Option<CancelToken>>>,
+    /// touch a sync in flight. The token is wrapped in its own `Arc` so a finishing scan
+    /// can prove the slot still holds *its* token before clearing it (F3, `Arc::ptr_eq`).
+    scan_cancel: Arc<Mutex<Option<Arc<CancelToken>>>>,
     last: Arc<Mutex<Option<LastRun>>>,
     /// The ffmpeg/ffprobe pair every command decodes with, resolved once at startup
     /// (D-031). `None` means resolution failed — a user who installs ffmpeg while the
@@ -144,16 +207,92 @@ struct AppState {
 impl AppState {
     /// The stored sidecar, resolving and caching it if startup could not.
     fn sidecar(&self) -> Result<Sidecar, String> {
-        if let Ok(slot) = self.sidecar.lock() {
+        if let Ok(slot) = lock_state(&self.sidecar, OnPoison::Recover) {
             if let Some(sidecar) = slot.as_ref() {
                 return Ok(sidecar.clone());
             }
         }
         let resolved = resolve_sidecar()?;
-        if let Ok(mut slot) = self.sidecar.lock() {
+        if let Ok(mut slot) = lock_state(&self.sidecar, OnPoison::Recover) {
             *slot = Some(resolved.clone());
         }
         Ok(resolved)
+    }
+
+    /// Installs the cancel token for a run about to start.
+    fn set_cancel(&self, token: CancelToken) {
+        if let Ok(mut slot) = lock_state(&self.cancel, OnPoison::Recover) {
+            *slot = Some(token);
+        }
+    }
+
+    /// Drops the cancel token once a run has finished (or failed).
+    fn clear_cancel(&self) {
+        if let Ok(mut slot) = lock_state(&self.cancel, OnPoison::Recover) {
+            *slot = None;
+        }
+    }
+
+    /// Fires the in-flight run's cancel token. F1: recovers a poisoned lock rather than
+    /// silently no-opping — a poisoned `AppState` must not disable the one safety control.
+    fn request_cancel(&self) {
+        if let Ok(slot) = lock_state(&self.cancel, OnPoison::Recover) {
+            if let Some(token) = slot.as_ref() {
+                token.cancel();
+            }
+        }
+    }
+
+    /// Installs a fresh scan-cancel token, cancelling and superseding any previous scan.
+    /// Returns the owning `Arc` so the caller can later prove ownership of the slot (F3).
+    fn install_scan_cancel(&self) -> Arc<CancelToken> {
+        let token = Arc::new(CancelToken::new());
+        if let Ok(mut slot) = lock_state(&self.scan_cancel, OnPoison::Recover) {
+            if let Some(previous) = slot.replace(token.clone()) {
+                previous.cancel();
+            }
+        }
+        token
+    }
+
+    /// Clears the scan-cancel slot **only if it still holds `mine`** (F3). Checking identity
+    /// under the lock closes the TOCTOU window where a late-finishing scan cleared a newer
+    /// scan's token and left the newer run uncancellable.
+    fn clear_scan_cancel_if_ours(&self, mine: &Arc<CancelToken>) {
+        if let Ok(mut slot) = lock_state(&self.scan_cancel, OnPoison::Recover) {
+            if slot
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, mine))
+            {
+                *slot = None;
+            }
+        }
+    }
+
+    /// Stores a freshly completed run. Recovers a poisoned lock and overwrites wholesale
+    /// (the old value is being replaced by good data anyway), then clears the poison so the
+    /// [`OnPoison::Reject`] read path in export works again after a healthy sync.
+    fn store_last(&self, run: LastRun) {
+        if let Ok(mut slot) = lock_state(&self.last, OnPoison::Recover) {
+            *slot = Some(run);
+        }
+        self.last.clear_poison();
+    }
+
+    /// Snapshot of the last run for export, guarded by the F6 inputs fingerprint. Errors
+    /// cleanly on a poisoned lock (`Reject`), on an empty slot, or on a source mismatch.
+    fn export_snapshot(
+        &self,
+        fingerprint: u64,
+    ) -> Result<(SyncResult, BTreeMap<PathBuf, f64>), String> {
+        let guard = lock_state(&self.last, OnPoison::Reject)?;
+        let last = guard
+            .as_ref()
+            .ok_or_else(|| "nothing has been synced yet".to_string())?;
+        if last.inputs_hash != fingerprint {
+            return Err(STALE_EXPORT_MSG.to_string());
+        }
+        Ok((last.result.clone(), last.durations.clone()))
     }
 }
 
@@ -199,9 +338,7 @@ fn run_sync(
     let sidecar = state.sidecar()?;
 
     let cancel = CancelToken::new();
-    if let Ok(mut slot) = state.cancel.lock() {
-        *slot = Some(cancel.clone());
-    }
+    state.set_cancel(cancel.clone());
 
     let defaults = SyncRequest::new(Vec::new());
     let request = SyncRequest {
@@ -214,21 +351,26 @@ fn run_sync(
         sidecar: Some(sidecar),
     };
 
+    // F6: the fingerprint of the sources that produced this run, stored with the result so
+    // export can refuse a mismatched later request. Computed before the request is moved.
+    let inputs_hash = inputs_fingerprint(
+        &request.inputs,
+        &request.device_overrides,
+        request.reference_override.as_deref(),
+    );
+
     let sink = EventSink::new(app, "sync:progress");
     let outcome = sync_with_durations(&request, &sink, &cancel);
 
-    if let Ok(mut slot) = state.cancel.lock() {
-        *slot = None;
-    }
+    state.clear_cancel();
 
     match outcome {
         Ok((result, durations)) => {
-            if let Ok(mut slot) = state.last.lock() {
-                *slot = Some(LastRun {
-                    result: result.clone(),
-                    durations: durations.clone(),
-                });
-            }
+            state.store_last(LastRun {
+                result: result.clone(),
+                durations: durations.clone(),
+                inputs_hash,
+            });
             Ok(SyncOutcome { result, durations })
         }
         Err(e) => Err(e.to_string()),
@@ -251,12 +393,7 @@ fn scan_inputs(
 ) -> Result<sundaysync_core::ScanManifest, String> {
     let sidecar = state.sidecar()?;
 
-    let cancel = CancelToken::new();
-    if let Ok(mut slot) = state.scan_cancel.lock() {
-        if let Some(previous) = slot.replace(cancel.clone()) {
-            previous.cancel();
-        }
-    }
+    let cancel = state.install_scan_cancel();
 
     // Exclude the cache exactly as the pipeline does (D-020) — a user-configured cache
     // inside a dropped folder must not appear as broken media in the preview either.
@@ -266,14 +403,10 @@ fn scan_inputs(
     let outcome =
         sundaysync_core::scan::scan_detailed(&inputs, &sidecar, exclude.as_deref(), &sink, &cancel);
 
-    // Clear the slot only if it still holds OUR token: a newer scan may already have
-    // installed its own, and clearing that would orphan its cancel button. Our token
-    // being cancelled is exactly the signal that we were superseded.
-    if !cancel.is_cancelled() {
-        if let Ok(mut slot) = state.scan_cancel.lock() {
-            *slot = None;
-        }
-    }
+    // F3: clear the slot only if it still holds OUR token, checked under the lock via
+    // `Arc::ptr_eq`. A newer scan may already have replaced it; clearing that would orphan
+    // the newer run's cancel button and leave it uncancellable.
+    state.clear_scan_cancel_if_ours(&cancel);
 
     outcome
         .map(|(manifest, _)| manifest)
@@ -320,11 +453,9 @@ fn clear_cache(dir: Option<PathBuf>) -> Result<u64, String> {
 /// so this returns immediately and the run unwinds on its own.
 #[tauri::command]
 fn cancel_sync(state: State<'_, AppState>) {
-    if let Ok(slot) = state.cancel.lock() {
-        if let Some(token) = slot.as_ref() {
-            token.cancel();
-        }
-    }
+    // F1: routed through the poison-recovering helper so a poisoned `AppState` — a prior
+    // thread panicking mid-update — can no longer silently disable Cancel.
+    state.request_cancel();
 }
 
 /// Validates a frontend-supplied export path before the engine writes to it (S-5,
@@ -360,24 +491,34 @@ fn validate_export_path(path: &Path, required_ext: Option<&str>) -> Result<(), S
 }
 
 /// Writes the FCPXML for the most recent successful sync.
+///
+/// F6: the frontend already hides export behind `phase.stale`, but that is a UI convention,
+/// not a guard — a hostile or buggy `invoke` could export a previous run's timeline after
+/// the sources changed. The caller passes its *current* sources; we refuse if they no longer
+/// fingerprint to the run that is stored. `inputs`/`reference`/`overrides` mirror the same
+/// three staleness triggers the frontend tracks (`state.ts`).
 #[tauri::command]
 fn export_timeline(
     state: State<'_, AppState>,
     path: PathBuf,
     project: Option<String>,
+    inputs: Vec<PathBuf>,
+    reference: Option<PathBuf>,
+    device_overrides: Option<BTreeMap<PathBuf, String>>,
 ) -> Result<usize, String> {
     // S-5: the path is untrusted IPC input — validate before writing.
     validate_export_path(&path, Some("fcpxml"))?;
-    let guard = state
-        .last
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
-    let Some(last) = guard.as_ref() else {
-        return Err("nothing has been synced yet".into());
-    };
+
+    let fingerprint = inputs_fingerprint(
+        &inputs,
+        &device_overrides.unwrap_or_default(),
+        reference.as_deref(),
+    );
+    let (result, durations) = state.export_snapshot(fingerprint)?;
+
     let export = export_fcpxml(
-        &last.result,
-        &last.durations,
+        &result,
+        &durations,
         project.as_deref().unwrap_or("SundaySync"),
     )
     .map_err(|e| e.to_string())?;
@@ -433,10 +574,7 @@ fn export_diagnostics(state: State<'_, AppState>, path: PathBuf) -> Result<(), S
     // S-5: the path is untrusted IPC input — validate before writing.
     validate_export_path(&path, None)?;
 
-    let guard = state
-        .last
-        .lock()
-        .map_err(|_| "internal state was poisoned".to_string())?;
+    let guard = lock_state(&state.last, OnPoison::Reject)?;
 
     // S-6: source only. The absolute ffmpeg/ffprobe paths are dropped — a bundled build's
     // path runs through the user's home directory and would leak the username.
@@ -490,7 +628,7 @@ fn source_word(source: SidecarSource) -> &'static str {
 #[tauri::command]
 fn check_sidecar(state: State<'_, AppState>) -> Result<SidecarStatus, String> {
     let resolved = resolve_sidecar()?;
-    if let Ok(mut slot) = state.sidecar.lock() {
+    if let Ok(mut slot) = lock_state(&state.sidecar, OnPoison::Recover) {
         *slot = Some(resolved.clone());
     }
     Ok(SidecarStatus {
@@ -518,7 +656,7 @@ pub fn run() {
             let state = AppState::default();
             match resolve_sidecar() {
                 Ok(sidecar) => {
-                    if let Ok(mut slot) = state.sidecar.lock() {
+                    if let Ok(mut slot) = lock_state(&state.sidecar, OnPoison::Recover) {
                         *slot = Some(sidecar);
                     }
                 }
@@ -655,5 +793,154 @@ mod tests {
     #[test]
     fn export_path_validation_rejects_an_empty_path() {
         assert!(validate_export_path(Path::new(""), None).is_err());
+    }
+
+    /// Poisons `slot` by panicking while its guard is held, the way a real mid-update panic
+    /// would. Returns with the mutex left poisoned.
+    fn poison<T: Send + 'static>(slot: &Arc<Mutex<T>>) {
+        let m = Arc::clone(slot);
+        let _ = std::thread::spawn(move || {
+            let _guard = m.lock().unwrap();
+            panic!("deliberately poisoning the mutex for a test");
+        })
+        .join();
+        assert!(slot.is_poisoned(), "the slot should be poisoned now");
+    }
+
+    fn last_run(inputs_hash: u64) -> LastRun {
+        LastRun {
+            result: sample_result(),
+            durations: BTreeMap::new(),
+            inputs_hash,
+        }
+    }
+
+    #[test]
+    fn cancel_still_fires_when_the_cancel_lock_is_poisoned() {
+        // F1: the one safety control must survive a poisoned AppState. Before the fix,
+        // `cancel_sync` took `if let Ok(slot) = lock()` and silently did nothing here.
+        let state = AppState::default();
+        let token = CancelToken::new();
+        state.set_cancel(token.clone());
+
+        poison(&state.cancel);
+
+        state.request_cancel();
+        assert!(
+            token.is_cancelled(),
+            "cancel must fire even through a poisoned lock"
+        );
+    }
+
+    #[test]
+    fn export_snapshot_errors_cleanly_on_a_poisoned_last() {
+        // F1: the LastRun slot is the unsafe-to-recover one — a torn result must not be
+        // exported. It errors instead of panicking or handing back half-written state.
+        let state = AppState::default();
+        state.store_last(last_run(7));
+        poison(&state.last);
+
+        let err = state.export_snapshot(7).unwrap_err();
+        assert!(err.contains("poisoned"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn scan_cancel_clear_respects_token_identity() {
+        // F3: an old scan finishing late must not clear a newer scan's cancel slot.
+        let state = AppState::default();
+        let old = state.install_scan_cancel();
+        let new = state.install_scan_cancel();
+
+        // Installing the newer token supersedes (cancels) the old one.
+        assert!(
+            old.is_cancelled(),
+            "the superseded scan should be cancelled"
+        );
+        assert!(!new.is_cancelled(), "the newest scan must not be cancelled");
+
+        // The old scan tries to clean up after itself — it must NOT touch the newer token.
+        state.clear_scan_cancel_if_ours(&old);
+        {
+            let slot = state.scan_cancel.lock().unwrap();
+            let current = slot.as_ref().expect("the newer token must survive");
+            assert!(
+                Arc::ptr_eq(current, &new),
+                "the newer scan's cancel token was wrongly cleared — it is now uncancellable"
+            );
+        }
+
+        // The rightful owner can still clear it.
+        state.clear_scan_cancel_if_ours(&new);
+        assert!(state.scan_cancel.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn export_snapshot_gates_on_the_inputs_fingerprint() {
+        // F6: export succeeds for the sources that produced the run, and refuses once they
+        // change — even for a caller that bypasses the UI's `phase.stale` gate.
+        let state = AppState::default();
+        let inputs = vec![PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")];
+        let overrides = BTreeMap::new();
+        let hash = inputs_fingerprint(&inputs, &overrides, None);
+        state.store_last(last_run(hash));
+
+        assert!(
+            state.export_snapshot(hash).is_ok(),
+            "matching inputs export"
+        );
+
+        let changed = inputs_fingerprint(&[PathBuf::from("/a/1.mp4")], &overrides, None);
+        assert_ne!(hash, changed);
+        let err = state.export_snapshot(changed).unwrap_err();
+        assert!(err.contains("sources changed"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn inputs_fingerprint_is_order_and_duplicate_independent() {
+        // The frontend dedups via a Set and does not promise an order; the fingerprint must
+        // agree regardless so a mere reshuffle never reads as "sources changed".
+        let overrides = BTreeMap::new();
+        let a = inputs_fingerprint(
+            &[PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")],
+            &overrides,
+            None,
+        );
+        let b = inputs_fingerprint(
+            &[
+                PathBuf::from("/a/2.mp4"),
+                PathBuf::from("/a/1.mp4"),
+                PathBuf::from("/a/1.mp4"),
+            ],
+            &overrides,
+            None,
+        );
+        assert_eq!(a, b);
+
+        // But a different reference, or a different override, does change it.
+        let mut overrides2 = BTreeMap::new();
+        overrides2.insert(PathBuf::from("/a/1.mp4"), "cam-b".to_string());
+        assert_ne!(
+            a,
+            inputs_fingerprint(
+                &[PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")],
+                &overrides2,
+                None,
+            )
+        );
+        assert_ne!(
+            a,
+            inputs_fingerprint(
+                &[PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")],
+                &overrides,
+                Some(Path::new("/a/1.mp4")),
+            )
+        );
+    }
+
+    #[test]
+    fn export_snapshot_reports_an_empty_slot() {
+        let state = AppState::default();
+        let err = state.export_snapshot(0).unwrap_err();
+        assert!(err.contains("nothing has been synced"), "unexpected: {err}");
     }
 }

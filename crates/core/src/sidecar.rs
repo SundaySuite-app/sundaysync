@@ -97,16 +97,32 @@ pub fn fallback_candidates() -> Vec<PathBuf> {
     }
 }
 
+/// Ceiling for a `-version` probe (F11). `-version` is trivial — this exists only to
+/// bound a *wedged* binary (quarantine limbo, a dead FUSE mount), not a slow one, so a
+/// few seconds is generous. Well under [`PROBE_TIMEOUT`]; the two are unrelated stages.
+const RUNNABLE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// `<bin> -version` exits 0 — the cheapest proof this is a real, runnable executable for
 /// this architecture, rather than a name that merely exists on disk.
 fn runnable(bin: &Path) -> bool {
-    Command::new(bin)
-        .arg("-version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
+    runnable_within(bin, RUNNABLE_TIMEOUT)
+}
+
+/// [`runnable`] with an explicit bound, so tests can assert the timeout fires without
+/// waiting the full production ceiling.
+///
+/// # Why this is bounded now (F11, docs/DECISIONS.md D-035)
+///
+/// The previous form used a plain blocking `status()`, unlike [`run`]'s poll loop. A
+/// bundled ffmpeg that hangs on `-version` would then wedge `check_sidecar` and onboarding
+/// forever and uncancellably. Reusing [`run`] inherits its bounded wait *and* the D-010
+/// lesson — a killed child is never joined on its reader threads on the timeout path — so
+/// a wedged binary is reported as not-runnable instead of hanging the caller.
+fn runnable_within(bin: &Path, timeout: Duration) -> bool {
+    // A fresh, never-cancelled token: this probe has no user-facing Cancel of its own; the
+    // timeout is the whole safety net.
+    run(bin, ["-version"], timeout, &CancelToken::new())
+        .map(|o| o.success)
         .unwrap_or(false)
 }
 
@@ -427,6 +443,44 @@ mod tests {
             serde_json::to_string(&SidecarSource::System).unwrap(),
             "\"system\""
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runnable_gives_up_on_a_binary_that_hangs_on_version() {
+        // F11: a binary wedged on `-version` must be reported as not-runnable within the
+        // bound, not hang check_sidecar/onboarding. A short script that sleeps far past a
+        // tight bound stands in for the quarantine-limbo / dead-mount case.
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir()
+            .join("sundaysync-tests")
+            .join("sidecar-runnable-hang");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("hangs.sh");
+        std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let start = Instant::now();
+        let ok = runnable_within(&script, Duration::from_millis(150));
+        assert!(!ok, "a binary that never answers -version is not runnable");
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "runnable() did not honour its timeout: {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn runnable_accepts_a_real_binary_within_the_bound() {
+        // The positive half: a genuine ffmpeg passes the bounded probe. Skips where the
+        // machine has none, exactly like the accuracy harness.
+        let Ok(system) = Sidecar::from_path() else {
+            eprintln!("SKIP: no ffmpeg on this machine");
+            return;
+        };
+        assert!(runnable_within(&system.ffmpeg, RUNNABLE_TIMEOUT));
     }
 
     #[test]
