@@ -30,6 +30,7 @@ import { detectLang, dictionaries, type Lang } from "./i18n";
 import { getSettings, saveSettings } from "./settings";
 import { initialState, reducer } from "./state";
 import { getTelemetryStatus, reportFrontendError } from "./telemetry";
+import { checkForUpdate } from "./update";
 import { gateErrorReport, initialErrorGateState, shapeErrorPayload } from "./telemetryErrors";
 import type { ProgressEvent, ScanManifest, SidecarStatus, SyncOutcome } from "./types";
 
@@ -81,6 +82,27 @@ export function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // E9: a quiet on-launch update check. If the chosen ring has a newer release, surface a
+  // calm info banner pointing at Settings → System, where the actual download/install lives
+  // — the launch check never downloads anything on its own. Fully silent otherwise: a
+  // failed or unreachable check is a non-event (dev builds short-circuit to upToDate in the
+  // backend), never a startup error in the user's face. Runs once.
+  useEffect(() => {
+    let cancelled = false;
+    checkForUpdate(getSettings().betaChannel).then((status) => {
+      if (cancelled || status.phase !== "available") return;
+      dispatch({
+        type: "banner/set",
+        banner: { kind: "info", text: t.updateBannerAvailable(status.version) },
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Once at startup; `t` intentionally omitted so a language toggle doesn't re-check.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Global error capture (E7 CONSENT-UX frontend half): forward uncaught errors and
