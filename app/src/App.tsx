@@ -14,6 +14,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { BannerRegion } from "./components/Banner";
+import { ConsentCard } from "./components/ConsentCard";
 import { DropZone } from "./components/DropZone";
 import { EmptyState } from "./components/EmptyState";
 import { Onboarding } from "./components/Onboarding";
@@ -28,6 +29,8 @@ import { invokeWithTimeout } from "./invoke";
 import { detectLang, dictionaries, type Lang } from "./i18n";
 import { getSettings, saveSettings } from "./settings";
 import { initialState, reducer } from "./state";
+import { getTelemetryStatus, reportFrontendError } from "./telemetry";
+import { gateErrorReport, initialErrorGateState, shapeErrorPayload } from "./telemetryErrors";
 import type { ProgressEvent, ScanManifest, SidecarStatus, SyncOutcome } from "./types";
 
 export function App() {
@@ -35,6 +38,7 @@ export function App() {
   const [lang, setLang] = useState<Lang>(() => getSettings().lang ?? detectLang());
   const [showSettings, setShowSettings] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(() => !getSettings().onboardingDone);
+  const [showConsent, setShowConsent] = useState(false);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("SundaySync");
   const t = dictionaries[lang];
@@ -61,6 +65,58 @@ export function App() {
     // `t` is intentionally not a dependency: this self-test runs once at startup, and a
     // language toggle during the probe should not re-spawn ffmpeg -version.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // E7 CONSENT-UX: prompt for telemetry consent once, whenever this install hasn't
+  // answered yet (`consentVersion === null`) — true both for a brand-new install (after
+  // onboarding closes, see the render below) and for an existing install upgrading into
+  // this version, whose `onboardingDone` is already `true` and would otherwise never see
+  // this dialog. Fails soft: if the core command isn't there yet, `getTelemetryStatus`
+  // resolves `null` and the prompt simply never shows.
+  useEffect(() => {
+    let cancelled = false;
+    getTelemetryStatus().then((status) => {
+      if (!cancelled && status && status.consentVersion === null) setShowConsent(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Global error capture (E7 CONSENT-UX frontend half): forward uncaught errors and
+  // unhandled promise rejections to the anonymous telemetry queue. `report_frontend_error`
+  // is itself best-effort (telemetry.ts), and `gateErrorReport` dedupes/rate-limits so a
+  // tight failure loop can't flood it — see telemetryErrors.ts for the pure logic.
+  useEffect(() => {
+    let gate = initialErrorGateState;
+    const submit = (kind: string, rawMessage: string) => {
+      try {
+        const shaped = shapeErrorPayload(kind, rawMessage);
+        const gated = gateErrorReport(gate, shaped.kind, shaped.message, Date.now());
+        gate = gated.state;
+        if (!gated.allow) return;
+        void reportFrontendError(shaped.kind, shaped.message);
+      } catch {
+        // An error handler must never itself throw.
+      }
+    };
+
+    const onWindowError = (event: ErrorEvent) => {
+      submit("error", event.message || String(event.error ?? "unknown error"));
+    };
+    const onRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason as unknown;
+      const message =
+        reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
+      submit("unhandledrejection", message);
+    };
+
+    window.addEventListener("error", onWindowError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onWindowError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
   }, []);
 
   // Progress events for the running sync.
@@ -304,11 +360,21 @@ export function App() {
           onClose={() => setShowSettings(false)}
           onLangChange={(next) => setLang(next ?? detectLang())}
           onShowOnboarding={() => setShowOnboarding(true)}
+          onShowConsent={() => setShowConsent(true)}
           onNotice={notice}
         />
       )}
 
       {showOnboarding && <Onboarding t={t} onDone={() => setShowOnboarding(false)} />}
+
+      {/* Deferred until onboarding is out of the way so the two dialogs never stack. */}
+      {!showOnboarding && showConsent && (
+        <ConsentCard
+          t={t}
+          onDecided={() => setShowConsent(false)}
+          onDismiss={() => setShowConsent(false)}
+        />
+      )}
     </main>
   );
 }
