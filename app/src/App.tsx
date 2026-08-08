@@ -24,6 +24,7 @@ import { SourcesView } from "./components/SourcesView";
 import { GearIcon } from "./components/icons";
 
 import { mapEngineError } from "./errors";
+import { invokeWithTimeout } from "./invoke";
 import { detectLang, dictionaries, type Lang } from "./i18n";
 import { getSettings, saveSettings } from "./settings";
 import { initialState, reducer } from "./state";
@@ -44,11 +45,22 @@ export function App() {
     document.documentElement.lang = lang;
   }, [lang]);
 
-  // ffmpeg check up front, so the warning shows before the user drops 40 GB in.
+  // ffmpeg check up front, so the warning shows before the user drops 40 GB in. Bounded by
+  // a timeout (F11/F14): a bundled ffmpeg that hangs on `-version` must not wedge onboarding
+  // forever — on expiry we fall back to the "not found" warning and surface a retry notice.
   useEffect(() => {
-    invoke<SidecarStatus>("check_sidecar")
+    invokeWithTimeout<SidecarStatus>("check_sidecar", undefined, 10_000)
       .then(() => dispatch({ type: "sidecar/checked", ok: true }))
-      .catch(() => dispatch({ type: "sidecar/checked", ok: false }));
+      .catch((e) => {
+        dispatch({ type: "sidecar/checked", ok: false });
+        const mapped = mapEngineError(String(e), t);
+        if (mapped.kind === "notice") {
+          dispatch({ type: "banner/set", banner: { kind: "info", text: mapped.text } });
+        }
+      });
+    // `t` is intentionally not a dependency: this self-test runs once at startup, and a
+    // language toggle during the probe should not re-spawn ffmpeg -version.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Progress events for the running sync.
@@ -128,7 +140,16 @@ export function App() {
     });
     if (!path) return;
     try {
-      const clips = await invoke<number>("export_timeline", { path, project: projectName });
+      // F6: pass the current sources so the backend can refuse if they no longer match the
+      // stored run — defense in depth behind the `disabled={phase.stale}` UI gate.
+      const clips = await invoke<number>("export_timeline", {
+        path,
+        project: projectName,
+        inputs: state.phase.name === "result" ? state.phase.inputs : [],
+        reference: state.reference,
+        deviceOverrides:
+          Object.keys(state.overrides).length > 0 ? state.overrides : null,
+      });
       setExportedPath(path);
       dispatch({
         type: "banner/set",
@@ -140,7 +161,7 @@ export function App() {
         banner: { kind: "error", text: mapEngineError(String(e), t).text },
       });
     }
-  }, [projectName, t]);
+  }, [projectName, t, state.phase, state.reference, state.overrides]);
 
   const notice = useCallback((kind: "ok" | "error", text: string) => {
     dispatch({ type: "banner/set", banner: { kind, text } });

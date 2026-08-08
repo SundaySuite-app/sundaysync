@@ -101,7 +101,10 @@ export const nb = {
   errInvariant: (detail: string) =>
     `Intern feil — dette er en programfeil, ikke et problem med filene dine. (${detail})`,
   errUnknown: (raw: string) => `Noe gikk galt: ${raw}`,
+  errStaleExport:
+    "Kildene er endret siden denne synkroniseringen. Synkroniser på nytt før du eksporterer.",
   noticeCancelled: "Avbrutt. Ingenting er endret.",
+  noticeTimeout: "Motoren svarte ikke i tide. Prøv igjen.",
 
   // Settings
   settings: "Innstillinger",
@@ -236,7 +239,10 @@ export const en: Strings = {
   errInvariant: (detail: string) =>
     `Internal error — this is a bug in the app, not a problem with your files. (${detail})`,
   errUnknown: (raw: string) => `Something went wrong: ${raw}`,
+  errStaleExport:
+    "The sources have changed since this sync. Sync again before exporting.",
   noticeCancelled: "Cancelled. Nothing was changed.",
+  noticeTimeout: "The engine did not answer in time. Try again.",
 
   settings: "Settings",
   language: "Language",
