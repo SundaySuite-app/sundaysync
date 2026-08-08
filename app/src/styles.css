@@ -492,6 +492,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); }
 }
 .onboarding__status--ok { background: var(--green-bg); color: var(--green); }
 .onboarding__status--missing { background: var(--red-bg); color: var(--red); }
+.onboarding .onboarding__path { color: var(--text3); font-size: 0.8125rem; margin: -0.75rem 0 1.5rem; }
 .onboarding code {
   background: var(--surface3);
   border-radius: var(--rxs);

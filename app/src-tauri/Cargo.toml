@@ -3,7 +3,7 @@
 [package]
 name = "sundaysync-app"
 description = "SundaySync desktop shell. Thin: invokes the engine, renders progress and results."
-version = "0.1.0"
+version = "0.1.2"
 authors = ["Richard Fossland"]
 edition = "2021"
 license = "MIT"

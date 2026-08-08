@@ -4,7 +4,8 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type { Lang, Strings } from "../i18n";
 import { formatBytes } from "../i18n";
 import { getSettings, parseMinPsrInput, saveSettings } from "../settings";
-import type { CacheStatus } from "../types";
+import { describeSidecar } from "../sidecarStatus";
+import type { CacheStatus, SidecarStatus } from "../types";
 import { Dialog } from "./Dialog";
 
 /**
@@ -35,6 +36,7 @@ export function SettingsPanel({
   const [minPsrError, setMinPsrError] = useState(false);
   const [cache, setCache] = useState<CacheStatus | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [sidecar, setSidecar] = useState<SidecarStatus | null>(null);
 
   const refreshCache = () => {
     invoke<CacheStatus>("cache_status", { dir: getSettings().cacheDir })
@@ -42,6 +44,11 @@ export function SettingsPanel({
       .catch(() => setCache(null));
   };
   useEffect(refreshCache, []);
+  useEffect(() => {
+    invoke<SidecarStatus>("check_sidecar")
+      .then(setSidecar)
+      .catch(() => setSidecar(null));
+  }, []);
 
   const commitMinPsr = () => {
     const parsed = parseMinPsrInput(minPsrDraft);
@@ -196,6 +203,14 @@ export function SettingsPanel({
           </button>
         </div>
         <small className="subtle">{t.diagnosticsHint}</small>
+
+        {sidecar && (
+          <small className="subtle">
+            {sidecar.source === "bundled"
+              ? describeSidecar(sidecar, t).label
+              : t.obFfmpegSystemPath(sidecar.path)}
+          </small>
+        )}
       </div>
     </Dialog>
   );

@@ -109,6 +109,17 @@ export interface CacheStatus {
   bytes: number;
 }
 
+/**
+ * Mirrors the shell's `SidecarStatus` struct (`app/src-tauri/src/lib.rs`) — the resolved
+ * shape of `invoke("check_sidecar")` now that ffmpeg is bundled with the app. Rejects
+ * with an error string instead when neither the bundled binary nor anything on PATH
+ * works.
+ */
+export interface SidecarStatus {
+  source: "bundled" | "system";
+  path: string;
+}
+
 export function basename(path: string): string {
   const parts = path.split(/[/\\]/);
   return parts[parts.length - 1] ?? path;

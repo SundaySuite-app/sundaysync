@@ -14,9 +14,9 @@
 #            or: xattr -cr /Applications/SundaySync.app
 #   Windows: SmartScreen will warn. "More info" → "Run anyway".
 #
-# Testers also need ffmpeg on PATH (brew install ffmpeg / winget install ffmpeg)
-# — bundling the sidecar is likewise Phase 9 (§10). The app's onboarding checks
-# for it and says exactly this.
+# ffmpeg and ffprobe are BUNDLED as of v0.1.2 (D-031): each runner fetches its
+# own SHA-256-pinned pair below, and tauri's `externalBin` places them next to
+# the app executable. Testers install nothing.
 
 name: release
 
@@ -60,6 +60,15 @@ jobs:
         working-directory: app
         run: npm ci
 
+      # Each platform's runner fetches its OWN sidecars — the script reads the host
+      # triple from `rustc -vV` and names the files the way `externalBin` expects. Both
+      # the downloaded archive and the unpacked binary are SHA-256-pinned, so a moved or
+      # altered download fails the build instead of shipping. Run explicitly rather than
+      # leaning on the `pretauri` hook, because tauri-action invokes the CLI directly.
+      - name: Fetch ffmpeg sidecars
+        working-directory: app
+        run: node scripts/fetch-ffmpeg.mjs
+
       # tauri-action builds the bundle and attaches it to a draft-free prerelease.
       # No signing secrets exist yet, so it produces unsigned installers (see header).
       - name: Build and publish
@@ -77,11 +86,12 @@ jobs:
             eller kjør `xattr -cr /Applications/SundaySync.app`.
             **Windows:** SmartScreen advarer — «Mer info» → «Kjør likevel».
 
-            **Krav:** ffmpeg på PATH (`brew install ffmpeg` / `winget install ffmpeg`).
-            Appen sjekker dette i introduksjonen og sier fra om det mangler.
+            **Alt innebygd — ingenting å installere ved siden av.** ffmpeg følger med i
+            appen; introduksjonen bekrefter det med en selvtest.
 
             ---
             **Test build — unsigned.** macOS: right-click → Open the first time, or
             `xattr -cr /Applications/SundaySync.app`. Windows: SmartScreen → "More info"
-            → "Run anyway". Requires ffmpeg on PATH; the app's onboarding checks for it.
+            → "Run anyway". Everything bundled — nothing else to install; the app's
+            onboarding self-test confirms it.
           prerelease: true

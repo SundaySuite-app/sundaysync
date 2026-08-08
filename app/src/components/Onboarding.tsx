@@ -2,33 +2,44 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Strings } from "../i18n";
 import { saveSettingsNow } from "../settings";
+import { describeSidecar } from "../sidecarStatus";
+import type { SidecarStatus } from "../types";
 import { Dialog } from "./Dialog";
 import { SyncArt } from "./icons";
 
 const TOTAL_STEPS = 3;
+
+/** `null` = checking, `"missing"` = the reject path (degraded install), otherwise the
+ *  resolved bundled/system status. */
+type SidecarState = SidecarStatus | null | "missing";
 
 /**
  * First-run onboarding — three steps, skippable, re-openable from settings.
  * SundayRec's pattern translated to React: `onboardingDone` is saved immediately on
  * finish/skip (not debounced), so quitting right after cannot lose it.
  *
- * Step 3 is the practical one: a live ffmpeg check with a re-check button, so a user
- * who installs it mid-onboarding sees the light turn green without restarting.
+ * Step 3 is a self-test of the bundled engine, not an install prerequisite (E1): ffmpeg
+ * ships inside the app now, so the happy paths are "bundled" and "using the system's
+ * copy" — both green. A rejection (damaged install) falls back to the old missing-flow
+ * with a re-check button and the Homebrew hint as a manual last resort.
  */
 export function Onboarding({ t, onDone }: { t: Strings; onDone: () => void }) {
   const [step, setStep] = useState(1);
-  const [ffmpegOk, setFfmpegOk] = useState<boolean | null>(null);
+  const [sidecar, setSidecar] = useState<SidecarState>(null);
 
-  const checkFfmpeg = useCallback(() => {
-    setFfmpegOk(null);
-    invoke<string>("check_sidecar")
-      .then(() => setFfmpegOk(true))
-      .catch(() => setFfmpegOk(false));
+  const checkSidecar = useCallback(() => {
+    setSidecar(null);
+    invoke<SidecarStatus>("check_sidecar")
+      .then(setSidecar)
+      .catch(() => setSidecar("missing"));
   }, []);
 
   useEffect(() => {
-    if (step === 3) checkFfmpeg();
-  }, [step, checkFfmpeg]);
+    if (step === 3) checkSidecar();
+  }, [step, checkSidecar]);
+
+  const sidecarDescription =
+    sidecar && sidecar !== "missing" ? describeSidecar(sidecar, t) : null;
 
   const finish = () => {
     saveSettingsNow({ onboardingDone: true });
@@ -56,10 +67,19 @@ export function Onboarding({ t, onDone }: { t: Strings; onDone: () => void }) {
           <>
             <h2 id="onboarding-title">{t.obTitle3}</h2>
             <p>{t.obBody3}</p>
-            {ffmpegOk === true && (
-              <p className="onboarding__status onboarding__status--ok">✓ {t.obFfmpegOk}</p>
+            {sidecarDescription && (
+              <>
+                <p className="onboarding__status onboarding__status--ok">
+                  ✓ {sidecarDescription.label}
+                </p>
+                {sidecarDescription.path && (
+                  <p className="onboarding__path">
+                    <code>{sidecarDescription.path}</code>
+                  </p>
+                )}
+              </>
             )}
-            {ffmpegOk === false && (
+            {sidecar === "missing" && (
               <>
                 <p className="onboarding__status onboarding__status--missing">
                   {t.obFfmpegMissing}
@@ -67,7 +87,7 @@ export function Onboarding({ t, onDone }: { t: Strings; onDone: () => void }) {
                 <p>
                   {t.obFfmpegHow} <code>brew install ffmpeg</code>
                 </p>
-                <button type="button" className="secondary" onClick={checkFfmpeg}>
+                <button type="button" className="secondary" onClick={checkSidecar}>
                   {t.obCheckAgain}
                 </button>
               </>

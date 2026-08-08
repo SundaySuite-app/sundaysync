@@ -1,6 +1,7 @@
 //! The input side of the single `sync()` entry point — docs/PLAN.md §3.
 
 use crate::result::Parameters;
+use crate::sidecar::Sidecar;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -65,6 +66,14 @@ pub struct SyncRequest {
     /// [`crate::correlate::SEGMENT_COUNT_RANGE`] at the pipeline boundary, so a wild
     /// value from a config file degrades to the nearest sane one instead of erroring.
     pub segment_count: usize,
+    /// The ffmpeg/ffprobe pair to decode with. `None` means "resolve from this machine"
+    /// via [`Sidecar::from_path`], which is what the CLI and the tests want.
+    ///
+    /// The desktop shell fills this in with the binaries bundled inside the application
+    /// (D-031). Passing them through the request is what keeps the engine Tauri-free
+    /// (D-023): resolving an app-relative path is the shell's job, and the engine only
+    /// ever sees two verified paths.
+    pub sidecar: Option<Sidecar>,
 }
 
 impl SyncRequest {
@@ -77,6 +86,7 @@ impl SyncRequest {
             min_psr: DEFAULT_MIN_PSR,
             device_overrides: BTreeMap::new(),
             segment_count: crate::correlate::SEGMENT_COUNT,
+            sidecar: None,
         }
     }
 

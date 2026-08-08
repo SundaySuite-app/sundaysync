@@ -27,6 +27,17 @@ const REQUIRED_WITHIN_TOLERANCE: f64 = 0.95;
 /// what these churches shoot), so one frame is 40 ms.
 const FRAME_MS: f64 = 1000.0 / 25.0;
 
+/// The D-005 skip guard: no ffmpeg, no accuracy suite.
+///
+/// The trigger is `Sidecar::from_path()` failing, which since D-031 also searches
+/// `/opt/homebrew/bin`, `/usr/local/bin` and `/opt/local/bin`. That changes what happens
+/// on a *developer's* machine under the D-025 stripped-PATH check — these tests now RUN
+/// there instead of skipping, which is strictly better: the variant was only ever a proxy
+/// for CI. It changes nothing on the runners themselves. The macOS and Windows jobs
+/// install no ffmpeg at all, and a Homebrew ffmpeg would have been on the runner's PATH
+/// anyway (`/opt/homebrew/bin` is in it), so an empty PATH lookup there means an empty
+/// fallback lookup too, and the suite still skips exactly as D-005 intends. The ubuntu
+/// job sets `SUNDAYSYNC_REQUIRE_FFMPEG=1`, so a skip there is a hard failure regardless.
 fn require_ffmpeg() -> Option<Sidecar> {
     match Sidecar::from_path() {
         Ok(s) => Some(s),

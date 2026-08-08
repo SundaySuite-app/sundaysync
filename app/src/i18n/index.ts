@@ -96,7 +96,7 @@ export const nb = {
   // Engine errors (D-030 — mapped from stable Display prefixes in errors.ts)
   errNoInput: "Ingen filer å synkronisere.",
   errSidecar:
-    "Finner ikke ffmpeg. Installer det (f.eks. «brew install ffmpeg») og prøv igjen.",
+    "Motoren (ffmpeg) svarer ikke. Prøv å starte appen på nytt; installer eventuelt ffmpeg manuelt («brew install ffmpeg») som nødløsning.",
   errIo: (path: string) => `Kunne ikke lese ${path}.`,
   errInvariant: (detail: string) =>
     `Intern feil — dette er en programfeil, ikke et problem med filene dine. (${detail})`,
@@ -141,10 +141,12 @@ export const nb = {
   obTitle2: "Tips for best resultat",
   obBody2:
     "Ta med sporet fra mikser eller lydopptaker — det blir referansen alle kameraene festes til. Mapper du har organisert per kamera blir automatisk egne enheter. Klipp appen ikke er sikker på, blir ærlig rapportert i stedet for å bli plassert på slump.",
-  obTitle3: "Én ting må være på plass",
+  obTitle3: "Motoren er innebygd",
   obBody3:
-    "SundaySync bruker ffmpeg til å lese mediefiler. Det er gratis og installeres én gang.",
-  obFfmpegOk: "ffmpeg er klart",
+    "SundaySync har ffmpeg innebygd — det er motoren som leser mediefilene. Her er en rask selvtest.",
+  obFfmpegBundled: "Alt innebygd — ingenting å installere",
+  obFfmpegSystem: "Bruker ffmpeg fra maskinen",
+  obFfmpegSystemPath: (path: string) => `Fant: ${path}`,
   obFfmpegMissing: "ffmpeg ble ikke funnet",
   obFfmpegHow: "Installer med Homebrew:",
   obCheckAgain: "Sjekk igjen",
@@ -229,7 +231,7 @@ export const en: Strings = {
 
   errNoInput: "No files to synchronize.",
   errSidecar:
-    "Cannot find ffmpeg. Install it (e.g. “brew install ffmpeg”) and try again.",
+    "The engine (ffmpeg) is not responding. Try restarting the app; as a last resort install ffmpeg manually (“brew install ffmpeg”).",
   errIo: (path: string) => `Could not read ${path}.`,
   errInvariant: (detail: string) =>
     `Internal error — this is a bug in the app, not a problem with your files. (${detail})`,
@@ -272,9 +274,12 @@ export const en: Strings = {
   obTitle2: "Tips for the best result",
   obBody2:
     "Include the mixer or recorder track — it becomes the reference every camera is anchored to. Folders you have organised per camera automatically become their own devices. Clips the app is not sure about are reported honestly instead of being placed on a guess.",
-  obTitle3: "One thing needs to be in place",
-  obBody3: "SundaySync uses ffmpeg to read media files. It is free and installed once.",
-  obFfmpegOk: "ffmpeg is ready",
+  obTitle3: "The engine is built in",
+  obBody3:
+    "SundaySync ships with ffmpeg built in — the engine that reads media files. Here is a quick self-test.",
+  obFfmpegBundled: "Everything bundled — nothing to install",
+  obFfmpegSystem: "Using ffmpeg from this machine",
+  obFfmpegSystemPath: (path: string) => `Found: ${path}`,
   obFfmpegMissing: "ffmpeg was not found",
   obFfmpegHow: "Install with Homebrew:",
   obCheckAgain: "Check again",
