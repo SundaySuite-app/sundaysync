@@ -151,6 +151,19 @@ export function App() {
     };
   }, []);
 
+  // Progress events for the pre-sync scan/probe (`scan_inputs`'s own `EventSink`,
+  // channel `scan:progress` — lib.rs). Previously emitted and silently dropped: the
+  // scanning phase showed nothing but a static spinner even while the backend was
+  // already reporting real stage + completed/total ticks for a large card dump.
+  useEffect(() => {
+    const unlisten = listen<ProgressEvent>("scan:progress", (e) =>
+      dispatch({ type: "scan/progress", progress: e.payload }),
+    );
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, []);
+
   // The scan effect: whenever the phase enters `scanning`, run scan_inputs for the
   // current sequence number. A superseded scan's result is dropped by the reducer.
   const phase = state.phase;
@@ -301,10 +314,9 @@ export function App() {
       )}
 
       {phase.name === "scanning" && (
-        <p className="scanline">
-          <span className="scanline__spinner" aria-hidden="true" />
-          {t.scanningInputs}
-        </p>
+        <div className="run">
+          <ProgressBar t={t} progress={phase.progress} idleLabel={t.scanningInputs} />
+        </div>
       )}
 
       {(phase.name === "sources" || phase.name === "result") && manifest && (

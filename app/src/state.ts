@@ -15,7 +15,14 @@ import type { ProgressEvent, ScanManifest, SyncOutcome } from "./types";
 
 export type Phase =
   | { name: "empty" }
-  | { name: "scanning"; inputs: string[]; previous: ScanManifest | null }
+  | {
+      name: "scanning";
+      inputs: string[];
+      previous: ScanManifest | null;
+      /** Live `scan:progress` ticks from the backend probe — null until the first event
+       *  arrives, so the UI falls back to an indeterminate "reading sources" label. */
+      progress: ProgressEvent | null;
+    }
   | { name: "sources"; inputs: string[]; manifest: ScanManifest }
   | {
       name: "syncing";
@@ -67,6 +74,7 @@ export type Action =
   | { type: "inputs/removeRoot"; path: string }
   | { type: "inputs/clear" }
   | { type: "scan/start" }
+  | { type: "scan/progress"; progress: ProgressEvent }
   | { type: "scan/done"; seq: number; manifest: ScanManifest }
   | { type: "scan/failed"; seq: number; error: MappedError }
   | { type: "override/set"; file: string; device: string }
@@ -105,7 +113,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         banner: null,
-        phase: { name: "scanning", inputs, previous: currentManifest(state.phase) },
+        phase: { name: "scanning", inputs, previous: currentManifest(state.phase), progress: null },
         scanSeq: state.scanSeq + 1,
       };
     }
@@ -118,7 +126,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         banner: null,
-        phase: { name: "scanning", inputs, previous: currentManifest(state.phase) },
+        phase: { name: "scanning", inputs, previous: currentManifest(state.phase), progress: null },
         scanSeq: state.scanSeq + 1,
       };
     }
@@ -136,6 +144,10 @@ export function reducer(state: AppState, action: Action): AppState {
       // inputs/add and inputs/removeRoot already moved us to `scanning`; this action
       // exists for the App effect to acknowledge, and is a no-op on state.
       return state;
+
+    case "scan/progress":
+      if (state.phase.name !== "scanning") return state;
+      return { ...state, phase: { ...state.phase, progress: action.progress } };
 
     case "scan/done": {
       if (action.seq !== state.scanSeq || state.phase.name !== "scanning") {
