@@ -25,6 +25,12 @@ export interface Settings {
   segmentCount: number | null;
   /** `null` = the OS cache location the engine picks itself. */
   cacheDir: string | null;
+  /**
+   * Optional cache size cap in megabytes (D-040). `null` = off (the default): the cache
+   * grows and only the 90-day age sweep and manual "clear" bound it. A positive number
+   * enforces a ceiling, evicting least-recently-used entries when exceeded.
+   */
+  cacheCapMb: number | null;
   onboardingDone: boolean;
 }
 
@@ -33,6 +39,7 @@ export const DEFAULTS: Settings = {
   minPsr: null,
   segmentCount: null,
   cacheDir: null,
+  cacheCapMb: null,
   onboardingDone: false,
 };
 
@@ -53,6 +60,7 @@ function load(): Settings {
       minPsr: isPositiveNumber(p.minPsr) ? p.minPsr : null,
       segmentCount: isPositiveNumber(p.segmentCount) ? Math.round(p.segmentCount) : null,
       cacheDir: typeof p.cacheDir === "string" && p.cacheDir.length > 0 ? p.cacheDir : null,
+      cacheCapMb: isPositiveNumber(p.cacheCapMb) ? Math.round(p.cacheCapMb) : null,
       onboardingDone: p.onboardingDone === true,
     };
   } catch {

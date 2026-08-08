@@ -975,3 +975,95 @@ Fix: the nonce is now a single process-global `static SCRATCH_NONCE: AtomicU64`
 `temp_path` still carries cross-process uniqueness. The previously `#[ignore]`d
 `two_extractors_in_one_process_*` test is un-ignored as a passing regression
 (`crates/core/tests/concurrency.rs`).
+
+## D-038 — E5/P-1: the reference transform is finally "computed once and cached" (bit-identical), plus deterministic segment parallelism
+
+§4.3 promised the reference's forward-FFT block spectra are "computed once and cached", but
+`Correlator` held only an `FftPlanner`, so `find()` re-ran the whole overlap-save loop over
+the reference for every segment of every clip — ~48,000 2²⁰ FFTs on a 3 h/30-clip service,
+the ~8 min of pass-1 correlation the E2 explorers measured.
+
+`Correlator` now memoises the reference's PHAT-normalised block spectra, keyed by **(BLAKE3
+content hash of the reference samples, segment length)**. Keying on a content hash rather
+than a slice pointer is deliberate: a freed reference's address can be reused for different
+content, which pointer-identity would serve stale spectra for — a §7.5 silent-wrongness bug.
+The hash makes aliasing two distinct references cryptographically impossible, the same
+guarantee the on-disk cache relies on (D-035). Segment length is in the key because two
+segment lengths can share an FFT size `n` yet tile the reference differently. The cache is
+single-entry and byte-budgeted at 1.75 GiB: a reference whose spectra would exceed the
+budget (≈ a >4 h reference at the default 20 s segment) streams exactly as before, one block
+resident at a time, so the cache never breaches §7.7's 4 GB ceiling (D-034). The memoisation
+is pure — a miss recomputes identical values — so it is **bit-identical by construction** to
+the retained exhaustive path (`match_clip_exhaustive`). Proven so field-for-field over the
+real §8.1 fixtures and across positive/zero/negative/edge lags.
+
+The independent per-segment correlations additionally fan out across
+`extract::worker_count()` (§4.3(c)), sharing the spectra read-only and writing indexed slots
+assembled in input order, so placements are identical regardless of thread scheduling
+(§13.4). Peak memory is unchanged from the serial cached path — segment-level (not
+cross-clip) parallelism was chosen precisely so per-thread caches never multiply the
+reference spectra by the worker count. `MIN_PSR` is untouched: the arithmetic per segment is
+identical, so the Phase-3/D-015 calibration still holds without re-validation.
+
+Measured (12 min reference, 12×90 s clips, 4 workers): Tier-1 memoisation ~1.85×, segment
+parallelism ~2.1×, combined ~3.7–4.1× (machine-dependent). Projected shipping correlation:
+the §10 realistic 3 h/20-clip service **~57 s** (down from ~214 s; spectra 1.4 GB, cached);
+the 8 h/100-file stress day ~23 min (spectra 3.6 GB exceeds the budget → streams, parallel
+only — see D-039).
+
+## D-039 — E5/P-1: the decimated coarse-search is deferred, not abandoned
+
+Tier-1 caching + segment parallelism bring the §10 realistic 1.5–3 h church service
+comfortably within budget (~57 s of correlation), but do **not** meet §10's literal 8 h/100-
+file stress day in < 6 min (~23 min projected). That day is also the case where the
+reference's spectra (~3.6 GB) exceed both the cache budget and, with the resident reference
+audio, the 4 GB ceiling — so it must stream, and caching cannot help it. The remaining lever
+is the plan's decimated coarse search (÷8 → ~1.5 kHz to localise each offset, then a
+full-rate refine over a narrow window), which shrinks both the FFT size and the block count
+and would simultaneously make the long-reference spectra small enough to cache again.
+
+It is deferred rather than shipped because it is the one change that alters the arithmetic
+(placements within ±1 sample, not bit-identical), and §13.2/§13.4 demand it be gated hard:
+the coarse decimation factor and refine half-window must be chosen and **proven** so the
+coarse localisation error can never exceed the refine window on adversarial offsets (clip
+before the reference, near either end, negative lag), and PSR must be taken from the
+full-rate refine window (or `MIN_PSR` re-calibrated per D-015) with D-014's caution that a
+change which looks better is exactly when to suspect the instrument. That validation is a
+task in its own right; shipping it under-proven risks the false placements §8.2/§7.5 make the
+product's core promise against. The exhaustive path (`match_clip_exhaustive`) is retained
+precisely as the oracle a future decimated path must diff against. Recommended for E10's
+real-corpus loop, where the ±1-sample budget can be validated against real rooms rather than
+only synthetic material.
+
+## D-040 — Cache eviction closes D-013: 90-day mtime sweep by default, size cap off
+
+E5, P-4. D-013 left cache growth (~169 MB/audio-hour) unmanaged pending a product call. The
+engine now exposes `Cache::sweep_older_than(age)` and `Cache::enforce_size_cap(max_bytes)`,
+both returning `Evicted { entries, bytes }`. The analysis cache is regenerable, so age
+eviction is non-destructive to user data — a swept entry simply cold-decodes if that shoot is
+re-synced. Conductor-approved defaults: a **90-day sweep on app start** (on — run off the
+main thread in the shell's `setup()`, non-fatal), a **size cap in Settings (off by
+default)**, and the manual "Tøm buffer" stays. Both reuse the S-7 marker guard `clear()` uses
+(refuse an unmarked non-default dir), operate only on finished `.f32` entries — never an
+in-flight `.tmp` a live extraction owns, never a foreign file, never the marker — and are
+safe under a concurrent run (a vanished entry is success, not error). Age is from **mtime,
+not atime** (atime is frozen/absent under `relatime`/`noatime`/network mounts; mtime is
+written once at the write-then-rename commit, so "older than `age`" cleanly means "committed
+more than `age` ago"). The cap evicts least-recently-modified first, tie-broken by path, so
+the evicted set is a deterministic function of the inputs. Shell wiring: the `sweep_cache`
+and `enforce_cache_cap` commands, the startup sweep, and a `cacheCapMb` setting (null = off)
+driving `enforce_cache_cap` from the Settings panel.
+
+## D-041 — Parallel probing must be byte-identical to the serial result
+
+E5, P-2. Probing moved from a serial loop to the bounded extract worker pool
+(`worker_count()`, `min(4, cores)`) — one 30 s-timeout file no longer stalls the scan with
+idle cores. To keep the engine a deterministic function of its inputs (§3, §13.4),
+`probe_candidates` writes each probe outcome into an **index-aligned slot** and the caller
+folds them in candidate order, so `probed`, `unsynced`, and the manifest are identical
+whatever the thread schedule. Guaranteed by a test that runs the scan with 1 worker (serial)
+and 8 workers (parallel) over a mixed good/bad shoot and asserts the manifests are byte-equal
+(serde) and the raw `Probed` vectors are equal. Cancellation is preserved: workers check the
+token before taking work, an in-flight probe cancels via `probe`'s token path (§7.4), and a
+set token returns `Error::Cancelled` before any slot is unwrapped. The D-005 skip-guard
+behaviour is unchanged.

@@ -17,11 +17,11 @@
 //! # Why this is a long reference with FEW clips, not the literal 20 h/200 files
 //!
 //! `sundaysync_fixturegen::day::DaySpec::full_day` is the literal §7.7 target (20 h, 200
-//! files) and is what `sundaysync bench` should be pointed at once E5's correlation
-//! performance fix (P-1: cost is `O(reference_length × clips × segments)`, nothing
-//! cached yet) makes that tractable to run in a normal test session. Today it is not —
-//! by P-1's own measured baseline (3 h reference, 30 clips, ~8 min of pass-1 correlation
-//! alone), the full spec would take on the order of hours. This gate instead isolates the
+//! files) and is what `sundaysync bench` can be pointed at. E5's P-1 fix (D-038) landed the
+//! reference-spectra cache §4.3 promised, cutting the realistic 3 h/20-clip service from
+//! ~214 s to ~57 s of correlation, but a literal 20 h/200-file run is still minutes of work
+//! (D-039: the long-reference stress case streams rather than caches), so this gate keeps to
+//! a long reference with FEW clips to stay tractable in a normal session. It instead isolates the
 //! MEMORY dimension: `Extractor::load()`'s double-allocation is a function of the
 //! reference's length alone, so a long reference with few, short (`<45 s`, so each
 //! correlates as a single whole-clip pass rather than 5 segments — `WHOLE_CLIP_LIMIT_

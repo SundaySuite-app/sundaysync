@@ -119,13 +119,22 @@ export const nb = {
   segmentDefault: "5 (standard)",
   cacheDir: "Mappe for analyse-buffer",
   cacheHint:
-    "Bufferen gjør ny synkronisering nesten øyeblikkelig. Den bruker ca. 170 MB per time lyd og tømmes ikke automatisk.",
+    "Bufferen gjør ny synkronisering nesten øyeblikkelig. Den bruker ca. 170 MB per time lyd. Oppføringer som ikke er brukt på 90 dager ryddes automatisk ved oppstart.",
   cachePick: "Velg mappe",
   cacheUsage: (entries: number, size: string) =>
     entries === 1 ? `1 oppføring · ${size}` : `${entries} oppføringer · ${size}`,
   cacheClear: "Tøm buffer",
   cacheClearConfirm: "Tømme bufferen? Neste synkronisering må analysere alt på nytt.",
   cacheCleared: (size: string) => `Frigjorde ${size}.`,
+  cacheCap: "Størrelsestak (MB)",
+  cacheCapOff: "Av",
+  cacheCapHint:
+    "Valgfritt. Når satt, fjernes de eldst brukte oppføringene så snart bufferen overstiger taket. La feltet stå tomt for å slå det av.",
+  cacheCapError: "Skriv inn et positivt tall, eller la feltet stå tomt for å slå av.",
+  cacheEvicted: (entries: number, size: string) =>
+    entries === 1
+      ? `Fjernet 1 oppføring · frigjorde ${size}.`
+      : `Fjernet ${entries} oppføringer · frigjorde ${size}.`,
   showOnboarding: "Vis introduksjon igjen",
   diagnostics: "Eksporter diagnostikk",
   diagnosticsHint: "Inneholder logg og resultat — ingen mediefiler.",
@@ -256,13 +265,20 @@ export const en: Strings = {
   segmentDefault: "5 (default)",
   cacheDir: "Analysis cache folder",
   cacheHint:
-    "The cache makes re-syncing nearly instant. It uses about 170 MB per hour of audio and is not cleared automatically.",
+    "The cache makes re-syncing nearly instant. It uses about 170 MB per hour of audio. Entries untouched for 90 days are cleared automatically at startup.",
   cachePick: "Choose folder",
   cacheUsage: (entries: number, size: string) =>
     entries === 1 ? `1 entry · ${size}` : `${entries} entries · ${size}`,
   cacheClear: "Clear cache",
   cacheClearConfirm: "Clear the cache? The next sync will have to analyse everything again.",
   cacheCleared: (size: string) => `Freed ${size}.`,
+  cacheCap: "Size cap (MB)",
+  cacheCapOff: "Off",
+  cacheCapHint:
+    "Optional. When set, the least-recently-used entries are removed as soon as the cache exceeds the cap. Leave empty to turn it off.",
+  cacheCapError: "Enter a positive number, or leave the field empty to turn it off.",
+  cacheEvicted: (entries: number, size: string) =>
+    entries === 1 ? `Removed 1 entry · freed ${size}.` : `Removed ${entries} entries · freed ${size}.`,
   showOnboarding: "Show the introduction again",
   diagnostics: "Export diagnostics",
   diagnosticsHint: "Contains the log and result — no media files.",

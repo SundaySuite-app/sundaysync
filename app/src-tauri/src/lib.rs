@@ -449,6 +449,59 @@ fn clear_cache(dir: Option<PathBuf>) -> Result<u64, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Result of a cache eviction pass, for the settings screen (D-040).
+#[derive(Debug, Clone, Serialize)]
+struct EvictionResult {
+    entries: usize,
+    bytes: u64,
+}
+
+impl From<sundaysync_core::Evicted> for EvictionResult {
+    fn from(e: sundaysync_core::Evicted) -> Self {
+        Self {
+            entries: e.entries,
+            bytes: e.bytes,
+        }
+    }
+}
+
+/// D-040: cache entries untouched longer than this are swept on app start. The analysis
+/// cache is regenerable, so age eviction is non-destructive — a swept shoot cold-decodes
+/// if it is ever re-synced. Ninety days is the conductor-approved default.
+const DEFAULT_SWEEP_AGE: std::time::Duration = std::time::Duration::from_secs(90 * 24 * 60 * 60);
+
+/// Sweeps cache entries older than `max_age_days` (90 when omitted). D-040. Exposed to the
+/// settings screen so the user can trigger it and see the freed number; the same sweep
+/// also runs automatically at startup.
+#[tauri::command]
+fn sweep_cache(dir: Option<PathBuf>, max_age_days: Option<u64>) -> Result<EvictionResult, String> {
+    let dir = match dir {
+        Some(d) => d,
+        None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
+    };
+    let age = max_age_days.map_or(DEFAULT_SWEEP_AGE, |d| {
+        std::time::Duration::from_secs(d * 24 * 60 * 60)
+    });
+    sundaysync_core::Cache::new(dir)
+        .sweep_older_than(age)
+        .map(EvictionResult::from)
+        .map_err(|e| e.to_string())
+}
+
+/// Evicts least-recently-modified entries until the cache is under `max_bytes` (D-040).
+/// Only called when the user has enabled the size cap in Settings — it is off by default.
+#[tauri::command]
+fn enforce_cache_cap(dir: Option<PathBuf>, max_bytes: u64) -> Result<EvictionResult, String> {
+    let dir = match dir {
+        Some(d) => d,
+        None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
+    };
+    sundaysync_core::Cache::new(dir)
+        .enforce_size_cap(max_bytes)
+        .map(EvictionResult::from)
+        .map_err(|e| e.to_string())
+}
+
 /// §7.4: cancel must take effect within 2 s. The engine kills in-flight ffmpeg children,
 /// so this returns immediately and the run unwinds on its own.
 #[tauri::command]
@@ -663,6 +716,26 @@ pub fn run() {
                 Err(e) => eprintln!("ffmpeg could not be resolved at startup: {e}"),
             }
             app.manage(state);
+
+            // D-040: age-based sweep on app start (90 days, on by default). Off the main
+            // thread so a large cache never delays the window, and non-fatal — a swept
+            // entry simply cold-decodes if that shoot ever returns.
+            std::thread::spawn(|| {
+                let Ok(dir) = sundaysync_core::Cache::default_dir() else {
+                    return;
+                };
+                match sundaysync_core::Cache::new(dir).sweep_older_than(DEFAULT_SWEEP_AGE) {
+                    Ok(ev) if !ev.is_empty() => {
+                        eprintln!(
+                            "cache sweep: removed {} entries ({} bytes)",
+                            ev.entries, ev.bytes
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("cache sweep skipped: {e}"),
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -671,6 +744,8 @@ pub fn run() {
             scan_inputs,
             cache_status,
             clear_cache,
+            sweep_cache,
+            enforce_cache_cap,
             export_timeline,
             export_diagnostics,
             check_sidecar,
