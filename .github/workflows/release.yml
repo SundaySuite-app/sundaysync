@@ -102,6 +102,20 @@ jobs:
           # ships a client that can actually deliver its consented payloads.
           SUNDAYSYNC_TELEMETRY_URL: https://telemetry.sundaysuite.app
           SUNDAYSYNC_TELEMETRY_KEY: ${{ secrets.SUNDAYSYNC_TELEMETRY_KEY }}
+          # ── macOS code signing (the "damaged / won't open" fix) ─────────────
+          # An UNSIGNED downloaded app on modern macOS shows only "appen er
+          # skadet" with no Open-Anyway path (ad-hoc + quarantine on Apple
+          # Silicon). SundayStage ships CODE-SIGNED with these same three
+          # secrets (repo-level there; mirror them onto this repo to activate —
+          # tauri-action signs whenever they are present, and skips cleanly
+          # while they are absent). Notarization stays disabled suite-wide until
+          # the Apple Developer agreement is re-accepted (owner task, same
+          # blocker as SundayRec/SundayStage); signed-but-not-notarized gives
+          # testers the normal right-click→Open / Open-Anyway path instead of a
+          # dead end.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}
