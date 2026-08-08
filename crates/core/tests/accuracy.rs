@@ -335,6 +335,170 @@ fn drift_is_measured_within_the_gate() {
     assert!(checked >= 2, "only {checked} drifting clips were checked");
 }
 
+/// E6 / D-042: the drift-correction END-alignment gate.
+///
+/// The §8.2 drift *measurement* gate above proves the engine knows the ppm; this proves the
+/// exporter then puts the clip's far end where the reference wants it. CI has no Resolve, so
+/// this asserts on the engine's own emitted `<timeMap>`: apply its ratio to the clip's
+/// source end and check the timeline time it lands at.
+///
+/// A 40 ppm / 400 s clip carries 16 ms of end drift — the D-016 case. Uncorrected that is
+/// well outside the ±10 ms gate; corrected it must fall inside it. Both signs of drift are
+/// exercised, and the D-019 inversion (which would *double* the error) is shown failing, so
+/// the test proves the correction did the work rather than the tolerance being loose.
+///
+/// `#[ignore]` to sit with the other full-tier drift work; run via `-- --ignored`. It needs
+/// no ffmpeg — it drives the real `export_fcpxml` over a constructed result.
+#[test]
+#[ignore = "full tier: drift correction END-alignment (E6 / D-042)"]
+fn drift_correction_lands_the_clip_end_within_the_gate() {
+    use sundaysync_core::{
+        export_fcpxml, export_fcpxml_with_options, Device, DeviceKind, ExportOptions, Parameters,
+        Placement, Rational, Reference, Sequence, SyncResult, SCHEMA_VERSION,
+    };
+
+    // 40 ppm / 400 s. Half a frame at 50 fps is 10 ms, so 16 ms of drift is past the gate
+    // and the clip is corrected — the same physics as a long church-camera clip, at a frame
+    // rate that makes the half-frame rule bite for a case the plan calls out by name.
+    let source_seconds = 400.0_f64;
+    let fps = Rational::new(50, 1).unwrap();
+
+    let build = |ppm: f64| -> (SyncResult, std::collections::BTreeMap<PathBuf, f64>) {
+        let err_ms = ppm * 1e-6 * source_seconds * 1000.0;
+        let mut durations = std::collections::BTreeMap::new();
+        durations.insert(PathBuf::from("/m/rec.wav"), source_seconds + 20.0);
+        durations.insert(PathBuf::from("/m/cam.mp4"), source_seconds);
+        let result = SyncResult {
+            schema: SCHEMA_VERSION,
+            parameters: Parameters {
+                analysis_rate: 12_000,
+                min_psr: DEFAULT_MIN_PSR,
+            },
+            reference: Some(Reference {
+                file: PathBuf::from("/m/rec.wav"),
+                device: "rec".into(),
+            }),
+            devices: vec![
+                Device {
+                    id: "rec".into(),
+                    label: "Rec".into(),
+                    kind: DeviceKind::Audio,
+                    files: vec![PathBuf::from("/m/rec.wav")],
+                },
+                Device {
+                    id: "cam".into(),
+                    label: "Cam".into(),
+                    kind: DeviceKind::Video,
+                    files: vec![PathBuf::from("/m/cam.mp4")],
+                },
+            ],
+            placements: vec![
+                Placement {
+                    file: PathBuf::from("/m/rec.wav"),
+                    device: "rec".into(),
+                    offset_seconds: 0.0,
+                    confidence: 1.0,
+                    psr: f64::INFINITY,
+                    drift_ppm: None,
+                    projected_end_error_ms: None,
+                    chain: vec![],
+                    warnings: vec![],
+                },
+                Placement {
+                    file: PathBuf::from("/m/cam.mp4"),
+                    device: "cam".into(),
+                    // Median placement, offset at the clip midpoint (§4.3).
+                    offset_seconds: 30.0,
+                    confidence: 0.9,
+                    psr: 50.0,
+                    drift_ppm: Some(ppm),
+                    projected_end_error_ms: Some(err_ms),
+                    chain: vec![],
+                    warnings: vec![],
+                },
+            ],
+            unsynced: vec![],
+            sequence: Sequence {
+                fps,
+                duration_seconds: source_seconds + 20.0,
+            },
+            warnings: vec![],
+        };
+        (result, durations)
+    };
+
+    const TB: f64 = 48_000.0;
+    println!("\n=== drift correction END-alignment (E6 / D-042) ===");
+    // A clip recorded on a slow clock measures negative ppm (D-019); the positive case is a
+    // fast clock. Both must correct to the same place.
+    for ppm in [-40.0_f64, 40.0] {
+        let (result, durations) = build(ppm);
+        let e = export_fcpxml(&result, &durations, "Drift").unwrap();
+        let cam = e
+            .clips
+            .iter()
+            .find(|c| c.file.ends_with("cam.mp4"))
+            .unwrap();
+        let tm = cam
+            .time_map
+            .unwrap_or_else(|| panic!("ppm {ppm}: a 16 ms clip past half a frame must be retimed"));
+
+        // The clip start on the timeline (offset is in the sequence's 50-fps timebase).
+        let start_s = cam.offset_ticks as f64 / f64::from(fps.num());
+        // `ppm` is d(offset)/d(position): source position p belongs at reference time
+        // start + (1 + ppm·1e-6)·p, with the start already re-referenced by the exporter.
+        let ideal_end = start_s + (1.0 + ppm * 1e-6) * source_seconds;
+
+        let corrected_end = start_s + tm.timeline_end_ticks as f64 / TB;
+        let uncorrected_end = start_s + tm.source_end_ticks as f64 / TB; // a 1:1 export
+        let inverted_end = start_s
+            + tm.source_end_ticks as f64 / TB
+                * (tm.source_end_ticks as f64 / tm.timeline_end_ticks as f64);
+
+        let corrected_err_ms = (corrected_end - ideal_end) * 1000.0;
+        let uncorrected_err_ms = (uncorrected_end - ideal_end) * 1000.0;
+        let inverted_err_ms = (inverted_end - ideal_end) * 1000.0;
+
+        println!(
+            "  ppm {ppm:+6.1}: uncorrected end {uncorrected_err_ms:+7.2} ms, \
+             corrected {corrected_err_ms:+7.2} ms, inverted {inverted_err_ms:+7.2} ms"
+        );
+
+        // The whole point: correction pulls the end inside ±10 ms (in fact to ~0).
+        assert!(
+            corrected_err_ms.abs() <= TOLERANCE_MS,
+            "ppm {ppm}: corrected end {corrected_err_ms:.2} ms outside ±{TOLERANCE_MS} ms"
+        );
+        // Proof the tolerance did not do the work: uncorrected is a clear ~16 ms out.
+        assert!(
+            uncorrected_err_ms.abs() > TOLERANCE_MS,
+            "ppm {ppm}: uncorrected end only {uncorrected_err_ms:.2} ms out — nothing was proven"
+        );
+        // Proof the sign is right (D-019): inverting the ratio roughly doubles the error.
+        assert!(
+            inverted_err_ms.abs() > 1.5 * uncorrected_err_ms.abs(),
+            "ppm {ppm}: inverted ratio {inverted_err_ms:.2} ms should dwarf uncorrected {uncorrected_err_ms:.2} ms"
+        );
+    }
+
+    // The toggle off reproduces v1 exactly: no retime at all, even past the gate.
+    let (result, durations) = build(-40.0);
+    let off = export_fcpxml_with_options(
+        &result,
+        &durations,
+        "Drift",
+        ExportOptions {
+            correct_drift: false,
+        },
+    )
+    .unwrap();
+    assert!(
+        !off.xml.contains("<timeMap>"),
+        "toggle off still retimed a clip"
+    );
+    println!("  toggle off: no <timeMap> emitted (v1 output)");
+}
+
 /// Determinism at the level that matters: the same fixtures must measure identically.
 #[test]
 fn measurements_are_reproducible() {

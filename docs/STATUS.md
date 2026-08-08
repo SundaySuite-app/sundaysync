@@ -140,10 +140,10 @@ All four CI jobs green on both phases — ubuntu (full gate), macOS, Windows, an
 
 ## Open items carried into later phases
 
-- **⚠️ DECISIONS.md D-016 — needs Richard's decision.** Uncorrected drift consumes the
-  whole ±10 ms budget on clips over ~8 minutes at 40 ppm. A 90-minute continuous recording
-  would land ~108 ms out. §4.6 defers correction to v2; §8.2 demands ±10 ms. One of the
-  three has to give, and picking is a plan change, not an implementation detail.
+- **✅ DECISIONS.md D-016 — RESOLVED in v0.2 by D-042 (E6).** Drift is now corrected via a
+  per-clip `<timeMap>` retime (owner-signed-off, spike-proven against Resolve, on by default
+  past half a frame, toggleable). A 90-minute 40 ppm camera lands both ends on the reference
+  instead of ~108 ms out; no media is touched.
 - **`MIN_PSR = 15.0` is calibrated on synthetic material only** (D-015) and must be
   re-validated against the real corpus in Phase 6.
 - **DECISIONS.md D-004 is unfalsified but not reproduced** — measured per-codec bias is

@@ -117,6 +117,9 @@ export const nb = {
   segmentCountHint:
     "Hvor mange utsnitt av hvert klipp som sammenlignes med referansen. Flere segmenter gir sikrere driftmåling på lange klipp, men tar lengre tid.",
   segmentDefault: "5 (standard)",
+  driftCorrect: "Korriger klokkedrift",
+  driftCorrectHint:
+    "Retter langsom klokkedrift så klipp holder synk helt til slutten. Skriver en skånsom retiming i FCPXML-en (rører ingen filer) kun for klipp som driver mer enn en halv frame. På som standard.",
   cacheDir: "Mappe for analyse-buffer",
   cacheHint:
     "Bufferen gjør ny synkronisering nesten øyeblikkelig. Den bruker ca. 170 MB per time lyd. Oppføringer som ikke er brukt på 90 dager ryddes automatisk ved oppstart.",
@@ -263,6 +266,9 @@ export const en: Strings = {
   segmentCountHint:
     "How many excerpts of each clip are compared against the reference. More segments give a more reliable drift measurement on long clips, but take longer.",
   segmentDefault: "5 (default)",
+  driftCorrect: "Correct clock drift",
+  driftCorrectHint:
+    "Fixes slow clock drift so clips stay in sync all the way to the end. Writes a gentle retime into the FCPXML (touches no files), only for clips that drift more than half a frame. On by default.",
   cacheDir: "Analysis cache folder",
   cacheHint:
     "The cache makes re-syncing nearly instant. It uses about 170 MB per hour of audio. Entries untouched for 90 days are cleared automatically at startup.",

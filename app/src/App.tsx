@@ -120,6 +120,7 @@ export function App() {
           deviceOverrides:
             Object.keys(state.overrides).length > 0 ? state.overrides : null,
           segmentCount: settings.segmentCount,
+          correctDrift: settings.correctDrift,
         },
       });
       dispatch({ type: "sync/done", outcome });

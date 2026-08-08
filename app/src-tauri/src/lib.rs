@@ -11,8 +11,8 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use sundaysync_core::{
-    export_fcpxml, sync_with_durations, CancelToken, Progress, ProgressSink, Sidecar,
-    SidecarSource, Stage, SyncRequest, SyncResult, DEFAULT_MIN_PSR,
+    export_fcpxml_with_options, sync_with_durations, CancelToken, ExportOptions, Progress,
+    ProgressSink, Sidecar, SidecarSource, Stage, SyncRequest, SyncResult, DEFAULT_MIN_PSR,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -186,6 +186,9 @@ struct LastRun {
     /// Fingerprint of the sources that produced this run ([`inputs_fingerprint`]). Export
     /// refuses when the caller's current sources hash to something else (F6).
     inputs_hash: u64,
+    /// E6 (D-042): whether this run's export should apply drift correction. Captured at
+    /// sync time so a later export uses the same setting the run was made under.
+    correct_drift: bool,
 }
 
 /// Shared cancellation handle, so the UI's Cancel button can reach a run in flight.
@@ -284,7 +287,7 @@ impl AppState {
     fn export_snapshot(
         &self,
         fingerprint: u64,
-    ) -> Result<(SyncResult, BTreeMap<PathBuf, f64>), String> {
+    ) -> Result<(SyncResult, BTreeMap<PathBuf, f64>, bool), String> {
         let guard = lock_state(&self.last, OnPoison::Reject)?;
         let last = guard
             .as_ref()
@@ -292,7 +295,11 @@ impl AppState {
         if last.inputs_hash != fingerprint {
             return Err(STALE_EXPORT_MSG.to_string());
         }
-        Ok((last.result.clone(), last.durations.clone()))
+        Ok((
+            last.result.clone(),
+            last.durations.clone(),
+            last.correct_drift,
+        ))
     }
 }
 
@@ -324,6 +331,11 @@ struct RunSyncArgs {
     device_overrides: Option<BTreeMap<PathBuf, String>>,
     #[serde(default)]
     segment_count: Option<usize>,
+    /// E6 (D-042): drift correction. `None` uses the engine default (on). The export
+    /// emits a `<timeMap>` only for clips whose drift exceeds half a frame, so this
+    /// governs whether that correction is applied at all.
+    #[serde(default)]
+    correct_drift: Option<bool>,
 }
 
 /// Runs a full sync. Blocking, so the frontend calls it off the UI thread.
@@ -348,6 +360,7 @@ fn run_sync(
         min_psr: args.min_psr.unwrap_or(DEFAULT_MIN_PSR),
         device_overrides: args.device_overrides.unwrap_or_default(),
         segment_count: args.segment_count.unwrap_or(defaults.segment_count),
+        correct_drift: args.correct_drift.unwrap_or(defaults.correct_drift),
         sidecar: Some(sidecar),
     };
 
@@ -370,6 +383,7 @@ fn run_sync(
                 result: result.clone(),
                 durations: durations.clone(),
                 inputs_hash,
+                correct_drift: request.correct_drift,
             });
             Ok(SyncOutcome { result, durations })
         }
@@ -567,12 +581,13 @@ fn export_timeline(
         &device_overrides.unwrap_or_default(),
         reference.as_deref(),
     );
-    let (result, durations) = state.export_snapshot(fingerprint)?;
+    let (result, durations, correct_drift) = state.export_snapshot(fingerprint)?;
 
-    let export = export_fcpxml(
+    let export = export_fcpxml_with_options(
         &result,
         &durations,
         project.as_deref().unwrap_or("SundaySync"),
+        ExportOptions { correct_drift },
     )
     .map_err(|e| e.to_string())?;
     std::fs::write(&path, export.xml).map_err(|e| e.to_string())?;
@@ -887,6 +902,7 @@ mod tests {
             result: sample_result(),
             durations: BTreeMap::new(),
             inputs_hash,
+            correct_drift: true,
         }
     }
 
