@@ -200,11 +200,34 @@ impl Cache {
 
     #[must_use]
     pub fn contains(&self, key: &CacheKey) -> bool {
-        // A zero-length entry is treated as absent. It cannot be produced by our own
-        // write-then-rename, but an out-of-space or force-killed *previous* version
-        // could have left one, and serving it as "silent audio" would corrupt a sync
-        // rather than fail it.
-        std::fs::metadata(self.entry_path(key)).is_ok_and(|m| m.len() > 0)
+        self.entry_len(key).is_some()
+    }
+
+    /// The byte length of a usable committed entry, or `None` when there is none.
+    ///
+    /// This is the single stat a cache hit needs: the caller learns *both* that the entry
+    /// exists and how much audio it holds, from one `metadata` call. [`Cache::contains`]
+    /// followed by a second `metadata` was not only a redundant syscall — the two could
+    /// disagree. An eviction pass (or another process's [`Cache::clear`]) landing between
+    /// them made the second call fail, and the extraction stage then minted a handle
+    /// claiming *zero* samples for a file that decodes perfectly, which §7.5 calls silent
+    /// wrongness. One stat cannot disagree with itself.
+    ///
+    /// Two entries are rejected rather than served:
+    ///
+    /// * **Zero-length.** Our own write-then-rename cannot produce one, but an
+    ///   out-of-space or force-killed *previous* version could have, and serving it as
+    ///   "silent audio" would corrupt a sync rather than fail it.
+    /// * **Anything that is not a regular file.** A directory's `len()` is non-zero on
+    ///   every platform we ship to, so a length test alone would report a directory named
+    ///   `{hash}.f32` as a cache hit — and the read that followed would abort the whole
+    ///   run. The eviction walks already apply this same `is_file` caution.
+    #[must_use]
+    pub fn entry_len(&self, key: &CacheKey) -> Option<u64> {
+        std::fs::metadata(self.entry_path(key))
+            .ok()
+            .filter(|m| m.is_file() && m.len() > 0)
+            .map(|m| m.len())
     }
 
     /// Total bytes of finished entries (`*.f32`). A missing directory is 0, not an error
@@ -574,6 +597,44 @@ mod tests {
         fs::write(cache.entry_path(&key), b"").unwrap();
         assert!(!cache.contains(&key), "empty entry must not count as a hit");
         fs::write(cache.entry_path(&key), [0u8; 4]).unwrap();
+        assert!(cache.contains(&key));
+    }
+
+    #[test]
+    fn a_directory_named_like_an_entry_is_not_a_cache_hit() {
+        // A directory's `len()` is non-zero on every platform we ship to, so the old
+        // length-only test reported `{hash}.f32/` as a hit. The extraction stage then
+        // handed placement a cache path it could not read, and `load()`'s error aborted
+        // the entire run — for a media file that decodes perfectly.
+        let dir = scratch("cache-entry-is-dir");
+        let f = dir.join("a.wav");
+        fs::write(&f, b"hello").unwrap();
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap();
+        let key = CacheKey::for_file(&f, ANALYSIS_RATE).unwrap();
+
+        fs::create_dir_all(cache.entry_path(&key)).unwrap();
+        assert_eq!(cache.entry_len(&key), None, "a directory is not an entry");
+        assert!(!cache.contains(&key), "a directory must not count as a hit");
+    }
+
+    #[test]
+    fn entry_len_reports_the_committed_size_in_one_stat() {
+        // The cache-hit path reads size and existence together, so an eviction landing
+        // between "does it exist" and "how big is it" can no longer produce a handle that
+        // claims zero samples for a perfectly good file.
+        let dir = scratch("cache-entry-len");
+        let f = dir.join("a.wav");
+        fs::write(&f, b"hello").unwrap();
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap();
+        let key = CacheKey::for_file(&f, ANALYSIS_RATE).unwrap();
+
+        assert_eq!(cache.entry_len(&key), None, "no entry yet");
+        fs::write(cache.entry_path(&key), b"").unwrap();
+        assert_eq!(cache.entry_len(&key), None, "an empty entry is not usable");
+        fs::write(cache.entry_path(&key), [0u8; 40]).unwrap();
+        assert_eq!(cache.entry_len(&key), Some(40));
         assert!(cache.contains(&key));
     }
 
