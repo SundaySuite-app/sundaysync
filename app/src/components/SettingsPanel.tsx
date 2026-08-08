@@ -125,10 +125,17 @@ export function SettingsPanel({
   // tester is a good person to hear from). Gentle: only re-surfaces the consent card for an
   // install that hasn't answered yet (`consentVersion === null`), never re-nags someone who
   // already decided, and never blocks the toggle itself.
+  //
+  // `onClose()` before `onShowConsent()`, same as the "show the consent text again" button
+  // below — App.tsx renders `SettingsPanel` and `ConsentCard` off two independent booleans
+  // (`showSettings`/`showConsent`) with nothing making them mutually exclusive, so calling
+  // `onShowConsent()` alone here stacked a second `role="dialog"` on top of the still-open
+  // Settings one: two competing focus traps, two Escape handlers, both `aria-modal="true"`.
   const toggleBeta = (on: boolean) => {
     setBetaChannel(on);
     saveSettings({ betaChannel: on });
     if (on && telemetry && telemetry.consentVersion === null) {
+      onClose();
       onShowConsent();
     }
   };
