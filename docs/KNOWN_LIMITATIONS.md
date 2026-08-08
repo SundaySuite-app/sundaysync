@@ -4,18 +4,20 @@ What v1 does not do, and what is not yet proven. Kept honest rather than flatter
 §7.5 makes "honest failure over silent wrongness" the product's promise, and that applies
 to its documentation too.
 
-## Drift is measured, not corrected
+## Drift is corrected (v0.2)
 
-v1 reports clock drift per clip (`drift_ppm`, `projected_end_error_ms`) and warns when the
-projected end error exceeds half a frame. It does not resample. That is a deliberate v1/v2
-split (PLAN §1.3, §2).
+As of v0.2 clock drift is measured **and corrected** (DECISIONS.md D-042, closing D-016).
+For any clip whose projected end error exceeds half a frame, the exporter writes a per-clip
+`<timeMap>` retime into the FCPXML — no media file is touched; DaVinci Resolve resamples on
+playback/render. A spike proved Resolve honours the retime and preserves the sub-frame ppm
+ratio exactly, so a 90-minute 40 ppm camera now lands both ends on the reference instead of
+±108 ms. It is on by default and can be turned off in Settings (then output is byte-identical
+to v0.1). Verified against the engine's real FCPXML layout in DaVinci Resolve Studio 21; the
+one thing left for the owner's release QA is a drift-corrected export of a real long-service
+camera (E11 checklist).
 
-**Consequence you should know about:** because placement uses the median of segment
-offsets, a drifting clip is centred rather than start-aligned, so its error is
-±(total drift ÷ 2) — zero in the middle, worst at both ends. At 40 ppm that stays inside
-±10 ms only up to about 8 minutes of clip. A 90-minute continuous recording at 40 ppm
-lands roughly ±108 ms out at its extremes. See DECISIONS.md D-016; this is unresolved and
-needs a product decision.
+**Residual, minor:** the clip's *timeline boundary* stays frame-aligned (the retime ratio
+that governs the audio is exact and sub-frame; only the visible clip edge is quantised).
 
 ## FCPXML: what is verified and what is not
 

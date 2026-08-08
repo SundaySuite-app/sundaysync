@@ -262,7 +262,32 @@ plan estimates are optimistic and one plan invariant is unimplemented:**
 "Phase 2" stub; `crates/core/src/extract.rs:17` cites "D-012" for the memmap deferral
 where DECISIONS.md has it as **D-011** (D-012 is cancellation).
 
-### E6 — Drift correction (the v2 headline, pulled into v0.2)
+### E6 — Drift correction ✅ done 2026-08-08
+
+**Done — 2026-08-08 (PR pending).** Design-first, per plan: the conductor ran a spike against
+real DaVinci Resolve Studio 21, the owner signed off the mechanism, then one Opus engine agent
+implemented it and the conductor did the toggle UI + verify-harness + live validation.
+
+**Spike result (D-042):** Resolve **honours a per-clip `<timeMap>`** and preserves the ratio
+sub-frame-exact (+250 ppm → `12003/200s`, round-tripped as an exact rational); `<conform-rate>`
+is ignored. **Owner sign-off:** mechanism = `<timeMap>`; on by default; correct only clips past
+half a frame; toggleable.
+
+**Implemented:** the exporter emits a `<timeMap>` stretching a corrected clip's timeline span to
+`source · (1 + ppm·1e-6)` (D-019 reciprocal), with a half-drift start re-reference so the median-
+based placement pivots correctly. `SyncRequest.correct_drift` (default true) + `ExportOptions` +
+`export_fcpxml_with_options`; shell wires a Settings switch through `run_sync` and stores it on the
+run. The sign is pinned by a test (40 ppm/400 s: uncorrected end ~16 ms → corrected ~0 ms; inverted
+~32 ms). No-drift golden byte-unchanged; new `timeline_drift.fcpxml` golden locks the corrected form.
+`resolve-verify.py` now measures the clip END. **Live-verified end to end:** the engine's exact
+gap/spine/lane+timeMap layout imports into Resolve and retimes (10 % map → 66.0 s while the
+reference stays 60.0 s). Closes D-016. §12 "toggleable like PluralEyes 4.1" satisfied.
+
+Gates: 169 core + golden 3 (incl. drift golden) + accuracy full-tier drift END-alignment gate +
+shell 11 + 31 vitest; both PATH variants; clippy `-D warnings`; tsc + vite build. Owner E11
+checklist item remains: drift-corrected export of a real long-service camera into Resolve.
+
+### E6 — Drift correction (original plan: the v2 headline, pulled into v0.2)
 
 Resolves D-016. Design question first, implementation second — Opus runs a
 spike against real DaVinci Resolve before any engine code:

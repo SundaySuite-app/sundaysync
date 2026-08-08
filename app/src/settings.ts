@@ -31,6 +31,12 @@ export interface Settings {
    * enforces a ceiling, evicting least-recently-used entries when exceeded.
    */
   cacheCapMb: number | null;
+  /**
+   * E6 (D-042): correct measured clock drift by writing a per-clip `<timeMap>` retime into
+   * the FCPXML. On by default; the export only ever retimes clips whose drift exceeds half
+   * a frame, so this is a safety valve, not a per-clip control.
+   */
+  correctDrift: boolean;
   onboardingDone: boolean;
 }
 
@@ -40,6 +46,7 @@ export const DEFAULTS: Settings = {
   segmentCount: null,
   cacheDir: null,
   cacheCapMb: null,
+  correctDrift: true,
   onboardingDone: false,
 };
 
@@ -61,6 +68,9 @@ function load(): Settings {
       segmentCount: isPositiveNumber(p.segmentCount) ? Math.round(p.segmentCount) : null,
       cacheDir: typeof p.cacheDir === "string" && p.cacheDir.length > 0 ? p.cacheDir : null,
       cacheCapMb: isPositiveNumber(p.cacheCapMb) ? Math.round(p.cacheCapMb) : null,
+      // Defaults to on: only an explicit stored `false` disables it, so a fresh or corrupt
+      // blob keeps drift correction (D-042's on-by-default).
+      correctDrift: p.correctDrift !== false,
       onboardingDone: p.onboardingDone === true,
     };
   } catch {

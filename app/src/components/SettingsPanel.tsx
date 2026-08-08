@@ -41,6 +41,7 @@ export function SettingsPanel({
     settings.cacheCapMb === null ? "" : String(settings.cacheCapMb),
   );
   const [cacheCapError, setCacheCapError] = useState(false);
+  const [correctDrift, setCorrectDrift] = useState(settings.correctDrift);
 
   const refreshCache = () => {
     invoke<CacheStatus>("cache_status", { dir: getSettings().cacheDir })
@@ -181,6 +182,21 @@ export function SettingsPanel({
             ))}
           </select>
           <small>{t.segmentCountHint}</small>
+        </label>
+
+        <label className="field field--check">
+          <span className="field__row">
+            <input
+              type="checkbox"
+              checked={correctDrift}
+              onChange={(e) => {
+                setCorrectDrift(e.target.checked);
+                saveSettings({ correctDrift: e.target.checked });
+              }}
+            />
+            <span>{t.driftCorrect}</span>
+          </span>
+          <small>{t.driftCorrectHint}</small>
         </label>
 
         <div className="field">

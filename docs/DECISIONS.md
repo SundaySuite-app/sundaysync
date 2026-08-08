@@ -326,7 +326,15 @@ false negative (visible on the unsynced shelf) is much cheaper than a false posi
 **Must be re-validated against the real corpus in Phase 6.** Synthetic material cannot
 prove a threshold for real rooms.
 
-## D-016 — ⚠️ Uncorrected drift will exceed the §8.2 gate on long clips — raise with Richard
+## D-016 — ✅ RESOLVED by D-042 (E6): drift is now corrected via a per-clip `<timeMap>`
+
+**Resolution (E6, 2026-08-08).** Option 3 was taken — drift correction ships in v0.2 — but
+without moving placement off the median. The exporter writes a per-clip `<timeMap>` retime
+(the owner-signed-off, spike-proven mechanism, D-042) for any clip whose measured drift
+exceeds half a frame, so short clips keep the median's balanced ±half-drift and long clips
+are actively corrected end-to-end. The gate collision this note flagged no longer bites: a
+90-minute 40 ppm camera now lands both ends on the reference instead of ±108 ms. The
+analysis below is retained as the reasoning that led there.
 
 **Phase 3, measured.** On the `full` suite the correlator is essentially exact on
 non-drifting clips (**−0.01 ms**), and every residual error is accounted for, to the
@@ -1067,3 +1075,48 @@ and 8 workers (parallel) over a mixed good/bad shoot and asserts the manifests a
 token before taking work, an in-flight probe cancels via `probe`'s token path (§7.4), and a
 set token returns `Error::Cancelled` before any slot is unwrapped. The D-005 skip-guard
 behaviour is unchanged.
+
+## D-042 — E6: `<timeMap>` drift correction, on by default past half a frame
+
+**E6, drift correction — closes D-016; the v2 headline pulled into v0.2.** The engine has
+always *measured* clock drift (`drift.rs`: signed `ppm` + `projected_end_error_ms`); v0.1
+did not *correct* it, so a long camera on a fast/slow clock drifts out of sync by the clip's
+end (D-016: a 90-minute 40 ppm camera ends ±108 ms out).
+
+**Spike first (owner-gated).** Against real DaVinci Resolve Studio 21 the conductor proved
+the importer **honours a per-clip `<timeMap>`** on an `<asset-clip>` and preserves the ratio
+*exactly, sub-frame*: a +250 ppm map (source 60.000 s → timeline 60.015 s) round-tripped
+through Resolve's own FCPXML export as `<timept time="12003/200s" value="60/1s"/>` — 60.015 s
+kept as an exact rational, not snapped to a frame. `<conform-rate>` is **ignored** by
+Resolve. The clip's timeline *boundary* is frame-quantised (cosmetic); the retime *ratio*
+that drives the audio resample is exact. Live-verified again in the engine's full
+gap/spine/lane layout: a 10 % timeMap read back as 66.0 s while the reference clip stayed at
+60.0 s. **Owner sign-off (2026-08-08): mechanism = `<timeMap>`; on by default; correct only
+clips whose drift exceeds half a frame; toggleable.**
+
+**Mechanism.** For any clip whose measured drift exceeds half a frame (`Drift::exceeds_half_frame`),
+the exporter emits a `<timeMap>` stretching the clip's timeline span to
+`source_span · (1 + ppm·1e-6)` — the reciprocal of D-019's `1/(1+ppm·1e-6)` *resample*, i.e.
+the timeline has to be *longer* by the drift for the far end to land where the reference
+puts it. Because §4.3 places on the **median** (the offset estimate is at the clip midpoint),
+a corrected clip's start is first re-referenced by half the projected end error
+(`projected_end_error_ms/2000` s) so the stretch pivots on the reference-correct start; both
+ends then land within the gate. Timepts are exact rationals over `AUDIO_TIMEBASE` (48000);
+the asset-clip `duration`/`offset` stay frame-aligned as before. The reference clip is never
+corrected (it defines the origin).
+
+**Sign is the trap (D-014/D-019), so it is test-pinned.** Inverting the ratio moves the end
+the wrong way and *doubles* the error. `drift::tests` and the full-tier accuracy gate assert,
+for both signs of injected drift, a 40 ppm / 400 s clip: **uncorrected end ~16 ms → corrected
+~0 ms; inverted → ~32 ms** — so the tolerance is never doing the work, and an inverted
+correction fails loudly.
+
+**Toggle.** `SyncRequest.correct_drift` (default `true`) governs whether correction is
+applied at all; export carries it via `ExportOptions`/`export_fcpxml_with_options`. The shell
+threads it from a Settings switch (`correctDrift`, on by default) through `run_sync` and
+stores it on the run so a later export uses the same setting. With it off, output is v0.1
+**byte-for-byte** (no `<timeMap>`); the no-drift golden is unchanged, and a new
+`timeline_drift.fcpxml` golden locks the corrected form.
+
+**Verification harness.** `scripts/resolve-verify.py` now reports each clip's **END**
+alignment (start + duration), not only its start — that is where uncorrected drift shows.
