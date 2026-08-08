@@ -89,6 +89,11 @@ pub const QUEUE_MAX: usize = 50;
 pub const MESSAGE_MAX_CHARS: usize = 200;
 /// Cap for a `file:line:col`.
 pub const LOCATION_MAX_CHARS: usize = 120;
+/// Cap for the version text the shared envelope carries (`appVersion`, on the
+/// payload and on every crash record). The Worker validates it as free text at 32
+/// characters and answers a longer one with a 400 for the WHOLE payload — so the
+/// envelope caps it here rather than trusting whatever the bundle declares.
+pub const VERSION_MAX_CHARS: usize = 32;
 
 /// The env/build var naming the endpoint's BASE url (no trailing path).
 pub const BASE_URL_VAR: &str = "SUNDAYSYNC_TELEMETRY_URL";
@@ -104,6 +109,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Max retry attempts before an outbox entry is dropped as undeliverable.
 const MAX_ATTEMPTS: u32 = 6;
+
+/// How long a claimed outbox entry stays claimed. Four times [`REQUEST_TIMEOUT`],
+/// so an in-flight POST can never see its own entry come back due.
+const SEND_LEASE_MS: i64 = 60_000;
 
 // ── Data directory (lock-free, for the panic hook) ───────────────────────────
 
@@ -135,9 +144,19 @@ pub fn now_ms() -> i64 {
 }
 
 /// This build's timestamp, baked in at release under
-/// `SUNDAYSYNC_TELEMETRY_BUILT_AT` (unix ms). Falls back to now in dev/CI, where
-/// nothing is ever sent. Kept in the shared envelope for parity — E8's validator
-/// mirrors the shared `builtAt` range check.
+/// `SUNDAYSYNC_TELEMETRY_BUILT_AT` (unix ms). Kept in the shared envelope for
+/// parity — the Worker mirrors the shared `builtAt` range check and stores it as
+/// `sync_events.built_at`, which is what "how old is the build this came from"
+/// is answered with.
+///
+/// ⚠️ **`.github/workflows/release.yml` does not set it today.** It bakes
+/// `SUNDAYSYNC_TELEMETRY_URL` and `_KEY` and stops there, so `option_env!` is
+/// `None` in a RELEASE build too and the fallback below runs — meaning `builtAt`
+/// is the moment the payload was built, not the moment the binary was. That is in
+/// range, so nothing 400s; the field is simply not true, and build-age analysis
+/// silently reads every install as brand new. The fallback's "dev/CI, where
+/// nothing is ever sent" is only correct once the workflow sets the variable
+/// (one line, next to the other two bakes).
 fn built_at() -> i64 {
     option_env!("SUNDAYSYNC_TELEMETRY_BUILT_AT")
         .and_then(|s| s.trim().parse::<i64>().ok())
@@ -426,6 +445,30 @@ fn is_path_body(c: char) -> bool {
     !HARD_DELIMITERS.contains(&c)
 }
 
+/// Whether `prev` (the char immediately LEFT of a candidate path) opens one.
+///
+/// ⚠️ **This set must stay a SUPERSET of the endpoint's.** The Worker screens
+/// every free-text field with `ABSOLUTE_PATH_RE`
+/// (`sunday-telemetry/src/schema.ts`), anchored at
+///
+/// ```text
+/// (^|[\s"'(<[])
+/// ```
+///
+/// — start of string, whitespace, a double or single quote, an open paren, an
+/// **angle bracket**, or an **open square bracket**. Anything the Worker treats as
+/// a boundary and we do not is a path we leave in a message the Worker then
+/// refuses with `unscrubbed_path`; [`classify`] calls that 400 permanent, so the
+/// outbox drops the whole batch — runs included — without retrying and without
+/// telling anyone. `<` and `[` were the two missing ones, and `[C:\Temp\a.mov]`
+/// is what fell through (see `a_scrubbed_message_never_trips_the_workers_path_screen`).
+fn is_left_boundary(prev: Option<char>) -> bool {
+    match prev {
+        None => true,
+        Some(c) => c.is_whitespace() || matches!(c, '"' | '\'' | '(' | '<' | '['),
+    }
+}
+
 /// Whether an absolute path begins at byte offset `i` in `text` (`lower` is its
 /// ASCII-lowercased copy; `prev` is the char just to the left).
 fn path_starts_at(text: &str, lower: &str, i: usize, prev: Option<char>) -> bool {
@@ -436,9 +479,9 @@ fn path_starts_at(text: &str, lower: &str, i: usize, prev: Option<char>) -> bool
     if rest.starts_with("~/") || rest.starts_with("~\\") {
         return true;
     }
-    // Anchored shapes: only at a left boundary (prev is not path-ish), which keeps
-    // relative paths like `src/place.rs` — identical on every machine — intact.
-    if prev.is_some_and(|c| c != '"' && c != '\'' && c != '(' && !c.is_whitespace()) {
+    // Anchored shapes: only at a left boundary (see [`is_left_boundary`]), which
+    // keeps relative paths like `src/place.rs` — identical on every machine — intact.
+    if !is_left_boundary(prev) {
         return false;
     }
     let b = rest.as_bytes();
@@ -514,6 +557,20 @@ pub fn scrub_free_text(raw: &str, home: Option<&str>, max: usize) -> String {
     let mut out: String = cleaned.chars().take(max).collect();
     out.push('…');
     out
+}
+
+/// `v`, or `0.0` when it is not a finite number.
+///
+/// `serde_json` writes NaN and ±∞ as JSON `null`, and the Worker's `float()` check
+/// answers `null` with `expected_number` — a 400 that drops the WHOLE payload, not
+/// just the offending run. A threshold that is not a number is not worth losing a
+/// batch of reports over, so it lands as zero and stays visible in aggregate.
+fn finite_or_zero(v: f64) -> f64 {
+    if v.is_finite() {
+        v
+    } else {
+        0.0
+    }
 }
 
 // ── The payload ──────────────────────────────────────────────────────────────
@@ -611,7 +668,11 @@ impl TelemetryPayload {
             consent_version: CONSENT_VERSION,
             install_id: sanitize_install_id(install_id),
             built_at: built_at(),
-            app_version: app_version.to_string(),
+            // Through the same scrubber every other free-text field takes: the
+            // Worker validates `appVersion` as free text capped at
+            // [`VERSION_MAX_CHARS`] and path-screened, and a version string it
+            // refuses 400s the entire payload — runs, crashes and all.
+            app_version: scrub_free_text(app_version, home_dir().as_deref(), VERSION_MAX_CHARS),
             os: Os::current(),
             arch: Arch::current(),
             language: detect_language(),
@@ -718,7 +779,7 @@ pub fn sync_report(facts: &RunFacts, at: i64) -> SyncReport {
         unsynced_count: r.unsynced.len() as u32,
         duration_bucket: DurationBucket::from_seconds(r.sequence.duration_seconds),
         run_duration_bucket: RunDurationBucket::from_millis(facts.run_millis),
-        min_psr: r.parameters.min_psr,
+        min_psr: finite_or_zero(r.parameters.min_psr),
         analysis_rate: r.parameters.analysis_rate,
         formats,
         outcomes,
@@ -826,12 +887,67 @@ fn write_state(dir: &Path, state: &PersistState) -> std::io::Result<()> {
     write_atomic(dir, "state.json", &serde_json::to_vec_pretty(state)?)
 }
 
+/// The staging path one atomic write goes through.
+///
+/// ⚠️ Unique **per writer**, not per target file. `{name}.tmp` was a fixed name,
+/// and two app instances then share it — which the macOS `open -n` relaunch
+/// briefly produces, and both instances run the launch drain. One truncates the
+/// other's buffer mid-write and the loser's `rename` publishes a half-written
+/// `state.json`; `read_state` reads that as the default, which fails closed for
+/// consent (right) but silently forgets the install id and any **deletion still
+/// owed** (not right). The pid separates the instances, the counter separates two
+/// writes inside one. The `.tmp` suffix is load-bearing too — every reader filters
+/// staging files out by it.
+fn temp_name(name: &str, seq: u32) -> String {
+    format!("{name}.{}-{seq}.tmp", std::process::id())
+}
+
 /// Atomic write: a reader must never see a half-written file.
-fn write_atomic(dir: &Path, name: &str, body: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(dir: &Path, name: &str, body: &[u8]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!("{name}.tmp"));
+    let tmp = dir.join(temp_name(
+        name,
+        TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+    ));
     std::fs::write(&tmp, body)?;
-    std::fs::rename(&tmp, dir.join(name))
+    let renamed = std::fs::rename(&tmp, dir.join(name));
+    if renamed.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    sweep_stale_temps(dir);
+    renamed
+}
+
+/// Disambiguates two staged writes from the same process.
+static TMP_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Older than this, a `*.tmp` cannot be an in-flight write — the staging write is
+/// synchronous and the rename follows it immediately.
+const TEMP_ORPHAN_AGE: Duration = Duration::from_secs(300);
+
+/// Remove abandoned staging files. A per-writer temp name no longer self-cleans by
+/// being overwritten the way a fixed one did, so a process killed between the write
+/// and the rename would otherwise leave one behind for good. Best-effort: a temp
+/// file is never read by anything (every reader filters on the real name), so
+/// failing to remove one costs a few hundred bytes and nothing else.
+fn sweep_stale_temps(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        if !entry.file_name().to_string_lossy().ends_with(".tmp") {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > TEMP_ORPHAN_AGE);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 // ── The outbox ───────────────────────────────────────────────────────────────
@@ -902,6 +1018,91 @@ fn enqueue(dir: &Path, payload: &TelemetryPayload, now: i64) -> std::io::Result<
     Ok(true)
 }
 
+/// The envelope for a payload about to be QUEUED, or `None` when nothing may be.
+///
+/// Two gates, and the second one is the subtle half:
+///
+/// 1. **Consent must be active at the current scope version.** Nothing is built,
+///    let alone written, without it — not even a header.
+/// 2. **A real install id must exist, and is minted here when it does not.**
+///    "Delete my data" clears the id and deliberately leaves consent alone (D-043:
+///    deleting data and stopping collection are different requests), so
+///    *consent active, no id* is a state the app reaches by design. Filling it
+///    with [`NIL_INSTALL_ID`] — the shared preview id — is not a harmless
+///    placeholder: the endpoint rejects it BY NAME (`nil_install_id`), because
+///    otherwise every previewing install lands in one bucket. That 400 is
+///    permanent, and on the crash-drain path the watermark has already advanced
+///    past the records it carried, so they are lost outright. A deletion retires
+///    the old identity; continued consent means the next report comes from a
+///    fresh, unrelated one.
+///
+/// Returns `None` if the mint cannot be persisted, rather than sending under an id
+/// that will not survive the next launch (which would make every payload look like
+/// a different install).
+fn sendable_header(
+    dir: &Path,
+    state: &mut PersistState,
+    app_version: &str,
+) -> Option<TelemetryPayload> {
+    if !consent_active(&state.consent) {
+        return None;
+    }
+    if state.install_id.is_none() {
+        state.install_id = Some(new_install_id());
+        if write_state(dir, state).is_err() {
+            state.install_id = None;
+            return None;
+        }
+    }
+    let id = state.install_id.as_deref()?;
+    Some(TelemetryPayload::header(id, app_version))
+}
+
+/// The outbox entries due at `now`, each stamped with a delivery LEASE as it is
+/// handed out.
+///
+/// A pump is spawned from three places — launch, the end of a sync, and a
+/// mid-session "yes" — and it deliberately holds no lock across the network call,
+/// so a 15-second POST cannot block the UI's status read. Without a claim, two
+/// overlapping pumps read the same queue and both send it: the Worker stores the
+/// payload twice under two event ids and nothing on either side notices the
+/// double-count. Stamping `next_attempt` forward under the *same* lock that read
+/// the queue makes the claim atomic — and because the outbox is a file, it holds
+/// across two app instances too, which the macOS `open -n` relaunch can briefly
+/// produce.
+///
+/// The lease is a timeout, not a lock: a process killed mid-send leaves its entries
+/// claimed for [`SEND_LEASE_MS`] and they fall due again on their own.
+fn claim_due(dir: &Path, now: i64) -> Vec<OutboxEntry> {
+    let mut queue = read_outbox(dir);
+    let mut claimed = Vec::new();
+    for entry in queue.iter_mut() {
+        if entry.next_attempt <= now {
+            claimed.push(entry.clone());
+            entry.next_attempt = now + SEND_LEASE_MS;
+        }
+    }
+    if !claimed.is_empty() {
+        let _ = write_outbox(dir, &queue);
+    }
+    claimed
+}
+
+/// Whether the entry `id` may still be POSTed **right now** — re-read under the io
+/// lock in the moment before the network call, not once at the top of the pump.
+///
+/// The pump snapshots the queue and then sends entry by entry, up to
+/// [`REQUEST_TIMEOUT`] apiece, which is long enough to outlive the user's decision.
+/// Withdrawing consent and requesting a deletion both purge the outbox; the loop
+/// used to keep posting its owned snapshot regardless, so a payload could leave the
+/// machine after the user said stop — and, after a deletion, still carrying the id
+/// they had just retired. Re-reading here narrows that window to the moment between
+/// this check and `post`, which is as tight as a design holding no lock across an
+/// `.await` can be.
+fn still_sendable(dir: &Path, id: &str) -> bool {
+    consent_active(&read_state(dir).consent) && read_outbox(dir).iter().any(|e| e.id == id)
+}
+
 /// The dedup key: the payload's newest record.
 fn dedup_key(p: &TelemetryPayload) -> String {
     let newest = p
@@ -954,6 +1155,31 @@ fn classify(status: u16) -> SendOutcome {
     }
 }
 
+/// Turn one DELETE status into an outbox decision — the same contract as
+/// [`classify`], with one deliberate difference.
+///
+/// A deletion is the USER'S OWN REQUEST, and the parked id is the only record that
+/// it is still owed; clearing it is forgetting it forever. So the question is not
+/// "is this 4xx retryable" but "does this status say something about the ID, or
+/// about this BUILD?":
+///
+/// - `400 invalid_install_id` / `404` — the id is the problem, and no amount of
+///   retrying makes a malformed or unknown id deletable. Clear it.
+/// - **`401` / `403` — the write key is the problem** (`src/index.ts` answers a
+///   missing or wrong `x-write-key` with 401, on the delete route exactly as on
+///   ingest). That is a misconfigured build, not an undeletable id, and treating it
+///   as permanent abandons the deletion the user asked for. It stays owed and is
+///   retried, which is what "we will delete this" means.
+/// - Everything else follows [`classify`]: 2xx clears it (the Worker answers 200
+///   even for an app with no tables yet, precisely so a parked id can drain).
+fn classify_delete(status: u16) -> SendOutcome {
+    if status == 401 || status == 403 {
+        SendOutcome::Transient(format!("endpoint refused the write key: {status}"))
+    } else {
+        classify(status)
+    }
+}
+
 /// The retry backoff for `attempts` failures so far: 1, 2, 4, … minutes, capped.
 fn backoff_ms(attempts: u32) -> i64 {
     let minutes = 1u64 << attempts.min(8);
@@ -966,11 +1192,25 @@ fn backoff_ms(attempts: u32) -> i64 {
 /// env (dev/CI) falling back to values baked in at release. `None` means this
 /// build has no endpoint — reports queue locally and nothing reaches the network,
 /// which is exactly the state before an endpoint is configured.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Endpoint {
     ingest_url: String,
     base_url: String,
     write_key: String,
+}
+
+/// Debug is written by hand, not derived, for one reason: `write_key` is a
+/// SECRET. A derived `Debug` puts it one `{:?}` — one `dbg!`, one `eprintln!` in a
+/// future error path, one panic message — away from a log file or a crash record.
+/// The url is what a reader ever needs; the key is rendered as its presence.
+impl std::fmt::Debug for Endpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Endpoint")
+            .field("ingest_url", &self.ingest_url)
+            .field("base_url", &self.base_url)
+            .field("write_key", &"<redacted>")
+            .finish()
+    }
 }
 
 impl Endpoint {
@@ -1153,14 +1393,12 @@ pub fn after_sync(app: &tauri::AppHandle, facts: &RunFacts) {
             Ok(g) => g,
             Err(_) => return,
         };
-        let state = read_state(&dir);
-        if !consent_active(&state.consent) {
-            // Nothing is collected while consent is not active — not even in a
-            // file. The report is simply never built.
+        let mut state = read_state(&dir);
+        // Nothing is collected while consent is not active — not even in a file.
+        // The report is simply never built.
+        let Some(mut payload) = sendable_header(&dir, &mut state, &version) else {
             return;
-        }
-        let id = state.install_id.as_deref().unwrap_or(NIL_INSTALL_ID);
-        let mut payload = TelemetryPayload::header(id, &version);
+        };
         payload.runs.push(sync_report(facts, now));
         enqueue(&dir, &payload, now).unwrap_or(false)
     };
@@ -1206,8 +1444,9 @@ fn drain_launch_crashes(st: &TelemetryInner, dir: &Path, app_version: &str) {
         .map(|c| c.at)
         .max()
         .unwrap_or(state.crash_watermark);
-    let id = state.install_id.as_deref().unwrap_or(NIL_INSTALL_ID);
-    let mut payload = TelemetryPayload::header(id, app_version);
+    let Some(mut payload) = sendable_header(dir, &mut state, app_version) else {
+        return;
+    };
     payload.crashes = crashes;
     if enqueue(dir, &payload, now_ms()).unwrap_or(false) {
         state.crash_watermark = newest;
@@ -1241,15 +1480,23 @@ async fn pump(st: &TelemetryInner, dir: &Path) {
     }
 
     let now = now_ms();
+    // Claimed, not merely read: a concurrent pump (another spawn, or a second app
+    // instance) must not send the same payload again. See [`claim_due`].
     let due: Vec<OutboxEntry> = {
         let _g = lock_state(&st.io, OnPoison::Recover);
-        read_outbox(dir)
-            .into_iter()
-            .filter(|e| e.next_attempt <= now)
-            .collect()
+        claim_due(dir, now)
     };
 
     for entry in due {
+        // Re-checked immediately before the network call rather than once at the
+        // top: consent may have been withdrawn, or the queue purged by a deletion,
+        // while the previous entry was in flight. See [`still_sendable`].
+        {
+            let _g = lock_state(&st.io, OnPoison::Recover);
+            if !still_sendable(dir, &entry.id) {
+                continue;
+            }
+        }
         let outcome = post(client, endpoint, &entry.payload_json).await;
         let _g = lock_state(&st.io, OnPoison::Recover);
         let mut queue = read_outbox(dir);
@@ -1322,11 +1569,12 @@ async fn drain_deletions(
             .send()
             .await
         {
-            Ok(r) => classify(r.status().as_u16()),
+            Ok(r) => classify_delete(r.status().as_u16()),
             Err(_) => SendOutcome::Transient("could not reach the endpoint".to_string()),
         };
-        // Permanent OR Ok both clear it: a 4xx on a delete means the id is not
-        // deletable (or already gone), and retrying cannot change that.
+        // Permanent OR Ok both clear it: the id is either gone or not deletable,
+        // and retrying cannot change that. A refused write key is NOT one of those
+        // — see [`classify_delete`].
         if !matches!(outcome, SendOutcome::Transient(_)) {
             let _g = lock_state(&st.io, OnPoison::Recover);
             let mut state = read_state(dir);
@@ -1462,7 +1710,7 @@ mod tests {
 
     // ── A church-y result, full of things that must NOT leave ─────────────────
 
-    fn identifying_result() -> SyncResult {
+    pub(super) fn identifying_result() -> SyncResult {
         SyncResult {
             schema: SCHEMA_VERSION,
             parameters: Parameters {
@@ -1754,6 +2002,47 @@ mod tests {
         assert!(matches!(classify(503), SendOutcome::Transient(_)));
     }
 
+    /// ⚠️ A deletion is the user's own request, and the parked id is the only
+    /// record that it is still owed. The endpoint answers a missing or wrong
+    /// `x-write-key` with **401** on the delete route exactly as on ingest
+    /// (`sunday-telemetry/src/index.ts`), and treating that as permanent quietly
+    /// abandons the deletion instead of retrying it. The question is whether the
+    /// status is about the ID or about this BUILD.
+    #[test]
+    fn a_delete_is_only_forgotten_when_the_id_is_the_problem() {
+        // About the build — still owed.
+        assert!(matches!(classify_delete(401), SendOutcome::Transient(_)));
+        assert!(matches!(classify_delete(403), SendOutcome::Transient(_)));
+        // About the id — no retry can make it deletable.
+        assert!(matches!(classify_delete(400), SendOutcome::Permanent(_)));
+        assert!(matches!(classify_delete(404), SendOutcome::Permanent(_)));
+        assert!(matches!(classify_delete(410), SendOutcome::Permanent(_)));
+        // Done. (The Worker answers 200 even for an app with no tables yet, so a
+        // parked id from a machine that never sent anything still drains.)
+        assert_eq!(classify_delete(200), SendOutcome::Ok);
+        // And the shared retryable statuses stay retryable.
+        assert!(matches!(classify_delete(429), SendOutcome::Transient(_)));
+        assert!(matches!(classify_delete(503), SendOutcome::Transient(_)));
+    }
+
+    /// The write key is a secret. A derived `Debug` puts it one `{:?}` away from a
+    /// log line or a crash record, and a crash record is a thing this app UPLOADS.
+    #[test]
+    fn the_write_key_never_appears_in_a_debug_rendering() {
+        let key = "wk-not-a-real-key-0123456789";
+        let e = Endpoint::normalize(
+            Some("https://telemetry.sundaysuite.app".into()),
+            Some(key.into()),
+        )
+        .unwrap();
+        let rendered = format!("{e:?}");
+        assert!(!rendered.contains(key), "the write key leaked: {rendered}");
+        assert!(
+            rendered.contains("telemetry.sundaysuite.app"),
+            "…while the url, which is what a reader needs, is still there: {rendered}"
+        );
+    }
+
     #[test]
     fn backoff_grows_and_is_capped() {
         assert!(backoff_ms(0) < backoff_ms(1));
@@ -1919,6 +2208,242 @@ mod tests {
         );
     }
 
+    /// A minimal queueable payload carrying one crash at `at`.
+    fn queued_payload(at: i64) -> TelemetryPayload {
+        let mut p = TelemetryPayload::header("3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8", "0.2.0");
+        p.crashes.push(crash::CrashReport {
+            schema: crash::RECORD_SCHEMA,
+            kind: "panic".into(),
+            at,
+            app_version: "0.2.0".into(),
+            os: Os::Macos,
+            message: "boom".into(),
+            location: None,
+            backtrace_present: false,
+        });
+        p
+    }
+
+    /// A state file in the shape "consent granted, id minted".
+    fn granted_state() -> PersistState {
+        PersistState {
+            consent: Some(ConsentRecord::decide(true, now_ms())),
+            install_id: Some(new_install_id()),
+            pending_deletions: vec![],
+            crash_watermark: 0,
+        }
+    }
+
+    /// ⚠️ "Delete my data" clears the install id and — by design, D-043 — leaves
+    /// consent ALONE: deleting data and stopping collection are different requests.
+    /// So "consent active, no id" is a state the app reaches on purpose, and the
+    /// next sync used to fill it with [`NIL_INSTALL_ID`] — the shared preview id
+    /// the Worker rejects BY NAME (`nil_install_id`, or the whole fleet lands in one
+    /// bucket). That 400 is permanent, and on the crash-drain path the watermark has
+    /// already moved past those records, so they are gone for good.
+    #[test]
+    fn a_deleted_install_mints_a_fresh_id_instead_of_sending_the_nil_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let retired = new_install_id();
+        let mut state = PersistState {
+            consent: Some(ConsentRecord::decide(true, now_ms())),
+            install_id: None,
+            pending_deletions: vec![retired.clone()],
+            crash_watermark: 0,
+        };
+        write_state(dir, &state).unwrap();
+
+        let payload = sendable_header(dir, &mut state, "0.2.0").expect("consent is active");
+        assert_ne!(
+            payload.install_id, NIL_INSTALL_ID,
+            "the nil id reached a real send path — the Worker 400s it by name and the outbox drops it"
+        );
+        assert_eq!(
+            sanitize_install_id(&payload.install_id),
+            payload.install_id,
+            "and what replaced it must be a real UUID"
+        );
+        assert_ne!(
+            payload.install_id, retired,
+            "a deletion must not be undone by re-minting the id it retired"
+        );
+        // Minted once and persisted, so the next payload is the same install and
+        // not a brand-new one every sync.
+        assert_eq!(
+            read_state(dir).install_id.as_deref(),
+            Some(payload.install_id.as_str())
+        );
+        let again = sendable_header(dir, &mut state, "0.2.0").unwrap();
+        assert_eq!(again.install_id, payload.install_id);
+    }
+
+    /// …and the gate itself still holds: no grant, no envelope, no id minted.
+    #[test]
+    fn without_an_active_grant_nothing_is_queued_and_no_id_is_minted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        for consent in [
+            None,
+            Some(ConsentRecord::decide(false, now_ms())),
+            // A stale grant: the scope may have widened since they answered.
+            Some(ConsentRecord {
+                granted: true,
+                version: CONSENT_VERSION + 1,
+                decided_at: now_ms(),
+            }),
+        ] {
+            let mut state = PersistState {
+                consent,
+                install_id: None,
+                pending_deletions: vec![],
+                crash_watermark: 0,
+            };
+            write_state(dir, &state).unwrap();
+            assert!(sendable_header(dir, &mut state, "0.2.0").is_none());
+            assert_eq!(
+                read_state(dir).install_id,
+                None,
+                "minting an id for someone who has not said yes is itself collection"
+            );
+        }
+    }
+
+    /// ⚠️ A pump is spawned from three places (launch, after a sync, a mid-session
+    /// "yes") and holds no lock across the 15-second POST. Two overlapping pumps
+    /// used to read the same queue and both send it: the Worker stores the payload
+    /// twice under two event ids, and nothing on either side notices the
+    /// double-count. The claim has to be atomic with the read.
+    #[test]
+    fn a_claimed_entry_is_leased_so_two_pumps_cannot_double_send() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let now = 1_800_000_000_000;
+        for i in 0..3 {
+            assert!(enqueue(dir, &queued_payload(100 + i), now).unwrap());
+        }
+
+        let first = claim_due(dir, now);
+        assert_eq!(first.len(), 3);
+        assert!(
+            claim_due(dir, now).is_empty(),
+            "a second, overlapping pump claimed the same entries — every one of them would be POSTed twice"
+        );
+
+        // The lease is a timeout, not a lock: a process killed mid-send must not
+        // strand its payloads forever.
+        let recovered = claim_due(dir, now + SEND_LEASE_MS);
+        assert_eq!(recovered.len(), 3, "an expired lease must free the entry");
+        // Claiming does not lose, reorder or rewrite anything else.
+        assert_eq!(read_outbox(dir).len(), 3);
+        let ids: Vec<&str> = first.iter().map(|e| e.id.as_str()).collect();
+        for e in &recovered {
+            assert!(ids.contains(&e.id.as_str()));
+            assert_eq!(e.attempts, 0, "a claim is not a failed attempt");
+        }
+    }
+
+    /// ⚠️ The pump snapshots the queue and then sends entry by entry, 15 s apiece —
+    /// long enough to outlive the user's decision. Both "no" (which purges the
+    /// outbox) and "delete my data" (which purges it and retires the id) used to
+    /// leave the loop posting its owned snapshot regardless: payloads leaving the
+    /// machine after the user said stop.
+    #[test]
+    fn a_withdrawn_consent_or_a_deletion_stops_a_send_already_in_flight() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut st = granted_state();
+        write_state(dir, &st).unwrap();
+        assert!(enqueue(dir, &queued_payload(100), now_ms()).unwrap());
+        let id = read_outbox(dir)[0].id.clone();
+        assert!(
+            still_sendable(dir, &id),
+            "a queued payload under an active grant"
+        );
+
+        // The user says no between two POSTs.
+        st.consent = Some(ConsentRecord::decide(false, now_ms()));
+        write_state(dir, &st).unwrap();
+        assert!(
+            !still_sendable(dir, &id),
+            "a payload left the machine after consent was withdrawn"
+        );
+
+        // …and a deletion, which purges the outbox and retires the id the queued
+        // payloads carry, stops it for the same reason.
+        st.consent = Some(ConsentRecord::decide(true, now_ms()));
+        write_state(dir, &st).unwrap();
+        assert!(still_sendable(dir, &id));
+        write_outbox(dir, &[]).unwrap();
+        assert!(
+            !still_sendable(dir, &id),
+            "a payload carrying the retired install id left the machine"
+        );
+    }
+
+    /// ⚠️ The staging file has to be unique PER WRITER, not per target file.
+    /// `state.json.tmp` was a fixed name, and two app instances share it — which
+    /// the macOS `open -n` relaunch briefly produces, and both instances run the
+    /// launch drain. One truncates the other's buffer mid-write and the loser's
+    /// `rename` then publishes a half-written `state.json`. `read_state` reads that
+    /// as the default: consent fails closed (right), but the install id and any
+    /// **deletion still owed** are silently forgotten (very much not right).
+    #[test]
+    fn two_writers_never_stage_through_the_same_temp_path() {
+        let a = temp_name("state.json", 0);
+        let b = temp_name("state.json", 1);
+        assert_ne!(a, b, "two staged writes collided on one temp path");
+        assert!(
+            a.contains(&std::process::id().to_string()),
+            "the pid is what separates two instances, not just two calls: {a}"
+        );
+        // Still invisible to every reader: `record_names` and the state/outbox
+        // readers all key off the real name.
+        for n in [&a, &b] {
+            assert!(n.starts_with("state.json."), "{n}");
+            assert!(n.ends_with(".tmp"), "{n}");
+        }
+    }
+
+    /// The other half of a per-writer temp name: it no longer self-cleans by being
+    /// overwritten, so abandoned ones must be swept — and live ones must not be.
+    #[test]
+    fn an_abandoned_staging_file_is_swept_and_a_fresh_one_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        // A staging file some killed process left behind.
+        let orphan = dir.join("state.json.99999-0.tmp");
+        std::fs::write(&orphan, b"half a payl").unwrap();
+        let old = std::time::SystemTime::now() - TEMP_ORPHAN_AGE - Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&orphan)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        // …and one another instance is writing RIGHT NOW.
+        let live = dir.join("outbox.json.12345-7.tmp");
+        std::fs::write(&live, b"in flight").unwrap();
+
+        write_state(dir, &PersistState::default()).unwrap();
+
+        assert!(!orphan.exists(), "the abandoned staging file was kept");
+        assert!(
+            live.exists(),
+            "a staging file another writer is mid-write on was deleted"
+        );
+        // The write itself landed and left nothing of its own behind.
+        assert_eq!(read_state(dir), PersistState::default());
+        let staged = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with("state.json."))
+            .count();
+        assert_eq!(staged, 0, "the write left its own temp file behind");
+    }
+
     #[test]
     fn state_and_outbox_survive_a_reopen_and_reject_junk() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1928,5 +2453,573 @@ mod tests {
         std::fs::write(dir.join("outbox.json"), b"nonsense").unwrap();
         assert_eq!(read_state(dir), PersistState::default());
         assert!(read_outbox(dir).is_empty());
+    }
+}
+
+/// ═══════════════════════════════════════════════════════════════════════════
+///   THE WIRE CONTRACT, RESTATED AGAINST THE DEPLOYED WORKER
+/// ═══════════════════════════════════════════════════════════════════════════
+///
+/// The endpoint is now PRODUCTION TRUTH: `sunday-telemetry/src/schema-sync.ts`
+/// validates every field, every enum spelling and every cap, and answers a
+/// mismatch with a 400. [`classify`] calls a 400 `Permanent`, so the outbox drops
+/// that payload **without retrying and without telling anyone** — a client/server
+/// drift is not a loud failure, it is silent, permanent data loss for every
+/// install it affects.
+///
+/// So the contract is pinned HERE, in the client, from the server's own file:
+/// the key lists, the enum vocabularies, the caps and the free-text path screen
+/// below are transcribed from `schema-sync.ts` (which in turn re-uses
+/// `schema.ts`'s `Check`, `ABSOLUTE_PATH_RE` and timestamp window). A field
+/// renamed on either side fails a test in this module instead of quietly
+/// deleting a month of reports.
+#[cfg(test)]
+mod wire_contract {
+    use super::*;
+    use serde_json::Value;
+
+    // ── Transcribed from sunday-telemetry/src/schema-sync.ts ──────────────────
+
+    /// `SYNC_PAYLOAD_KEYS`. Exactly these — the Worker's `Check::object` rejects a
+    /// missing key AND an unknown one.
+    const PAYLOAD_KEYS: &[&str] = &[
+        "app",
+        "schema",
+        "consentVersion",
+        "installId",
+        "builtAt",
+        "appVersion",
+        "os",
+        "arch",
+        "language",
+        "runs",
+        "crashes",
+    ];
+    /// `RUN_KEYS`.
+    const RUN_KEYS: &[&str] = &[
+        "at",
+        "succeeded",
+        "fileCount",
+        "deviceCount",
+        "placedCount",
+        "unsyncedCount",
+        "durationBucket",
+        "runDurationBucket",
+        "minPsr",
+        "analysisRate",
+        "formats",
+        "outcomes",
+        "psrBands",
+        "driftCorrectionEnabled",
+        "driftClips",
+        "driftCorrectedClips",
+        "mixedFps",
+    ];
+    /// `CRASH_KEYS`. Note: no `task` — that field is SundayRec's.
+    const CRASH_KEYS: &[&str] = &[
+        "schema",
+        "kind",
+        "at",
+        "appVersion",
+        "os",
+        "message",
+        "location",
+        "backtracePresent",
+    ];
+
+    const OS_VALUES: &[&str] = &["macos", "windows", "linux", "other"];
+    const ARCH_VALUES: &[&str] = &["x86_64", "aarch64", "other"];
+    const MEDIA_FORMATS: &[&str] = &[
+        "mp4", "mov", "mkv", "avi", "mts", "wav", "flac", "mp3", "aac", "m4a", "other",
+    ];
+    const OUTCOME_REASONS: &[&str] = &[
+        "low_confidence",
+        "no_audio",
+        "decode_error",
+        "device_overlap",
+    ];
+    const DURATION_BUCKETS: &[&str] = &[
+        "under5m",
+        "b5to15m",
+        "b15to30m",
+        "b30to60m",
+        "b60to120m",
+        "over120m",
+    ];
+    const RUN_DURATION_BUCKETS: &[&str] =
+        &["under10s", "b10to30s", "b30to60s", "b60to300s", "over300s"];
+    const PSR_BANDS: &[&str] = &[
+        "under15", "b15to20", "b20to30", "b30to50", "b50to100", "over100",
+    ];
+
+    /// `MAX_SYNC_RUNS` / `MAX_SYNC_CRASHES`.
+    const WORKER_MAX_RUNS: usize = 20;
+    const WORKER_MAX_CRASHES: usize = 20;
+    /// `MESSAGE_MAX_CHARS` / `LOCATION_MAX_CHARS` / `VERSION_MAX_CHARS` — the
+    /// Worker's `freeText` allows the cap PLUS one trailing `…` (the client's own
+    /// truncation shape) and nothing more.
+    const WORKER_MESSAGE_MAX: usize = 200;
+    const WORKER_LOCATION_MAX: usize = 120;
+    const WORKER_VERSION_MAX: usize = 32;
+    /// `TS_MIN` / `TS_MAX` — 2020-01-01 .. 2100-01-01 UTC, in ms.
+    const TS_MIN: i64 = 1_577_836_800_000;
+    const TS_MAX: i64 = 4_102_444_800_000;
+    /// `MAX_BODY_BYTES`.
+    const WORKER_MAX_BODY_BYTES: usize = 64 * 1024;
+
+    /// The client's collection caps may never exceed the Worker's `too_many`
+    /// thresholds — a compile-time failure, because there is no runtime in which a
+    /// payload the endpoint refuses by size is acceptable.
+    const _: () = assert!(MAX_RUNS <= WORKER_MAX_RUNS);
+    const _: () = assert!(MAX_CRASHES <= WORKER_MAX_CRASHES);
+
+    /// A faithful port of `ABSOLUTE_PATH_RE` from `sunday-telemetry/src/schema.ts`:
+    ///
+    /// ```text
+    /// (^|[\s"'(<[])(\/(Users|home|var|tmp|private|Volumes)\/|[A-Za-z]:[\\/]|\\\\[^\s\\]+\\|~[\\/])
+    /// ```
+    ///
+    /// `freeText` refuses any string this matches with `unscrubbed_path`, which
+    /// 400s the WHOLE payload. This is therefore the exact question every scrubbed
+    /// string has to answer "no" to.
+    fn worker_path_screen_hits(s: &str) -> bool {
+        const ROOTS: &[&str] = &[
+            "/Users/",
+            "/home/",
+            "/var/",
+            "/tmp/",
+            "/private/",
+            "/Volumes/",
+        ];
+        for (i, _) in s.char_indices() {
+            let at_boundary = match s[..i].chars().next_back() {
+                None => true,
+                Some(c) => c.is_whitespace() || matches!(c, '"' | '\'' | '(' | '<' | '['),
+            };
+            if !at_boundary {
+                continue;
+            }
+            let rest = &s[i..];
+            if ROOTS.iter().any(|r| rest.starts_with(r)) {
+                return true;
+            }
+            let b = rest.as_bytes();
+            // `~/` or `~\`
+            if b.len() >= 2 && b[0] == b'~' && matches!(b[1], b'\\' | b'/') {
+                return true;
+            }
+            // `X:\` or `X:/`
+            if b.len() >= 3
+                && b[0].is_ascii_alphabetic()
+                && b[1] == b':'
+                && matches!(b[2], b'\\' | b'/')
+            {
+                return true;
+            }
+            // `\\host\`
+            if let Some(after) = rest.strip_prefix(r"\\") {
+                for (segment, c) in after.chars().enumerate() {
+                    if c == '\\' {
+                        if segment > 0 {
+                            return true;
+                        }
+                        break;
+                    }
+                    if c.is_whitespace() {
+                        break;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    // ── Fixtures ──────────────────────────────────────────────────────────────
+
+    /// A payload exercising every field, every collection and both caps.
+    fn maximal_payload() -> TelemetryPayload {
+        let mut p =
+            TelemetryPayload::header("3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8", "0.2.0-beta.2");
+        for i in 0..MAX_RUNS {
+            p.runs.push(SyncReport {
+                at: TS_MIN + i as i64,
+                succeeded: i % 2 == 0,
+                file_count: 12,
+                device_count: 4,
+                placed_count: 9,
+                unsynced_count: 3,
+                duration_bucket: DurationBucket::B60to120m,
+                run_duration_bucket: RunDurationBucket::B60to300s,
+                min_psr: 15.0,
+                analysis_rate: 12_000,
+                formats: vec![
+                    FormatCount {
+                        format: MediaFormat::Mp4,
+                        count: 8,
+                    },
+                    FormatCount {
+                        format: MediaFormat::Wav,
+                        count: 4,
+                    },
+                ],
+                outcomes: vec![OutcomeCount {
+                    reason: OutcomeReason::DecodeError,
+                    count: 3,
+                }],
+                psr_bands: vec![PsrBandCount {
+                    band: PsrBand::B30to50,
+                    count: 9,
+                }],
+                drift_correction_enabled: true,
+                drift_clips: 7,
+                drift_corrected_clips: 2,
+                mixed_fps: true,
+            });
+        }
+        for i in 0..MAX_CRASHES {
+            p.crashes.push(crash::CrashReport {
+                schema: crash::RECORD_SCHEMA,
+                kind: "panic".into(),
+                at: TS_MIN + i as i64,
+                app_version: "0.2.0-beta.2".into(),
+                os: Os::Macos,
+                // Worst case: the cap in multi-byte characters.
+                message: scrub_free_text(&"æ".repeat(400), None, MESSAGE_MAX_CHARS),
+                location: Some(scrub_free_text(&"ø".repeat(400), None, LOCATION_MAX_CHARS)),
+                backtrace_present: true,
+            });
+        }
+        p
+    }
+
+    fn keys_of(v: &Value) -> Vec<String> {
+        let mut k: Vec<String> = v
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::from)
+            .collect();
+        k.sort();
+        k
+    }
+
+    fn sorted(v: &[&str]) -> Vec<String> {
+        let mut k: Vec<String> = v.iter().map(|s| (*s).to_string()).collect();
+        k.sort();
+        k
+    }
+
+    // ── The tests ─────────────────────────────────────────────────────────────
+
+    /// Every key the client emits, at every level, is exactly the key set the
+    /// Worker demands — no missing field, no extra one.
+    #[test]
+    fn every_key_matches_the_workers_key_lists() {
+        let json: Value = serde_json::to_value(maximal_payload()).unwrap();
+        assert_eq!(keys_of(&json), sorted(PAYLOAD_KEYS), "payload keys drifted");
+        assert_eq!(
+            keys_of(&json["runs"][0]),
+            sorted(RUN_KEYS),
+            "run keys drifted"
+        );
+        assert_eq!(
+            keys_of(&json["crashes"][0]),
+            sorted(CRASH_KEYS),
+            "crash keys drifted"
+        );
+        assert_eq!(
+            keys_of(&json["runs"][0]["formats"][0]),
+            vec!["count".to_string(), "format".to_string()]
+        );
+        assert_eq!(
+            keys_of(&json["runs"][0]["outcomes"][0]),
+            vec!["count".to_string(), "reason".to_string()]
+        );
+        assert_eq!(
+            keys_of(&json["runs"][0]["psrBands"][0]),
+            vec!["band".to_string(), "count".to_string()]
+        );
+        // `app` is the dimension the app registry routes on.
+        assert_eq!(json["app"], "sundaysync");
+        assert_eq!(json["schema"], TELEMETRY_SCHEMA);
+        // `language` and `location` are `Option`s and must serialise as explicit
+        // nulls — the Worker's `nullable` accepts null but `object` still requires
+        // the KEY to be present, so a `skip_serializing_if` here would be a 400.
+        let mut headerless = TelemetryPayload::header(NIL_INSTALL_ID, "0.0.0");
+        headerless.language = None;
+        let v = serde_json::to_value(&headerless).unwrap();
+        assert!(v.as_object().unwrap().contains_key("language"));
+        assert!(v["language"].is_null());
+    }
+
+    /// Every closed enum serialises to a spelling the Worker's `enum()` accepts.
+    /// serde's `snake_case` inserts no underscore between a letter and a digit
+    /// (`B5to15m` → `b5to15m`), which is the exact assumption schema-sync.ts
+    /// documents — so this is where that assumption is checked rather than assumed.
+    #[test]
+    fn every_enum_spelling_is_in_the_workers_vocabulary() {
+        fn wire<T: Serialize>(v: T) -> String {
+            serde_json::to_value(v)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+        for (v, set) in [
+            (wire(Os::Macos), OS_VALUES),
+            (wire(Os::Windows), OS_VALUES),
+            (wire(Os::Linux), OS_VALUES),
+            (wire(Os::Other), OS_VALUES),
+            (wire(Arch::X86_64), ARCH_VALUES),
+            (wire(Arch::Aarch64), ARCH_VALUES),
+            (wire(Arch::Other), ARCH_VALUES),
+        ] {
+            assert!(
+                set.contains(&v.as_str()),
+                "{v:?} is not in the Worker's set"
+            );
+        }
+        // Every MediaFormat the classifier can produce.
+        for ext in [
+            "a.mp4", "a.mov", "a.mkv", "a.avi", "a.mts", "a.m2ts", "a.wav", "a.flac", "a.mp3",
+            "a.aac", "a.m4a", "a.zzz", "a",
+        ] {
+            let v = wire(MediaFormat::from_path(Path::new(ext)));
+            assert!(MEDIA_FORMATS.contains(&v.as_str()), "{ext} → {v:?}");
+        }
+        for r in [
+            UnsyncedReason::LowConfidence,
+            UnsyncedReason::NoAudio,
+            UnsyncedReason::DecodeError,
+            UnsyncedReason::DeviceOverlap,
+        ] {
+            let v = wire(OutcomeReason::from_engine(r));
+            assert!(OUTCOME_REASONS.contains(&v.as_str()), "{v:?}");
+        }
+        // The bucket functions, swept across their whole domain.
+        for secs in [
+            0.0, 299.0, 300.0, 899.0, 900.0, 1799.0, 1800.0, 3599.0, 3600.0, 7199.0, 7200.0, 1e9,
+        ] {
+            let v = wire(DurationBucket::from_seconds(secs));
+            assert!(DURATION_BUCKETS.contains(&v.as_str()), "{secs} → {v:?}");
+        }
+        for ms in [
+            0u128,
+            9_999,
+            10_000,
+            29_999,
+            30_000,
+            59_999,
+            60_000,
+            299_999,
+            300_000,
+            1_000_000_000,
+        ] {
+            let v = wire(RunDurationBucket::from_millis(ms));
+            assert!(RUN_DURATION_BUCKETS.contains(&v.as_str()), "{ms} → {v:?}");
+        }
+        for psr in [
+            0.0, 14.9, 15.0, 19.9, 20.0, 29.9, 30.0, 49.9, 50.0, 99.9, 100.0, 1e6,
+        ] {
+            let v = wire(PsrBand::from_psr(psr));
+            assert!(PSR_BANDS.contains(&v.as_str()), "{psr} → {v:?}");
+        }
+    }
+
+    /// Every cap the Worker enforces holds on the biggest payload the client can
+    /// build, including the free-text lengths counted in CHARS (the Worker counts
+    /// `[...v]`, i.e. Unicode scalars, not UTF-16 units) and the body-size ceiling.
+    #[test]
+    fn every_cap_the_worker_enforces_holds() {
+        let p = maximal_payload();
+        assert_eq!(MESSAGE_MAX_CHARS, WORKER_MESSAGE_MAX);
+        assert_eq!(LOCATION_MAX_CHARS, WORKER_LOCATION_MAX);
+        assert_eq!(VERSION_MAX_CHARS, WORKER_VERSION_MAX);
+
+        // Truncation past the caps still lands inside them.
+        let mut over = p.clone();
+        for i in 0..40 {
+            over.runs.push(over.runs[0].clone());
+            over.crashes.push(over.crashes[0].clone());
+            over.runs.last_mut().unwrap().at = TS_MIN + 1_000 + i;
+        }
+        over.truncate_to_caps();
+        assert_eq!(over.runs.len(), MAX_RUNS);
+        assert_eq!(over.crashes.len(), MAX_CRASHES);
+        // …and keep_last kept the NEWEST.
+        assert_eq!(over.runs.last().unwrap().at, TS_MIN + 1_000 + 39);
+
+        // Free text: at most cap + 1, and the +1 is the ellipsis the Worker allows.
+        for c in &p.crashes {
+            let n = c.message.chars().count();
+            assert!(n <= MESSAGE_MAX_CHARS + 1, "message was {n} chars");
+            if n == MESSAGE_MAX_CHARS + 1 {
+                assert_eq!(c.message.chars().last(), Some('…'));
+            }
+            let loc = c.location.as_deref().unwrap();
+            let n = loc.chars().count();
+            assert!(n <= LOCATION_MAX_CHARS + 1, "location was {n} chars");
+            if n == LOCATION_MAX_CHARS + 1 {
+                assert_eq!(loc.chars().last(), Some('…'));
+            }
+            assert!(c.app_version.chars().count() <= VERSION_MAX_CHARS + 1);
+        }
+        assert!(p.app_version.chars().count() <= VERSION_MAX_CHARS + 1);
+
+        // The per-run histograms cannot outgrow their closed vocabularies: each is
+        // built from a BTreeMap keyed by the enum, so duplicates (a 4xx) are
+        // impossible and the length is bounded by the enum's size.
+        for r in &p.runs {
+            assert!(r.formats.len() <= MEDIA_FORMATS.len());
+            assert!(r.outcomes.len() <= OUTCOME_REASONS.len());
+            assert!(r.psr_bands.len() <= PSR_BANDS.len());
+        }
+
+        // The whole thing fits the Worker's 64 kB body ceiling with room to spare.
+        let bytes = serde_json::to_vec(&p).unwrap().len();
+        assert!(
+            bytes < WORKER_MAX_BODY_BYTES,
+            "the maximal payload is {bytes} bytes, over the Worker's {WORKER_MAX_BODY_BYTES}"
+        );
+    }
+
+    /// Every timestamp the client puts on the wire sits inside the Worker's shared
+    /// window, so a well-clocked machine is never rejected `out_of_range`.
+    #[test]
+    fn timestamps_land_inside_the_workers_window() {
+        let p = maximal_payload();
+        assert!(
+            (TS_MIN..TS_MAX).contains(&p.built_at),
+            "builtAt out of window"
+        );
+        let now = now_ms();
+        assert!(
+            (TS_MIN..TS_MAX).contains(&now),
+            "this machine's clock is outside the Worker's accepted window"
+        );
+    }
+
+    /// ⚠️ THE ONE THAT BITES: the client's scrubber must be at least as aggressive
+    /// as the Worker's path screen, at every LEFT BOUNDARY the screen recognises.
+    ///
+    /// `ABSOLUTE_PATH_RE` anchors on `(^|[\s"'(<[])` — start, whitespace, a quote,
+    /// an open paren, an **angle bracket** or an **open square bracket**. A client
+    /// that only anchors on the first four leaves `[C:\…` and `<\\NAS\…` untouched,
+    /// and every one of those messages is a 400 that silently takes the whole batch
+    /// (runs included) with it.
+    #[test]
+    fn a_scrubbed_message_never_trips_the_workers_path_screen() {
+        let home = Some("/Users/kari");
+        for raw in [
+            // Bare, and after each boundary character the Worker recognises.
+            r"could not open C:\Users\Ola\Opptak\x.mp4",
+            r#"could not open "C:\Users\Ola\Opptak\x.mp4""#,
+            r"could not open (C:\Users\Ola\Opptak\x.mp4)",
+            r"could not open [C:\Users\Ola\Opptak\x.mp4]",
+            r"could not open <C:\Users\Ola\Opptak\x.mp4>",
+            r"sources: [C:\Temp\a.mov, C:\Temp\b.mov]",
+            r"share [\\NAS\Opptak\gudstjeneste.wav] is offline",
+            r"share <\\NAS\Opptak\gudstjeneste.wav> is offline",
+            r"config [~/Opptak/Balkong Kirke] missing",
+            r"config <~\Opptak\Balkong Kirke> missing",
+            "failed [/Users/kari/Opptak/Balkong Kirke/ZOOM0001.WAV]",
+            "failed </Volumes/Backup/Opptak/x.wav>",
+            "failed (/private/var/folders/xy/T/sundaysync-1234/ref.f32)",
+            "failed '/tmp/sundaysync/scratch.bin'",
+            "[/home/rf/opptak/x.mkv] and [/var/tmp/y.mkv]",
+            // The home-replacement route: `~` must not be left bare next to a slash.
+            "kunne ikke åpne /Users/kari/Opptak/Balkong Kirke/ZOOM0001.WAV",
+        ] {
+            let scrubbed = scrub_free_text(raw, home, MESSAGE_MAX_CHARS);
+            assert!(
+                !worker_path_screen_hits(&scrubbed),
+                "the Worker would 400 this as `unscrubbed_path`:\n  raw:      {raw}\n  scrubbed: {scrubbed}"
+            );
+            assert!(
+                scrubbed.contains(PATH_PLACEHOLDER),
+                "nothing was redacted at all:\n  raw:      {raw}\n  scrubbed: {scrubbed}"
+            );
+        }
+
+        // The port itself is honest: it DOES fire on an unscrubbed string, so a
+        // green test above means the scrubber worked, not that the screen is dead.
+        assert!(worker_path_screen_hits(r"open [C:\Users\Ola\x.mp4]"));
+        assert!(worker_path_screen_hits("open /Users/kari/x.wav"));
+        assert!(!worker_path_screen_hits("panicked at src/place.rs:42:9"));
+        assert!(!worker_path_screen_hits(
+            "GET https://telemetry.example/v1 failed"
+        ));
+    }
+
+    /// Every free-text field of a real crash record — message AND location — is
+    /// screen-clean, whichever producer wrote it.
+    #[test]
+    fn every_free_text_field_of_a_crash_is_screen_clean() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        crash::record(
+            dir,
+            "sync_error",
+            r"decode failed for [C:\Users\Ola\Opptak\x.mp4]",
+            // A panic location from a dependency compiled on a Windows runner.
+            Some(
+                r"C:\Users\runneradmin\.cargo\registry\src\index.crates.io-6f17d22bba15001f\x-1.0\src\lib.rs:42:9",
+            ),
+        );
+        crash::record(
+            dir,
+            "frontend",
+            "[TypeError] cannot read </Users/kari/x>",
+            None,
+        );
+        for rec in crash::read_crashes(dir) {
+            assert!(
+                !worker_path_screen_hits(&rec.message),
+                "message would 400: {}",
+                rec.message
+            );
+            if let Some(loc) = &rec.location {
+                assert!(!worker_path_screen_hits(loc), "location would 400: {loc}");
+            }
+        }
+    }
+
+    /// A non-finite `minPsr` serialises as JSON `null`, which the Worker rejects
+    /// with `expected_number` — and that 400 takes the whole batch, not just the
+    /// one run. The projection must therefore never emit one.
+    #[test]
+    fn a_non_finite_min_psr_never_reaches_the_wire() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut result = super::tests::identifying_result();
+            result.parameters.min_psr = bad;
+            let facts = RunFacts {
+                result: &result,
+                run_millis: 1_000,
+                drift_correction_enabled: false,
+            };
+            let report = sync_report(&facts, TS_MIN);
+            let v = serde_json::to_value(&report).unwrap();
+            assert!(
+                v["minPsr"].is_f64() || v["minPsr"].is_i64(),
+                "minPsr serialised as {:?} — the Worker answers 400 `expected_number`",
+                v["minPsr"]
+            );
+        }
+    }
+
+    /// `appVersion` is `freeText(…, 32)` on the Worker: over the cap is a 400 for
+    /// the whole payload. The envelope must cap it rather than trusting whatever
+    /// the bundle identifier happens to say.
+    #[test]
+    fn a_long_app_version_is_capped_to_the_workers_allowance() {
+        let p = TelemetryPayload::header(NIL_INSTALL_ID, &"9".repeat(200));
+        let n = p.app_version.chars().count();
+        assert!(
+            n <= VERSION_MAX_CHARS + 1,
+            "appVersion reached the wire at {n} chars"
+        );
+        if n == VERSION_MAX_CHARS + 1 {
+            assert_eq!(p.app_version.chars().last(), Some('…'));
+        }
     }
 }
