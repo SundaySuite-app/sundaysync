@@ -94,6 +94,14 @@ jobs:
           # it lives only in Actions secrets. See docs header + the E9 report.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # E7/E8: the telemetry client's compile-time bakes (option_env!). The URL is
+          # public infrastructure; the write key is an anti-abuse speed bump minted on the
+          # Worker (`WRITE_KEY_SUNDAYSYNC`) and mirrored here as a repo secret. Both ABSENT
+          # → the client has no endpoint and sends nothing (fails soft) — exactly the
+          # pre-E8-deploy state. Set the secret after the Worker deploy; the next tag then
+          # ships a client that can actually deliver its consented payloads.
+          SUNDAYSYNC_TELEMETRY_URL: https://telemetry.sundaysuite.app
+          SUNDAYSYNC_TELEMETRY_KEY: ${{ secrets.SUNDAYSYNC_TELEMETRY_KEY }}
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}
