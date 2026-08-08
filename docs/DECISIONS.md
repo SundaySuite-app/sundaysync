@@ -1189,3 +1189,57 @@ swap in that pubkey. Until a signing secret is set, `tauri-action` skips updater
 clients reject unsigned updates by design — so there is no unsigned-release risk in the
 meantime. Lesson for the suite: signing-key generation must keep the private key out of all
 agent/tool output.
+
+## D-045 — E10 corpus: the credibility gate, a stricter single-segment floor, and the .lrv skip
+
+**E10, the first real corpus (a 2026-04-05 multicam baptism: 70-min XH2 main camera +
+XT4 + two iPhones + an Insta360 X + a produced stereo mix).** The §8.3 ritual surfaced a
+release blocker and settled two open questions. Findings first, honestly:
+
+**Three false placements, zero true ones admitted wrongly after the fix.**
+1. The 70-min XH2 against the produced mix: placed at PSR 15.2 (MIN_PSR is 15),
+   confidence 0.02, **drift −587,484 ppm**. The mix is *edited* — every segment's audio
+   genuinely exists in it, at different offsets (cuts). The regression fitted a line
+   through the scatter; v1-era code warned and placed anyway; E6 then "corrected" the
+   clip by −59 %.
+2. A 95-s iPhone clip against the raw XH2: PSR 15.4, **−1,937,858 ppm** — the same shape
+   against an unedited reference, so this is not only an edited-mix problem.
+3. A 14-s iPhone clip against the raw XH2: PSR 19.0, placed an hour from where its
+   metadata puts it. Single whole-clip peak — no segments, so nothing for a consistency
+   check to catch.
+
+**The fix is two gates in `place::admissible`, both refusal-shaped (§7.5):**
+- **Credibility** (`Drift::credible`): a match with ≥ 3 segments must survive the drift
+  regression — `|ppm| ≤ 500` (`MAX_CREDIBLE_DRIFT_PPM`: consumer crystals are tens of
+  ppm; 500 is a generous ceiling) AND residual MAD around the fitted line ≤ 15 ms
+  (`RESIDUAL_LIMIT_MS`). Fitting the line *first* is what keeps D-016's legitimate case
+  alive: a 90-min 40 ppm camera has offsets ON a line (raw MAD around the median would
+  false-alarm — why `ClipMatch::consistent` was never a hard gate), while cuts and
+  sidelobes scatter around any line.
+- **No-evidence floor**: a match with < 3 segments (`MIN_SEGMENTS_FOR_DRIFT`) has PSR as
+  its only evidence and must clear `min_psr × 5/3` (`NO_DRIFT_EVIDENCE_PSR_FACTOR`,
+  effective 25 at the default). Provisional calibration from this corpus — observed false
+  peaks 15.2–19.0, synthetic true matches ≫ 25 — and the full §8.1 accuracy suites pass
+  unchanged, which is the standing guard against over-tightening. D-015 (MIN_PSR on real
+  rooms) remains open; more corpus refines the factor.
+
+Re-run after the fix: **all three false placements refused** (`low_confidence`), every
+synthetic gate green, no legitimate placement lost. On this corpus that means zero
+placements at all — also honest: the cameras were largely in different rooms/times (the
+XT4's first clip *ends* ten minutes before the XH2 starts, by their own metadata), and
+the one nominal 23-min overlap (XT4's second clip) refused at PSR < 15, which is what
+different acoustic spaces look like. **Recall on real corpora is still unmeasured** — a
+possible false negative there cannot be distinguished from a genuinely unrelated room
+without ears on the material; more corpus, ideally with a known-good multicam pair in one
+room, is the E10/E12 loop's job.
+
+**Also settled: D-009's `.lrv` question, with real files.** The Insta360 writes an
+`LRV_….lrv` low-res proxy beside every `VID_….insv` original — same audio twice in one
+folder-device. The recursive walk now skips `.lrv` (case-insensitive), classified with
+the dotfile skip: a deliberate, narrow exception to §4.1's no-extension-filtering rule,
+because a proxy is a duplicate by construction, not doubtful media. An explicitly passed
+`.lrv` file is still honoured.
+
+**Guidance encoded in KNOWN_LIMITATIONS:** a produced/edited mix is not a valid sync
+reference — the engine now *refuses* instead of mis-placing, and the UI's reference
+override should point at a raw recorder file or the longest camera instead.

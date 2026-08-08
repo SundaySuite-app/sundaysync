@@ -15,6 +15,26 @@ use crate::request::ANALYSIS_RATE;
 /// that can disagree with itself.
 pub const MIN_SEGMENTS_FOR_DRIFT: usize = 3;
 
+/// D-045: the largest |ppm| a real clock can plausibly drift.
+///
+/// Consumer quartz is specified in the tens of ppm and ages into the low hundreds at the
+/// very worst; 500 gives that a comfortable margin. Anything beyond it is not a clock —
+/// it is segments matching *different content* (an edited/produced mix used as the
+/// reference, or sidelobe hits), fitted to a line that happens to have a slope. The E10
+/// corpus produced −587,484 ppm this way: three orders of magnitude past this bound.
+pub const MAX_CREDIBLE_DRIFT_PPM: f64 = 500.0;
+
+/// D-045: how far segments may scatter around the fitted drift line, in milliseconds.
+///
+/// This is §4.3's `MAD_LIMIT_MS` idea applied *after* removing the linear clock
+/// component: a genuinely drifting clip has segment offsets ON a line (so a raw MAD
+/// around the median grows with clip length and would false-alarm — exactly why
+/// `ClipMatch::consistent` was never a hard gate), while an edited mix or a set of
+/// sidelobe hits scatters around any line you fit. Fifteen milliseconds of residual is
+/// far more than clock physics or estimator noise can produce, and far less than the
+/// seconds of scatter a cut produces.
+pub const RESIDUAL_LIMIT_MS: f64 = 15.0;
+
 /// The result of a drift regression.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Drift {
@@ -38,6 +58,11 @@ pub struct Drift {
     pub ppm: f64,
     /// How far off the clip's end is, given `ppm` over its length.
     pub projected_end_error_ms: f64,
+    /// D-045: median absolute deviation of the segment offsets around the fitted line,
+    /// in milliseconds. Zero for a perfect clock; small for real drift plus estimator
+    /// noise; **seconds** when segments matched different content (an edited reference,
+    /// sidelobe hits) and the "drift" is a line through scatter.
+    pub residual_mad_ms: f64,
 }
 
 impl Drift {
@@ -65,6 +90,25 @@ impl Drift {
     #[must_use]
     pub fn timeline_stretch(&self) -> f64 {
         1.0 + self.ppm * 1e-6
+    }
+
+    /// D-045: is this measurement physically believable as a *clock*?
+    ///
+    /// Two independent checks, either of which unmasks a non-clock:
+    /// - `|ppm|` beyond [`MAX_CREDIBLE_DRIFT_PPM`]: no real crystal drifts that fast, so
+    ///   the slope is a line fitted through matches on different content.
+    /// - residual beyond [`RESIDUAL_LIMIT_MS`]: even allowing an arbitrary linear clock,
+    ///   the segments still disagree — they are not one rigid recording against another.
+    ///
+    /// The E10 corpus made this concrete: a produced (edited) mix used as the reference
+    /// gave every segment a genuine match at a *different* offset. The regression dutifully
+    /// reported −587,484 ppm, and v0.1-era code placed the clip with only a warning — then
+    /// E6's drift correction stretched it by −59 %. A placement whose drift measurement is
+    /// not credible is not a placement; the §7.5 promise (honest failure over silent
+    /// wrongness) demands refusal, and [`crate::place`] now enforces exactly that.
+    #[must_use]
+    pub fn credible(&self) -> bool {
+        self.ppm.abs() <= MAX_CREDIBLE_DRIFT_PPM && self.residual_mad_ms <= RESIDUAL_LIMIT_MS
     }
 
     /// E6 / D-042: how far to move a corrected clip's start, in seconds, to turn §4.3's
@@ -119,13 +163,27 @@ pub fn measure(segments: &[SegmentMatch], clip_samples: usize) -> Option<Drift> 
 
     let projected_end_error_ms = slope * clip_samples as f64 / f64::from(ANALYSIS_RATE) * 1000.0;
 
-    if !ppm.is_finite() || !projected_end_error_ms.is_finite() {
+    // D-045: residual scatter around the fitted line. Median absolute deviation rather
+    // than RMS for the same reason §4.3 takes the median of offsets — one outlier segment
+    // must register, not be averaged away (nor dominate quadratically).
+    let intercept = mean_y - slope * mean_x;
+    let mut deviations: Vec<f64> = xs
+        .iter()
+        .zip(ys.iter())
+        .map(|(x, y)| (y - (intercept + slope * x)).abs())
+        .collect();
+    deviations.sort_by(f64::total_cmp);
+    let residual_samples = deviations[deviations.len() / 2];
+    let residual_mad_ms = residual_samples / f64::from(ANALYSIS_RATE) * 1000.0;
+
+    if !ppm.is_finite() || !projected_end_error_ms.is_finite() || !residual_mad_ms.is_finite() {
         return None;
     }
 
     Some(Drift {
         ppm,
         projected_end_error_ms,
+        residual_mad_ms,
     })
 }
 
@@ -254,6 +312,7 @@ mod tests {
             let d = Drift {
                 ppm,
                 projected_end_error_ms: slope * l * 1000.0,
+                residual_mad_ms: 0.0,
             };
 
             // Reference-correct timeline position of the source END.
@@ -293,15 +352,98 @@ mod tests {
     }
 
     #[test]
+    fn scattered_segments_are_not_a_credible_clock() {
+        // D-045, the E10 corpus failure shape: each segment genuinely matched *somewhere*
+        // (an edited mix contains the clip's audio several cuts apart), so the offsets are
+        // seconds apart and the regression reports an absurd slope. Both prongs of
+        // `credible()` must fire on this.
+        let clip = 3600 * ANALYSIS_RATE as usize; // a long service camera
+        let offsets_s = [-68.0, -12.5, 33.0, -95.2, 7.7]; // seconds, scattered by cuts
+        let segs: Vec<SegmentMatch> = offsets_s
+            .iter()
+            .enumerate()
+            .map(|(i, off)| SegmentMatch {
+                start_in_clip: i * clip / 5,
+                offset_samples: off * f64::from(ANALYSIS_RATE),
+                psr: 16.0, // each individually over MIN_PSR — exactly the trap
+            })
+            .collect();
+        let d = measure(&segs, clip).unwrap();
+        assert!(
+            !d.credible(),
+            "scatter must not be credible: ppm {:.0}, residual {:.1} ms",
+            d.ppm,
+            d.residual_mad_ms
+        );
+        assert!(
+            d.residual_mad_ms > RESIDUAL_LIMIT_MS,
+            "residual {:.1} ms should dwarf the limit",
+            d.residual_mad_ms
+        );
+    }
+
+    #[test]
+    fn an_absurd_slope_on_a_perfect_line_is_not_credible_either() {
+        // The other prong: offsets exactly ON a line (zero residual) whose slope no clock
+        // could produce. A perfectly linear artefact must still be refused.
+        let clip = 600 * ANALYSIS_RATE as usize;
+        let slope = -0.5; // −500,000 ppm — the corpus measured −587,484
+        let segs: Vec<SegmentMatch> = (0..5)
+            .map(|i| {
+                let start = i * clip / 5;
+                SegmentMatch {
+                    start_in_clip: start,
+                    offset_samples: slope * start as f64,
+                    psr: 16.0,
+                }
+            })
+            .collect();
+        let d = measure(&segs, clip).unwrap();
+        assert!(d.residual_mad_ms < 1e-6, "line has no residual");
+        assert!(!d.credible(), "|{:.0}| ppm cannot be a clock", d.ppm);
+    }
+
+    #[test]
+    fn genuine_drift_with_estimator_noise_stays_credible() {
+        // The gate must not eat D-016's legitimate case: a long clip on a real
+        // slow/fast clock, with sub-sample estimator wobble. This is the exact shape
+        // `ClipMatch::consistent` would have false-alarmed on (raw MAD around the median
+        // grows with length), which is why the gate fits the line first.
+        let clip = 5400 * ANALYSIS_RATE as usize; // 90 min at 40 ppm = 216 ms end-to-end
+        let slope = 40e-6;
+        let wobble = [0.4f64, -0.3, 0.2, -0.4, 0.3];
+        let segs: Vec<SegmentMatch> = (0..5)
+            .map(|i| {
+                let start = i * clip / 5;
+                SegmentMatch {
+                    start_in_clip: start,
+                    offset_samples: slope * start as f64 + wobble[i],
+                    psr: 50.0,
+                }
+            })
+            .collect();
+        let d = measure(&segs, clip).unwrap();
+        assert!((d.ppm - 40.0).abs() < 5.0, "measured {:.2} ppm", d.ppm);
+        assert!(
+            d.residual_mad_ms < 1.0,
+            "wobble is sub-ms: {:.3}",
+            d.residual_mad_ms
+        );
+        assert!(d.credible(), "a real drifting clock must pass the gate");
+    }
+
+    #[test]
     fn the_half_frame_warning_triggers_at_the_right_point() {
         // At 25 fps half a frame is 20 ms.
         let under = Drift {
             ppm: 10.0,
             projected_end_error_ms: 19.0,
+            residual_mad_ms: 0.0,
         };
         let over = Drift {
             ppm: 10.0,
             projected_end_error_ms: 21.0,
+            residual_mad_ms: 0.0,
         };
         assert!(!under.exceeds_half_frame(25.0));
         assert!(over.exceeds_half_frame(25.0));
@@ -309,6 +451,7 @@ mod tests {
         let negative = Drift {
             ppm: -10.0,
             projected_end_error_ms: -21.0,
+            residual_mad_ms: 0.0,
         };
         assert!(negative.exceeds_half_frame(25.0));
         // A nonsense frame rate must not panic or warn spuriously.

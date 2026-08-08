@@ -457,7 +457,7 @@ fn walk_capped(
             return Err(Error::TooManyFiles { limit: max_files });
         }
         let path = entry.path();
-        if is_hidden(&path) {
+        if is_hidden(&path) || is_proxy_sidecar(&path) {
             continue;
         }
         // `symlink_metadata` does not follow links, so a symlink loop cannot trap the
@@ -493,6 +493,26 @@ fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.starts_with('.'))
+}
+
+/// D-045 (closes D-009's open question): skips low-resolution proxy sidecars.
+///
+/// GoPro and Insta360 cameras write a small `.lrv` preview file NEXT TO every original —
+/// the E10 corpus's Insta360 X paired `VID_…_00_007.insv` with `LRV_…_11_007.lrv`, and
+/// GoPros pair `GX010042.MP4` with `GL010042.LRV`. The proxy carries the SAME audio as
+/// its original, so scanning both puts duplicate, time-overlapping content on one device;
+/// §4.4's overlap eviction then has to arbitrate a fight the user never meant to start,
+/// and D-009's "ghost device" is the same file family surfacing twice.
+///
+/// This is a deliberate, narrow exception to §4.1's no-extension-filtering rule and is
+/// classified like the dotfile skip above: `.lrv` is not "media we doubt", it is a
+/// *duplicate by construction* of a sibling original. A user who genuinely wants to sync
+/// a bare `.lrv` (original lost) can still pass the FILE explicitly — only the recursive
+/// folder walk skips it, exactly as it treats hidden files.
+fn is_proxy_sidecar(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("lrv"))
 }
 
 #[cfg(test)]
@@ -571,6 +591,44 @@ mod tests {
         let (found, _) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
         assert_eq!(found.len(), 1);
         assert!(found[0].ends_with("real.bin"));
+    }
+
+    #[test]
+    fn lrv_proxy_sidecars_are_skipped_by_the_walk_but_honoured_explicitly() {
+        // D-045 / D-009: the E10 corpus's Insta360 wrote LRV_….lrv proxies beside every
+        // VID_….insv original — same audio twice on one device. The walk skips the proxy
+        // (either case), but a user who passes the FILE explicitly is trusted with it.
+        let dir = scratch("lrv");
+        fs::write(dir.join("VID_20260405_110428_00_007.insv"), b"original").unwrap();
+        fs::write(dir.join("LRV_20260405_110428_11_007.lrv"), b"proxy").unwrap();
+        fs::write(dir.join("UPPER.LRV"), b"proxy too").unwrap();
+        let (found, _) = collect(
+            std::slice::from_ref(&dir),
+            None,
+            &NoProgress,
+            &CancelToken::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "only the original survives the walk: {found:?}"
+        );
+        assert!(found[0].ends_with("VID_20260405_110428_00_007.insv"));
+
+        let explicit = dir.join("LRV_20260405_110428_11_007.lrv");
+        let (found, _) = collect(
+            std::slice::from_ref(&explicit),
+            None,
+            &NoProgress,
+            &CancelToken::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            found,
+            vec![explicit],
+            "an explicit file is never second-guessed"
+        );
     }
 
     #[test]

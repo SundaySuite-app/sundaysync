@@ -73,3 +73,22 @@ trustworthy; until then, treat the threshold as provisional.
 - **The app has no visual regression tests.** The engine is exhaustively tested; the UI
   is verified by launch and by hand. vitest covers the reducer, error mapping and
   settings logic.
+
+## A produced or edited mix is not a valid sync reference
+
+Correlation assumes the reference is one continuous recording. A post-produced mix
+(cut, tightened, rearranged) contains each clip's audio at *several different* offsets,
+so no single placement exists. As of v0.2 (D-045) the engine detects this — the segment
+offsets cannot be reconciled with any physically credible clock — and **refuses** the
+clip as `low_confidence` instead of placing it wrongly. Choose a raw recorder file or
+the longest camera as the reference; the produced mix belongs in the edit, not in the
+sync.
+
+## Short clips clear a higher bar
+
+A clip under ~45 s correlates as a single whole-clip pass, so there are no segments to
+cross-check and PSR is the only evidence. Such matches must clear `min_psr × 5/3`
+(25 at the default) — a provisional calibration from the first real corpus, where every
+observed *false* placement scored between 15 and 19 (D-045, D-015). A genuinely matching
+short clip in the same room scores far above this; a distant, noisy one may now be
+refused where v0.1 would have gambled.
