@@ -94,12 +94,27 @@ pub const NO_DRIFT_EVIDENCE_PSR_FACTOR: f64 = 5.0 / 3.0;
 ///   to catch a lucky sidelobe — a 14 s clip placed an hour from where its metadata put
 ///   it, at PSR 19.0.
 ///
+/// Which of the two applies is decided by the segment *count*, not by whether the
+/// regression happened to succeed: with ≥ 3 segments a `None` from [`drift::measure`] is a
+/// failed credibility check, not an absent one, and is refused outright.
+///
 /// Refusal here lands the clip in `unsynced` as `low_confidence` — which is precisely
 /// what it is.
 fn admissible(m: &crate::correlate::ClipMatch, clip_samples: usize, min_psr: f64) -> bool {
+    // Which bar applies is decided by how much evidence *exists*, not by whether reading
+    // it happened to succeed. Those are the same question only until they are not: a
+    // regression over enough segments can still come back empty (a degenerate fit, a
+    // non-finite slope), and routing that to the no-evidence floor would let the strongest
+    // possible sign of a bad match — "the segments do not describe a clock at all" — be
+    // answered with "then judge it on PSR alone". D-045's whole point is the opposite.
+    if m.segments.len() < drift::MIN_SEGMENTS_FOR_DRIFT {
+        return m.psr >= min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR;
+    }
     match drift::measure(&m.segments, clip_samples) {
         Some(d) => m.psr >= min_psr && d.credible(),
-        None => m.psr >= min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR,
+        // Enough segments to check, and the check did not come back: a failed credibility
+        // test, not an absent one. §7.5 says refuse.
+        None => false,
     }
 }
 
@@ -681,6 +696,99 @@ mod tests {
         assert_eq!(confidence_from_psr(-1.0, 15.0), 0.0);
     }
 
+    fn clip_match(psr: f64, segments: &[(usize, f64)]) -> crate::correlate::ClipMatch {
+        crate::correlate::ClipMatch {
+            offset_samples: 100.0,
+            psr,
+            segments: segments
+                .iter()
+                .map(|(start, off)| crate::correlate::SegmentMatch {
+                    start_in_clip: *start,
+                    offset_samples: *off,
+                    psr,
+                })
+                .collect(),
+            mad_ms: 0.0,
+            consistent: true,
+        }
+    }
+
+    #[test]
+    fn a_nan_score_is_refused_rather_than_slipping_through_the_gate() {
+        // Every comparison in `admissible` is written so that NaN *fails* it. That is not
+        // an accident of style: flip `psr >= min` to `!(psr < min)` and a NaN score becomes
+        // an admitted one — a clip placed on no evidence whatsoever, which is precisely the
+        // silent wrongness §7.5 exists to refuse. Pinned on both arms of the D-045 gate.
+        let long = clip_match(f64::NAN, &[(0, 0.0), (1_000, 0.0), (2_000, 0.0)]);
+        assert!(!admissible(&long, 3_000, 15.0), "≥3 segments, NaN psr");
+        let short = clip_match(f64::NAN, &[(0, 0.0)]);
+        assert!(!admissible(&short, 3_000, 15.0), "single segment, NaN psr");
+    }
+
+    #[test]
+    fn a_regression_that_cannot_be_read_is_a_refusal_not_a_free_pass() {
+        // Three segments is enough evidence to *check*, so a check that comes back empty
+        // is a failed credibility test — the strongest possible sign that these peaks do
+        // not describe one rigid recording against another. Routing it to the no-evidence
+        // floor would answer "these segments are not a clock at all" with "then judge it on
+        // PSR alone", which is the opposite of what D-045 is for.
+        //
+        // Both ways `drift::measure` can decline on a long-enough match:
+        let non_finite = clip_match(1_000.0, &[(0, 0.0), (1_000, f64::NAN), (2_000, 0.0)]);
+        assert!(drift::measure(&non_finite.segments, 3_000).is_none());
+        assert!(
+            !admissible(&non_finite, 3_000, 15.0),
+            "a non-finite regression must refuse, however high the PSR"
+        );
+
+        let no_lever_arm = clip_match(1_000.0, &[(500, 0.0), (500, 5.0), (500, -5.0)]);
+        assert!(drift::measure(&no_lever_arm.segments, 3_000).is_none());
+        assert!(
+            !admissible(&no_lever_arm, 3_000, 15.0),
+            "a degenerate fit must refuse too"
+        );
+
+        // The genuinely short clip is untouched: it keeps the no-evidence floor.
+        let short = clip_match(15.0 * NO_DRIFT_EVIDENCE_PSR_FACTOR, &[(0, 0.0)]);
+        assert!(admissible(&short, 3_000, 15.0));
+    }
+
+    #[test]
+    fn the_d045_gates_admit_exactly_at_their_limits() {
+        // D-045's two bounds are inclusive by construction (`<=`), and the no-evidence
+        // floor is a `>=`. A clip sitting exactly on a limit is admitted, not refused —
+        // worth pinning because "at the limit" is where a later re-tuning is most likely
+        // to change behaviour without anyone noticing.
+        let min_psr = 15.0;
+        let floor = min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR;
+
+        // Single segment, PSR exactly on the no-evidence floor.
+        assert!(admissible(&clip_match(floor, &[(0, 0.0)]), 3_000, min_psr));
+        // A hair under is refused; f64 makes that boundary exact.
+        let under = f64::from_bits(floor.to_bits() - 1);
+        assert!(!admissible(&clip_match(under, &[(0, 0.0)]), 3_000, min_psr));
+
+        // Three segments on a line of exactly MAX_CREDIBLE_DRIFT_PPM, zero residual.
+        let slope = drift::MAX_CREDIBLE_DRIFT_PPM * 1e-6;
+        let on_the_ppm_limit: Vec<(usize, f64)> = (0..3)
+            .map(|i| (i * 100_000, slope * (i * 100_000) as f64))
+            .collect();
+        let m = clip_match(min_psr, &on_the_ppm_limit);
+        let d = drift::measure(&m.segments, 300_000).unwrap();
+        assert!(
+            (d.ppm - drift::MAX_CREDIBLE_DRIFT_PPM).abs() < 1e-6,
+            "fixture should sit on the limit, measured {} ppm",
+            d.ppm
+        );
+        assert!(admissible(&m, 300_000, min_psr), "exactly at the ppm limit");
+
+        // ...and with ≥3 segments the *ordinary* min_psr applies, not the stricter floor.
+        assert!(
+            min_psr < floor,
+            "the two bars must differ for this to prove anything"
+        );
+    }
+
     fn placement(file: &str, device: &str, offset: f64, confidence: f64) -> Placement {
         Placement {
             file: PathBuf::from(file),
@@ -962,8 +1070,12 @@ mod tests {
         // "strong" (≥ min_psr × 4) — the only window in which the choice is exercised.
         let min_psr = 38.0;
         let mut c = Correlator::new();
-        let via_a1 = c.match_clip(&x, &a1, crate::correlate::SEGMENT_COUNT).unwrap();
-        let via_a2 = c.match_clip(&x, &a2, crate::correlate::SEGMENT_COUNT).unwrap();
+        let via_a1 = c
+            .match_clip(&x, &a1, crate::correlate::SEGMENT_COUNT)
+            .unwrap();
+        let via_a2 = c
+            .match_clip(&x, &a2, crate::correlate::SEGMENT_COUNT)
+            .unwrap();
         for (label, m) in [("A1", &via_a1), ("A2", &via_a2)] {
             assert!(
                 m.psr >= min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR && m.psr < min_psr * 4.0,
@@ -990,7 +1102,7 @@ mod tests {
         let x_placed = placed
             .placements
             .iter()
-            .find(|p| p.file == PathBuf::from("/media/x.mp4"))
+            .find(|p| p.file == Path::new("/media/x.mp4"))
             .expect("X should be placed transitively");
         assert_eq!(
             x_placed.chain,

@@ -811,7 +811,7 @@ mod tests {
         let reference_clip = e
             .clips
             .iter()
-            .find(|c| c.file == PathBuf::from("/media/cam-a.mp4"))
+            .find(|c| c.file == Path::new("/media/cam-a.mp4"))
             .unwrap();
         assert!(
             reference_clip.lane > 0,
@@ -822,7 +822,7 @@ mod tests {
         let other = e
             .clips
             .iter()
-            .find(|c| c.file == PathBuf::from("/media/cam-b.mp4"))
+            .find(|c| c.file == Path::new("/media/cam-b.mp4"))
             .unwrap();
         assert!(other.lane > 0);
         assert_ne!(reference_clip.lane, other.lane);
@@ -1163,6 +1163,50 @@ mod tests {
             "uncorrected error only {} s",
             (uncorrected_end - ideal_end).abs()
         );
+    }
+
+    #[test]
+    fn a_clip_whose_clock_ran_fast_is_corrected_the_other_way() {
+        // Every drift case in this file and in both goldens uses a *negative* ppm, i.e. a
+        // clip that has to shrink on the timeline. Both signs are physically ordinary
+        // (D-019: injecting +40 ppm of stretch measures −40 ppm, so the opposite injection
+        // measures +40), and the positive direction is the one where the corrected clip
+        // grows *past* its source length — the geometry nothing else covers.
+        let ppm = 150.0_f64;
+        let l = 400.0_f64;
+        let (r, d) = drifting_sample(ppm, l);
+        let e = export(&r, &d, "Service").unwrap();
+        let cam = e
+            .clips
+            .iter()
+            .find(|c| c.file.ends_with("cam.mp4"))
+            .unwrap();
+        let tm = cam.time_map.expect("a 60 ms end error must be corrected");
+
+        // The retime stretches rather than shrinks, and the clip occupies more timeline
+        // than it has source.
+        assert!(
+            tm.timeline_end_ticks > tm.source_end_ticks,
+            "a fast clock must stretch: {tm:?}"
+        );
+        assert!(cam.duration_ticks > (l * 25.0) as i64);
+
+        let tb = f64::from(AUDIO_TIMEBASE);
+        let start_s = cam.offset_ticks as f64 / 25.0;
+        let corrected_end = start_s + tm.timeline_end_ticks as f64 / tb;
+        let uncorrected_end = start_s + tm.source_end_ticks as f64 / tb;
+        let ideal_end = start_s + (1.0 + ppm * 1e-6) * l;
+        assert!(
+            (corrected_end - ideal_end).abs() < 0.001,
+            "corrected end {corrected_end} vs ideal {ideal_end}"
+        );
+        assert!(
+            (uncorrected_end - ideal_end).abs() > 0.010,
+            "the drift removed must be real, was {} s",
+            (uncorrected_end - ideal_end).abs()
+        );
+        // And the timeline is long enough to hold the clip it just stretched.
+        assert!(e.xml.contains("<timeMap>"));
     }
 
     #[test]
