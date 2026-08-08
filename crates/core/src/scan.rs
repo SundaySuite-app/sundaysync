@@ -380,13 +380,15 @@ fn collect(
 ) -> Result<(Vec<PathBuf>, Vec<Unsynced>)> {
     let mut files = Vec::new();
     let mut missing = Vec::new();
+    // Resolved once, here, rather than per directory inside the walk.
+    let exclude = Exclusion::new(exclude);
 
     for input in inputs {
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
         if input.is_dir() {
-            walk(input, 0, exclude, &mut files, progress, cancel)?;
+            walk(input, 0, &exclude, &mut files, progress, cancel)?;
         } else if input.is_file() {
             files.push(input.clone());
         } else {
@@ -405,10 +407,51 @@ fn collect(
     Ok((files, missing))
 }
 
+/// The directory the walk must not descend into (D-020), resolved once.
+///
+/// # Why the raw path alone is not enough
+///
+/// The exclusion and the walk's own paths reach this comparison by different routes: the
+/// exclusion is `request.cache_dir` or [`crate::cache::Cache::default_dir`] (assembled
+/// from `$HOME`/`$LOCALAPPDATA`), while the walk builds its paths by descending from
+/// whatever root the user dropped. A plain `==` therefore only holds when the two happen
+/// to be spelled identically — a symlinked drop root, or a cache path typed with a `.`
+/// segment, names the *same* directory under a different string, the exclusion misses,
+/// and D-020's bug is back: the second run scans its own `.f32` entries, fails to probe
+/// them, and reports the user's cache to them as broken media.
+///
+/// So identity, not spelling, decides. The exclusion is canonicalised once here, and the
+/// (cheap) string comparison is tried first so the canonicalising `stat` on the walk's
+/// side is only paid when it fails — and only ever per *directory*, never per file.
+#[derive(Debug, Default)]
+struct Exclusion {
+    raw: Option<PathBuf>,
+    real: Option<PathBuf>,
+}
+
+impl Exclusion {
+    fn new(dir: Option<&Path>) -> Self {
+        Self {
+            raw: dir.map(Path::to_path_buf),
+            real: dir.and_then(|d| std::fs::canonicalize(d).ok()),
+        }
+    }
+
+    fn covers(&self, dir: &Path) -> bool {
+        if self.raw.as_deref().is_some_and(|e| dir == e) {
+            return true;
+        }
+        let Some(real) = self.real.as_deref() else {
+            return false;
+        };
+        std::fs::canonicalize(dir).is_ok_and(|resolved| resolved == real)
+    }
+}
+
 fn walk(
     dir: &Path,
     depth: usize,
-    exclude: Option<&Path>,
+    exclude: &Exclusion,
     out: &mut Vec<PathBuf>,
     progress: &dyn ProgressSink,
     cancel: &CancelToken,
@@ -421,13 +464,13 @@ fn walk(
 fn walk_capped(
     dir: &Path,
     depth: usize,
-    exclude: Option<&Path>,
+    exclude: &Exclusion,
     out: &mut Vec<PathBuf>,
     progress: &dyn ProgressSink,
     cancel: &CancelToken,
     max_files: usize,
 ) -> Result<()> {
-    if exclude.is_some_and(|e| dir == e) {
+    if exclude.covers(dir) {
         return Ok(());
     }
     if depth >= MAX_DEPTH {
@@ -456,16 +499,29 @@ fn walk_capped(
         if out.len() >= max_files {
             return Err(Error::TooManyFiles { limit: max_files });
         }
-        let path = entry.path();
-        if is_hidden(&path) || is_proxy_sidecar(&path) {
+        // Both skip tests read the file NAME alone, so they are made before `entry.path()`
+        // builds the full path: on a camera card the AppleDouble `._*` companions macOS
+        // scatters everywhere can be half the entries, and none of them needs a joined
+        // `PathBuf` allocated just to be thrown away.
+        let name = entry.file_name();
+        let name = Path::new(&name);
+        if is_hidden(name) || is_proxy_sidecar(name) {
             continue;
         }
-        // `symlink_metadata` does not follow links, so a symlink loop cannot trap the
-        // walk. Linked-in media is rare enough that ignoring links is the safe default.
-        let Ok(meta) = entry.metadata() else { continue };
-        if meta.is_dir() {
+        // `DirEntry::file_type` does not follow links, so a symlink loop cannot trap the
+        // walk — a symlink is neither `is_dir` nor `is_file` here and is therefore skipped
+        // outright. Linked-in media is rare enough that ignoring links is the safe default.
+        //
+        // `file_type()` rather than `metadata()`: both answer this question and neither
+        // follows links, but the kind is already in the directory entry `read_dir` handed
+        // back on Linux and macOS, so this is the same answer for one fewer `lstat` per
+        // entry — up to [`MAX_FILES`] syscalls saved on a pathological tree.
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_dir() {
+            let path = entry.path();
             walk_capped(&path, depth + 1, exclude, out, progress, cancel, max_files)?;
-        } else if meta.is_file() {
+        } else if kind.is_file() {
+            let path = entry.path();
             out.push(path);
             // P-5: emit a live running count so a large tree no longer sits at "0/1" for
             // the whole walk. The total is unknown mid-walk, so `completed == total` is a
@@ -629,6 +685,98 @@ mod tests {
             vec![explicit],
             "an explicit file is never second-guessed"
         );
+    }
+
+    #[test]
+    fn the_cache_is_excluded_by_identity_not_by_spelling() {
+        // D-020: the exclusion and the walk's own paths arrive from different routes —
+        // the cache dir is assembled from `$HOME` or typed by the user, the walk's path is
+        // built by descending from the dropped root — so they can name the same directory
+        // with different strings. A plain `==` missed that, the cache was scanned as
+        // media, and the second run reported the user's own `.f32` entries back to them as
+        // broken files.
+        //
+        // The differing spelling here is a `..` segment, which is portable and which
+        // `Path`'s own comparison genuinely does not see through — unlike a `.` segment,
+        // which `Path::components` normalises away, so `==` handles that case already.
+        let dir = scratch("scan-exclude-spelling");
+        fs::write(dir.join("real.bin"), b"x").unwrap();
+        let cache = dir.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("deadbeef.f32"), [0u8; 8]).unwrap();
+
+        let differently_spelled = dir.join("cache").join("..").join("cache");
+        assert_ne!(
+            differently_spelled, cache,
+            "the two spellings must really differ, or this test proves nothing"
+        );
+        let (found, _) = collect(
+            std::slice::from_ref(&dir),
+            Some(&differently_spelled),
+            &NoProgress,
+            &CancelToken::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "the cache must be excluded however it is spelled: {found:?}"
+        );
+        assert!(found[0].ends_with("real.bin"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cache_is_excluded_when_the_walk_reaches_it_through_a_symlink() {
+        // The same D-020 hole, in the form a user actually hits: media on an external
+        // drive reached through a symlinked shortcut, with the cache configured under its
+        // real path.
+        let dir = scratch("scan-exclude-symlink");
+        let real = dir.join("media");
+        let cache = real.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(real.join("real.bin"), b"x").unwrap();
+        fs::write(cache.join("deadbeef.f32"), [0u8; 8]).unwrap();
+        let link = dir.join("shortcut");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let (found, _) = collect(
+            std::slice::from_ref(&link),
+            Some(&cache),
+            &NoProgress,
+            &CancelToken::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "the cache is the same directory whichever way the walk got there: {found:?}"
+        );
+        assert!(found[0].ends_with("real.bin"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_walk_does_not_follow_symlinks() {
+        // Pins the property the entry-kind test carries: links are classified without
+        // being followed, so a symlink loop cannot trap the walk and linked-in media is
+        // ignored rather than silently duplicated. Previously asserted only in a comment.
+        let dir = scratch("scan-symlinks");
+        let sub = dir.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(dir.join("real.bin"), b"x").unwrap();
+        fs::write(sub.join("nested.bin"), b"x").unwrap();
+        std::os::unix::fs::symlink(dir.join("real.bin"), dir.join("link-to-file")).unwrap();
+        // A link back to the walk's own root: following it would recurse forever.
+        std::os::unix::fs::symlink(&dir, dir.join("loop")).unwrap();
+
+        let (found, _) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
+        let names: Vec<String> = found
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .collect();
+        // Sorted by full path, so the root's own file precedes the subdirectory's.
+        assert_eq!(names, vec!["real.bin", "nested.bin"], "got {found:?}");
     }
 
     #[test]
@@ -1073,7 +1221,7 @@ mod tests {
         let r = walk_capped(
             &dir,
             0,
-            None,
+            &Exclusion::default(),
             &mut out,
             &NoProgress,
             &CancelToken::new(),
@@ -1101,7 +1249,7 @@ mod tests {
         let r = walk_capped(
             &dir,
             0,
-            None,
+            &Exclusion::default(),
             &mut out,
             &NoProgress,
             &CancelToken::new(),
@@ -1136,7 +1284,15 @@ mod tests {
         let handle = std::thread::spawn(move || flag.cancel());
         let start = std::time::Instant::now();
         let mut out = Vec::new();
-        let r = walk_capped(&dir, 0, None, &mut out, &NoProgress, &cancel, MAX_FILES);
+        let r = walk_capped(
+            &dir,
+            0,
+            &Exclusion::default(),
+            &mut out,
+            &NoProgress,
+            &cancel,
+            MAX_FILES,
+        );
         handle.join().unwrap();
         assert!(
             matches!(r, Err(Error::Cancelled)),
