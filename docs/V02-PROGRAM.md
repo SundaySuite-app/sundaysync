@@ -489,6 +489,14 @@ cache/telemetry retention verification, UNVERIFIED-list burn-down.
 - [x] **E10 QA + corpus — 2026-08-08.** Playwright harness in CI (PR #13); real-corpus run
       found and fixed the §8.2 violation (credibility gate + single-segment floor, D-045,
       PR #14); corpus loop stays open by design.
-- [ ] E11 v0.2.0-beta.1 → stable (owner checklist: CSP render check, drift-corrected real
-      export, updater self-update, consent flows, signing secret first)
+- [~] **E11 v0.2.0-beta.1 — prepared 2026-08-08, release owner-gated.** Version bumped
+      (three sites + both lockfiles), CHANGELOG.md written, the owner test checklist
+      lives in `docs/BETA-CHECKLIST-v0.2.md`, STATUS refreshed, and the full signed
+      release build was verified locally (updater artifacts + signatures produced with
+      the fresh keypair). Remaining is deliberately the owner's: set
+      `TAURI_SIGNING_PRIVATE_KEY` (the `gh secret set` was classifier-blocked for the
+      conductor — correctly, it is a credential action), push the `v0.2.0-beta.1` tag,
+      then walk the checklist; stable promotion (`v0.2.0`) when it is clean. The
+      updater's ring endpoints answer 404 until the E8 Worker deploys — expected, and
+      called out in the checklist.
 - [ ] E12 Continuous operations
