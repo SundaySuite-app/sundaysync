@@ -94,6 +94,28 @@ jobs:
           # it lives only in Actions secrets. See docs header + the E9 report.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # E7/E8: the telemetry client's compile-time bakes (option_env!). The URL is
+          # public infrastructure; the write key is an anti-abuse speed bump minted on the
+          # Worker (`WRITE_KEY_SUNDAYSYNC`) and mirrored here as a repo secret. Both ABSENT
+          # → the client has no endpoint and sends nothing (fails soft) — exactly the
+          # pre-E8-deploy state. Set the secret after the Worker deploy; the next tag then
+          # ships a client that can actually deliver its consented payloads.
+          SUNDAYSYNC_TELEMETRY_URL: https://telemetry.sundaysuite.app
+          SUNDAYSYNC_TELEMETRY_KEY: ${{ secrets.SUNDAYSYNC_TELEMETRY_KEY }}
+          # ── macOS code signing (the "damaged / won't open" fix) ─────────────
+          # An UNSIGNED downloaded app on modern macOS shows only "appen er
+          # skadet" with no Open-Anyway path (ad-hoc + quarantine on Apple
+          # Silicon). SundayStage ships CODE-SIGNED with these same three
+          # secrets (repo-level there; mirror them onto this repo to activate —
+          # tauri-action signs whenever they are present, and skips cleanly
+          # while they are absent). Notarization stays disabled suite-wide until
+          # the Apple Developer agreement is re-accepted (owner task, same
+          # blocker as SundayRec/SundayStage); signed-but-not-notarized gives
+          # testers the normal right-click→Open / Open-Anyway path instead of a
+          # dead end.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}

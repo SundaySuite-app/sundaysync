@@ -1,0 +1,43 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F6D488"/>
+      <stop offset="0.55" stop-color="#EBB84B"/>
+      <stop offset="1" stop-color="#D89B2E"/>
+    </linearGradient>
+    <radialGradient id="bg" cx="0.5" cy="0.4" r="0.8">
+      <stop offset="0" stop-color="#3A3168"/>
+      <stop offset="1" stop-color="#221D3E"/>
+    </radialGradient>
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="1024" height="1024" rx="228"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect x="12" y="12" width="1000" height="1000" rx="216" fill="none"
+          stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="18"/>
+
+    <!-- ══ SundaySync: the family mark. SundayRec is (( ✝ )) — sound around the
+         cross. SundaySync is ≈≈ ✝ ≈≈ — two waveforms either side, stacked pairs
+         in PERFECT phase: recordings brought into sync. ══ -->
+
+    <!-- Left pair: two identical sine strokes, in step -->
+    <path d="M 100 452 C 138 394, 190 394, 220 452 C 250 510, 302 510, 340 452"
+          fill="none" stroke="url(#gold)" stroke-width="46" stroke-linecap="round"/>
+    <path d="M 100 584 C 138 526, 190 526, 220 584 C 250 642, 302 642, 340 584"
+          fill="none" stroke="url(#gold)" stroke-width="46" stroke-linecap="round"/>
+
+    <!-- Right pair: identical, equally in step -->
+    <path d="M 684 452 C 722 394, 774 394, 804 452 C 834 510, 886 510, 924 452"
+          fill="none" stroke="url(#gold)" stroke-width="46" stroke-linecap="round"/>
+    <path d="M 684 584 C 722 526, 774 526, 804 584 C 834 642, 886 642, 924 584"
+          fill="none" stroke="url(#gold)" stroke-width="46" stroke-linecap="round"/>
+
+    <!-- The cross on the alignment axis — filled rounded rects (the one primitive
+         every renderer in the pipeline draws reliably). Proportioned like Rec's. -->
+    <rect x="479" y="300" width="66" height="400" rx="33" fill="url(#gold)"/>
+    <rect x="382" y="407" width="260" height="66" rx="33" fill="url(#gold)"/>
+  </g>
+</svg>
