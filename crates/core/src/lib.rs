@@ -15,10 +15,11 @@
 //!
 //! # Status
 //!
-//! **Phase 2.** Scan, probe, device grouping and analysis-audio extraction with
-//! caching are implemented — see [`scan`] and [`Extractor`]. The correlation stages
-//! behind [`sync`] are not, so `sync` still returns an empty, well-formed result.
-//! See docs/STATUS.md.
+//! The full §3 pipeline is implemented. [`sync`] runs the whole chain — scan and probe,
+//! device grouping, analysis-audio extraction with caching, pairwise GCC-PHAT
+//! correlation, global placement, drift measurement — and returns a populated
+//! [`SyncResult`], which [`export_fcpxml`] renders for Resolve. See the stage modules
+//! ([`scan`], [`Extractor`], [`Correlator`], [`place`], [`Drift`], [`fcpxml`]) for detail.
 
 pub mod cache;
 pub mod correlate;

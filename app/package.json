@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "audit": "npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

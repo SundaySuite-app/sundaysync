@@ -1,0 +1,7 @@
+# cargo-fuzz build + run artifacts. The harness sources and Cargo.lock are committed;
+# everything a run generates is not. (target/ and corpus/ are also caught by the root
+# .gitignore, repeated here so this stays self-contained as its own workspace.)
+target/
+corpus/
+artifacts/
+coverage/

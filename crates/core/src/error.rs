@@ -38,4 +38,19 @@ pub enum Error {
     /// a bug in the engine, surfaced loudly rather than shipped as a wrong timeline.
     #[error("internal invariant violated: {0}")]
     Invariant(String),
+
+    /// A single scan tried to enumerate more files than the scan ceiling allows (S-8,
+    /// docs/DECISIONS.md D-032). Not a bug and not a broken file: a mis-drop — a home
+    /// directory or a whole disk — that could never be a real multi-camera shoot.
+    /// Refused loudly and named, rather than truncated, so §7.3's "every input is
+    /// accounted for" is never quietly broken.
+    #[error("too many files to scan (limit {limit}); this looks like a mis-selected folder")]
+    TooManyFiles { limit: usize },
+
+    /// `clear_cache` was pointed at a directory that is neither the engine's default cache
+    /// nor one it stamped with its marker file (S-7, docs/DECISIONS.md D-032). Refused so
+    /// a mis-configured cache path (D-013 lets the user pick any folder) can never delete
+    /// files SundaySync did not write.
+    #[error("refusing to clear {path}: not a SundaySync cache directory")]
+    NotACacheDir { path: PathBuf },
 }

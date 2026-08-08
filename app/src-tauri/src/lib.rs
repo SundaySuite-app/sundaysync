@@ -7,7 +7,7 @@
 
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use sundaysync_core::{
     export_fcpxml, sync_with_durations, CancelToken, Progress, ProgressSink, Sidecar,
@@ -327,6 +327,38 @@ fn cancel_sync(state: State<'_, AppState>) {
     }
 }
 
+/// Validates a frontend-supplied export path before the engine writes to it (S-5,
+/// docs/DECISIONS.md D-032).
+///
+/// **IPC arguments are trust-boundary data.** The frontend is normally driven by the OS
+/// save dialog, but that dialog is a convention, not an enforced guard — a malformed or
+/// hostile `invoke` can pass any path, and the export commands do a raw `fs::write` on it.
+/// This is the defense-in-depth behind the CSP (S-4): reject a target that is an existing
+/// directory (the write would otherwise fail confusingly), and — where an extension is
+/// required — reject a target that lacks it, so `export_timeline` cannot be steered into
+/// overwriting an unrelated file that merely happens to be writable.
+fn validate_export_path(path: &Path, required_ext: Option<&str>) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("no export path was given".into());
+    }
+    if path.is_dir() {
+        return Err(format!(
+            "{} is a directory, not a file to write",
+            path.display()
+        ));
+    }
+    if let Some(ext) = required_ext {
+        let ok = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case(ext));
+        if !ok {
+            return Err(format!("the export path must end in .{ext}"));
+        }
+    }
+    Ok(())
+}
+
 /// Writes the FCPXML for the most recent successful sync.
 #[tauri::command]
 fn export_timeline(
@@ -334,6 +366,8 @@ fn export_timeline(
     path: PathBuf,
     project: Option<String>,
 ) -> Result<usize, String> {
+    // S-5: the path is untrusted IPC input — validate before writing.
+    validate_export_path(&path, Some("fcpxml"))?;
     let guard = state
         .last
         .lock()
@@ -351,24 +385,64 @@ fn export_timeline(
     Ok(export.clips.len())
 }
 
-/// §7.6: a diagnostics bundle with no media in it.
+/// Reduces a [`SyncResult`] to a support-safe form (S-6, docs/DECISIONS.md D-032).
 ///
-/// Writes the `SyncResult` and environment details as one JSON file. Deliberately not a
-/// zip and deliberately media-free — a support bundle someone hesitates to send is worth
-/// nothing, so there must be nothing in it to hesitate about.
+/// The raw result leaks three kinds of personal data the E7 telemetry rule forbids
+/// ("never filenames/paths/labels"): every `file` is an absolute path (→ the macOS
+/// username under `/Users/…`), and every device `label` is a human name §4.5 may have
+/// derived from a folder — often the church or service. This collapses each path to its
+/// bare filename and drops each label to its neutral id (e.g. `folder-balkong`, the
+/// non-PII handle §4.5/D-028 already use). The numbers a support reply actually needs —
+/// offsets, confidences, PSR, drift, reasons — are untouched.
+fn scrub_result(result: &SyncResult) -> SyncResult {
+    fn base(p: &Path) -> PathBuf {
+        p.file_name()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("<clip>"))
+    }
+    let mut r = result.clone();
+    if let Some(reference) = r.reference.as_mut() {
+        reference.file = base(&reference.file);
+    }
+    for device in &mut r.devices {
+        device.label = device.id.clone();
+        for f in &mut device.files {
+            *f = base(f);
+        }
+    }
+    for p in &mut r.placements {
+        p.file = base(&p.file);
+    }
+    for u in &mut r.unsynced {
+        u.file = base(&u.file);
+    }
+    r
+}
+
+/// §7.6: a diagnostics bundle safe to hand to support.
+///
+/// Writes the run's shape and this machine's environment as one JSON file — no media, and
+/// (S-6) no personal identifiers. Every absolute path is reduced to a bare filename by
+/// [`scrub_result`], every device's human label is dropped to its id, and the ffmpeg
+/// binary's absolute path — which on a bundled build embeds the macOS username — is
+/// omitted, leaving only whether it was the bundled or the system one. Deliberately not a
+/// zip: a support bundle someone hesitates to send is worth nothing, so there is nothing
+/// in it to hesitate about.
 #[tauri::command]
 fn export_diagnostics(state: State<'_, AppState>, path: PathBuf) -> Result<(), String> {
+    // S-5: the path is untrusted IPC input — validate before writing.
+    validate_export_path(&path, None)?;
+
     let guard = state
         .last
         .lock()
         .map_err(|_| "internal state was poisoned".to_string())?;
 
-    let (ffmpeg, ffmpeg_source) = match state.sidecar() {
-        Ok(s) => (
-            format!("{} / {}", s.ffmpeg.display(), s.ffprobe.display()),
-            source_word(s.source).to_string(),
-        ),
-        Err(e) => (format!("unavailable: {e}"), "none".to_string()),
+    // S-6: source only. The absolute ffmpeg/ffprobe paths are dropped — a bundled build's
+    // path runs through the user's home directory and would leak the username.
+    let ffmpeg_source = match state.sidecar() {
+        Ok(s) => source_word(s.source).to_string(),
+        Err(_) => "none".to_string(),
     };
 
     let report = serde_json::json!({
@@ -376,12 +450,11 @@ fn export_diagnostics(state: State<'_, AppState>, path: PathBuf) -> Result<(), S
         "schema": sundaysync_core::SCHEMA_VERSION,
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
-        "ffmpeg": ffmpeg,
         "ffmpeg_source": ffmpeg_source,
         "default_min_psr": DEFAULT_MIN_PSR,
         "default_segment_count": sundaysync_core::correlate::SEGMENT_COUNT,
         "analysis_rate": sundaysync_core::ANALYSIS_RATE,
-        "result": guard.as_ref().map(|l| &l.result),
+        "result": guard.as_ref().map(|l| scrub_result(&l.result)),
     });
 
     std::fs::write(
@@ -467,4 +540,120 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running SundaySync");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sundaysync_core::{
+        Device, DeviceKind, Parameters, Placement, Rational, Reference, Sequence, Unsynced,
+        UnsyncedReason, SCHEMA_VERSION,
+    };
+
+    fn sample_result() -> SyncResult {
+        SyncResult {
+            schema: SCHEMA_VERSION,
+            parameters: Parameters {
+                analysis_rate: 12_000,
+                min_psr: 15.0,
+            },
+            reference: Some(Reference {
+                file: PathBuf::from("/Users/kari/Opptak/Balkong Kirke/ZOOM0001.WAV"),
+                device: "rec".into(),
+            }),
+            devices: vec![Device {
+                id: "folder-balkong".into(),
+                label: "Balkong Kirke".into(),
+                kind: DeviceKind::Audio,
+                files: vec![PathBuf::from(
+                    "/Users/kari/Opptak/Balkong Kirke/ZOOM0001.WAV",
+                )],
+            }],
+            placements: vec![Placement {
+                file: PathBuf::from("/Users/kari/Opptak/Cam A/C0001.MP4"),
+                device: "cam-a".into(),
+                offset_seconds: 5.0,
+                confidence: 0.9,
+                psr: 42.0,
+                drift_ppm: None,
+                projected_end_error_ms: None,
+                chain: vec!["reference".into()],
+                warnings: vec![],
+            }],
+            unsynced: vec![Unsynced {
+                file: PathBuf::from("/Users/kari/Opptak/broken.mp4"),
+                reason: UnsyncedReason::DecodeError,
+            }],
+            sequence: Sequence {
+                fps: Rational::new(25, 1).unwrap(),
+                duration_seconds: 92.0,
+            },
+            warnings: vec![],
+        }
+    }
+
+    #[test]
+    fn scrub_removes_paths_usernames_and_labels() {
+        // S-6: the scrubbed report must carry no absolute path, no `/Users/…` (macOS
+        // username), and no human device label — only basenames, ids and numbers.
+        let scrubbed = scrub_result(&sample_result());
+        let json = serde_json::to_string_pretty(&scrubbed).unwrap();
+
+        assert!(!json.contains("/Users/"), "leaked a home path: {json}");
+        // No original absolute path (nor its parent folders) survives. The only `/` left
+        // in the document is the frame-rate rational (e.g. "25/1"), which is not a path.
+        assert!(
+            !json.contains("Opptak"),
+            "leaked a directory component: {json}"
+        );
+        assert!(
+            !json.contains("Balkong Kirke/") && !json.contains("Cam A/"),
+            "an absolute path component survived: {json}"
+        );
+        assert!(
+            !json.contains("Balkong Kirke"),
+            "leaked a device label: {json}"
+        );
+
+        // Basenames and neutral ids are what remains — enough to reason about a run.
+        assert!(json.contains("ZOOM0001.WAV"));
+        assert!(json.contains("C0001.MP4"));
+        assert!(json.contains("folder-balkong"));
+        // The label was redacted to the id, not merely dropped.
+        assert!(json.contains(r#""label": "folder-balkong""#), "{json}");
+        // Numbers a support reply needs are untouched.
+        assert!(json.contains("42.0"));
+    }
+
+    #[test]
+    fn scrub_is_idempotent_on_already_bare_names() {
+        let mut r = sample_result();
+        r.placements[0].file = PathBuf::from("C0001.MP4");
+        let scrubbed = scrub_result(&r);
+        assert_eq!(scrubbed.placements[0].file, PathBuf::from("C0001.MP4"));
+    }
+
+    #[test]
+    fn export_path_validation_rejects_directories() {
+        // S-5: an existing directory is never a valid write target.
+        let dir = std::env::temp_dir();
+        assert!(validate_export_path(&dir, None).is_err());
+        assert!(validate_export_path(&dir, Some("fcpxml")).is_err());
+    }
+
+    #[test]
+    fn export_path_validation_enforces_the_extension() {
+        // S-5: export_timeline must not be steered into overwriting a non-.fcpxml file.
+        let base = std::env::temp_dir();
+        assert!(validate_export_path(&base.join("timeline.mov"), Some("fcpxml")).is_err());
+        assert!(validate_export_path(&base.join("timeline.fcpxml"), Some("fcpxml")).is_ok());
+        // Case-insensitive, and diagnostics (no required ext) accepts a plain file path.
+        assert!(validate_export_path(&base.join("TIMELINE.FCPXML"), Some("fcpxml")).is_ok());
+        assert!(validate_export_path(&base.join("diag.json"), None).is_ok());
+    }
+
+    #[test]
+    fn export_path_validation_rejects_an_empty_path() {
+        assert!(validate_export_path(Path::new(""), None).is_err());
+    }
 }

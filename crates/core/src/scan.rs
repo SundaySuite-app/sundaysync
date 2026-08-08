@@ -17,6 +17,18 @@ use std::path::{Path, PathBuf};
 /// (`PRIVATE/M4ROOT/CLIP`); nothing legitimate goes deeper than this.
 const MAX_DEPTH: usize = 32;
 
+/// Total files a single scan will enumerate before it refuses to continue (S-8,
+/// docs/DECISIONS.md D-032).
+///
+/// A real multi-camera church service is dozens of clips; a walk that reaches six figures
+/// is a mis-drop — a home directory, a whole disk — not a shoot. Enumerating millions of
+/// entries would exhaust memory and blow §7.4's responsiveness budget for a run that could
+/// never produce a sensible timeline, so the honest outcome is a loud [`Error::TooManyFiles`]
+/// naming the limit rather than a silent truncation that would violate §7.3's "every input
+/// is accounted for". 100 000 is deliberately generous — orders of magnitude past any real
+/// shoot — so it can only ever fire on an obvious mistake.
+const MAX_FILES: usize = 100_000;
+
 /// The output of a scan: what we found, and what we could not use.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScanManifest {
@@ -289,6 +301,19 @@ fn walk(
     out: &mut Vec<PathBuf>,
     cancel: &CancelToken,
 ) -> Result<()> {
+    walk_capped(dir, depth, exclude, out, cancel, MAX_FILES)
+}
+
+/// The real walk, with the file ceiling as a parameter so a test can drive the S-8 limit
+/// without materialising 100 000 files. Production always calls it with [`MAX_FILES`].
+fn walk_capped(
+    dir: &Path,
+    depth: usize,
+    exclude: Option<&Path>,
+    out: &mut Vec<PathBuf>,
+    cancel: &CancelToken,
+    max_files: usize,
+) -> Result<()> {
     if exclude.is_some_and(|e| dir == e) {
         return Ok(());
     }
@@ -304,6 +329,20 @@ fn walk(
         return Ok(());
     };
     for entry in entries.flatten() {
+        // S-8: check cancel *inside* the entry loop, not only per-directory. A single
+        // directory holding millions of entries would otherwise run to completion before
+        // the per-directory check above could fire again, leaving Cancel dead for the
+        // whole drain (§7.4). A wedged network-mount `read_dir`/`metadata` syscall is
+        // still uninterruptible — that is inherent to std::fs and documented here, not
+        // fixed: only the syscall returning can unblock this loop.
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        // S-8: refuse a pathological width/total rather than enumerating unboundedly.
+        // Checked before the push so `out` never exceeds the ceiling.
+        if out.len() >= max_files {
+            return Err(Error::TooManyFiles { limit: max_files });
+        }
         let path = entry.path();
         if is_hidden(&path) {
             continue;
@@ -312,7 +351,7 @@ fn walk(
         // walk. Linked-in media is rare enough that ignoring links is the safe default.
         let Ok(meta) = entry.metadata() else { continue };
         if meta.is_dir() {
-            walk(&path, depth + 1, exclude, out, cancel)?;
+            walk_capped(&path, depth + 1, exclude, out, cancel, max_files)?;
         } else if meta.is_file() {
             out.push(path);
         }
@@ -723,5 +762,71 @@ mod tests {
         cancel.cancel();
         let r = scan(&[dir], &Sidecar::default(), &NoProgress, &cancel);
         assert!(matches!(r, Err(Error::Cancelled)));
+    }
+
+    #[test]
+    fn the_file_ceiling_triggers_and_names_the_limit() {
+        // S-8: a directory wider than the ceiling is refused loudly, not truncated. Driven
+        // through `walk_capped` with a tiny limit so the test need not create 100 000
+        // files — production wires the same code to MAX_FILES.
+        let dir = scratch("scan-ceiling");
+        for n in 0..25 {
+            fs::write(dir.join(format!("f{n}.bin")), b"x").unwrap();
+        }
+        let mut out = Vec::new();
+        let r = walk_capped(&dir, 0, None, &mut out, &CancelToken::new(), 10);
+        assert!(
+            matches!(r, Err(Error::TooManyFiles { limit: 10 })),
+            "expected a named ceiling error, got {r:?}"
+        );
+        assert!(
+            out.len() <= 10,
+            "the ceiling must bound `out`, found {}",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn a_scan_under_the_ceiling_is_unaffected() {
+        // The guard must not trip on a normal shoot: exactly-at-limit is fine, over is not.
+        let dir = scratch("scan-under-ceiling");
+        for n in 0..8 {
+            fs::write(dir.join(format!("f{n}.bin")), b"x").unwrap();
+        }
+        let mut out = Vec::new();
+        let r = walk_capped(&dir, 0, None, &mut out, &CancelToken::new(), 100);
+        assert!(r.is_ok(), "a small tree must scan cleanly, got {r:?}");
+        assert_eq!(out.len(), 8);
+    }
+
+    #[test]
+    fn cancel_interrupts_a_large_single_directory_mid_loop() {
+        // S-8: the in-loop cancel check must interrupt the drain of one huge directory,
+        // not only the gaps between directories. A canceller fires just after the walk has
+        // entered the loop; with thousands of entries the loop is still running, so the
+        // in-loop check — not the per-directory one at the top — is what stops it.
+        let dir = scratch("scan-cancel-midloop");
+        for n in 0..4000 {
+            fs::write(dir.join(format!("f{n}.bin")), b"x").unwrap();
+        }
+        let cancel = CancelToken::new();
+        let flag = cancel.clone();
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            flag.cancel();
+        });
+        let start = std::time::Instant::now();
+        let mut out = Vec::new();
+        let r = walk_capped(&dir, 0, None, &mut out, &cancel, MAX_FILES);
+        handle.join().unwrap();
+        assert!(
+            matches!(r, Err(Error::Cancelled)),
+            "a cancel during the drain must stop the walk, got {r:?}"
+        );
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "cancel did not return promptly: {:?}",
+            start.elapsed()
+        );
     }
 }

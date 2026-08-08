@@ -19,6 +19,13 @@ thiserror = { workspace = true }
 blake3 = { workspace = true }
 rustfft = { workspace = true }
 
+# Off by default and never enabled by a shipping build. It exposes a thin public door onto
+# the `pub(crate)` ffprobe-JSON parser so the out-of-tree `fuzz/` crate (its own workspace,
+# excluded from the root gates) can reach it — see docs/DECISIONS.md D-032. With the
+# feature off the door does not exist, so the public API is unchanged.
+[features]
+fuzzing = []
+
 # docs/PLAN.md §7.1: "No panics in `core`: `unwrap`/`expect` forbidden outside tests
 # (enforced with clippy lints in CI). All fallible paths return typed errors."
 #

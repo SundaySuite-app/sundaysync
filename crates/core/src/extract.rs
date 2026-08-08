@@ -540,10 +540,12 @@ mod tests {
             .unwrap()
             .filter_map(std::result::Result::ok)
             .map(|e| e.file_name().to_string_lossy().into_owned())
+            // The `.sundaysync-cache` marker (S-7) is an expected, permanent resident.
+            .filter(|n| n != ".sundaysync-cache")
             .collect();
         assert!(
             left.is_empty(),
-            "cache dir must be empty after a failed decode, found {left:?}"
+            "no entry or scratch may survive a failed decode, found {left:?}"
         );
     }
 
@@ -670,6 +672,9 @@ mod tests {
         let left: Vec<_> = fs::read_dir(ex.cache().dir())
             .unwrap()
             .filter_map(std::result::Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            // The `.sundaysync-cache` marker (S-7) is an expected, permanent resident.
+            .filter(|n| n != ".sundaysync-cache")
             .collect();
         assert!(left.is_empty(), "§7.4: leave only reusable cache files");
     }
@@ -682,5 +687,51 @@ mod tests {
             .extract_all(&[], &NoProgress, &CancelToken::new())
             .unwrap();
         assert!(out.is_empty());
+    }
+
+    /// The committed adversarial corpus (`fixtures/hostile/`, D-032), resolved from the
+    /// crate manifest so the working directory does not matter.
+    fn hostile(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/hostile")
+            .join(name)
+    }
+
+    #[test]
+    fn hostile_inputs_are_refused_by_extraction_not_followed() {
+        // S-1 (docs/DECISIONS.md D-032): the same passive-input vectors the probe stage
+        // closes must also be closed here, because §4.1 hands ffmpeg whatever reached
+        // probe. A concat script pointing at /etc/passwd and an HLS playlist with remote
+        // segments must both come back as per-file decode failures — never a successful
+        // extraction that read something external.
+        let Some(sidecar) = require_ffmpeg() else {
+            return;
+        };
+        let dir = scratch("extract-hostile");
+        let ex = extractor(&dir, sidecar);
+        let inputs = vec![
+            hostile("local-file-disclosure.ffconcat"),
+            hostile("ssrf.m3u8"),
+        ];
+        let out = ex
+            .extract_all(&inputs, &NoProgress, &CancelToken::new())
+            .unwrap();
+        assert_eq!(out.len(), 2);
+        for (i, r) in out.iter().enumerate() {
+            assert!(
+                r.is_err(),
+                "hostile input {} was extracted instead of refused: {r:?}",
+                inputs[i].display()
+            );
+        }
+        // And nothing hostile left a committed cache entry behind.
+        let left: Vec<_> = fs::read_dir(ex.cache().dir())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            // The `.sundaysync-cache` marker (S-7) is an expected, permanent resident.
+            .filter(|n| n != ".sundaysync-cache")
+            .collect();
+        assert!(left.is_empty(), "hostile decode left cache files: {left:?}");
     }
 }

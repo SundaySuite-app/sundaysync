@@ -13,6 +13,11 @@ use crate::error::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+/// Marker file stamped into a cache directory so [`Cache::clear`] can tell a real cache
+/// from a folder the user mis-pointed the setting at (S-7, docs/DECISIONS.md D-032). A
+/// dotfile so the scan's `is_hidden` skips it and `clear`'s suffix filter spares it.
+const CACHE_MARKER: &str = ".sundaysync-cache";
+
 /// Identity of one cached extraction.
 ///
 /// Hex-encoded BLAKE3 over the four things §4.2 names: absolute path, size, mtime, and
@@ -165,6 +170,21 @@ impl Cache {
     /// delete what we did not write. Cheap insurance against a user pointing the cache
     /// setting at, say, their Documents folder (D-013's settings UI makes that possible).
     pub fn clear(&self) -> Result<u64> {
+        // S-7: `dir` is caller-chosen (D-013's settings UI lets the user point it
+        // anywhere). Before touching a *non-default* directory, require our own marker —
+        // proof this really is a SundaySync cache and not, say, a Documents folder that
+        // happens to hold a few `.tmp` files. The default dir is trusted unconditionally
+        // (the engine created it), so its path stays frictionless. A directory that does
+        // not exist is still a no-op, not a refusal.
+        if !self.is_default_dir() && !self.has_marker() {
+            if self.dir.exists() {
+                return Err(Error::NotACacheDir {
+                    path: self.dir.clone(),
+                });
+            }
+            return Ok(0);
+        }
+
         let mut freed = 0u64;
         let entries = match std::fs::read_dir(&self.dir) {
             Ok(e) => e,
@@ -223,7 +243,40 @@ impl Cache {
         std::fs::create_dir_all(&self.dir).map_err(|source| Error::Io {
             path: self.dir.clone(),
             source,
-        })
+        })?;
+        // S-7: stamp the dir as ours so `clear()` can later distinguish a real cache from
+        // a mis-pointed folder. Best-effort: a marker we fail to write only ever costs a
+        // refusal to auto-clear a *non-default* dir, never data — the default dir is
+        // trusted without it.
+        let marker = self.dir.join(CACHE_MARKER);
+        if !marker.exists() {
+            let _ = std::fs::write(&marker, b"SundaySync analysis-audio cache.\n");
+        }
+        Ok(())
+    }
+
+    /// Whether this cache points at the engine's own default location, which is trusted
+    /// for [`Cache::clear`] without a marker (the engine created it).
+    fn is_default_dir(&self) -> bool {
+        let Ok(default) = Self::default_dir() else {
+            return false;
+        };
+        if self.dir == default {
+            return true;
+        }
+        // See through `.` segments and symlinks where both paths resolve.
+        match (
+            std::fs::canonicalize(&self.dir),
+            std::fs::canonicalize(&default),
+        ) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+    }
+
+    /// Whether this directory carries the SundaySync cache marker (S-7).
+    fn has_marker(&self) -> bool {
+        self.dir.join(CACHE_MARKER).is_file()
     }
 }
 
@@ -361,5 +414,72 @@ mod tests {
         let dir = Cache::default_dir().unwrap();
         assert!(dir.is_absolute(), "{dir:?}");
         assert!(dir.ends_with("SundaySync/analysis"), "{dir:?}");
+    }
+
+    #[test]
+    fn ensure_dir_stamps_the_marker() {
+        // S-7: a cache the engine created must carry its marker.
+        let dir = scratch("cache-marker");
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap();
+        assert!(
+            cache.dir().join(CACHE_MARKER).is_file(),
+            "marker not written"
+        );
+        // A second ensure_dir must not error on the existing marker.
+        cache.ensure_dir().unwrap();
+    }
+
+    #[test]
+    fn clear_refuses_a_marker_less_non_default_directory() {
+        // S-7: pointed at a folder we never stamped, `clear` must refuse and delete
+        // nothing — the user may have chosen a directory that matters (D-013).
+        let dir = scratch("cache-unmarked");
+        // Build the dir by hand, NOT via ensure_dir, so there is no marker.
+        let target = dir.join("mine");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("keep.f32"), [0u8; 40]).unwrap();
+        fs::write(target.join("stale.tmp"), [0u8; 10]).unwrap();
+
+        let cache = Cache::new(target.clone());
+        let r = cache.clear();
+        assert!(
+            matches!(r, Err(Error::NotACacheDir { .. })),
+            "expected a refusal, got {r:?}"
+        );
+        assert!(
+            target.join("keep.f32").exists() && target.join("stale.tmp").exists(),
+            "a refused clear must not delete anything"
+        );
+    }
+
+    #[test]
+    fn clear_succeeds_once_the_directory_is_marked() {
+        // S-7: the same directory clears normally after the engine has stamped it.
+        let dir = scratch("cache-marked");
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap(); // writes the marker
+        fs::write(cache.dir().join("a.f32"), [0u8; 100]).unwrap();
+
+        let freed = cache.clear().unwrap();
+        assert_eq!(freed, 100);
+        assert!(!cache.dir().join("a.f32").exists());
+        // The marker itself is spared, so the dir stays a recognised cache.
+        assert!(cache.dir().join(CACHE_MARKER).is_file());
+    }
+
+    #[test]
+    fn a_missing_unmarked_dir_is_still_a_no_op_not_a_refusal() {
+        // S-7 must not turn the "nothing to clear" case into an error.
+        let cache = Cache::new(PathBuf::from("/no/such/unmarked/cache/dir"));
+        assert_eq!(cache.clear().unwrap(), 0);
+    }
+
+    #[test]
+    fn the_default_dir_is_trusted_without_a_marker() {
+        // The frictionless path: the engine's own default location is a cache by
+        // definition, so `clear` there never demands a marker. Pure check — no fs writes.
+        let cache = Cache::new(Cache::default_dir().unwrap());
+        assert!(cache.is_default_dir());
     }
 }

@@ -8,7 +8,7 @@ members = ["crates/core", "crates/cli", "crates/fixturegen"]
 # The Tauri shell is its own workspace. §8.4 builds bundles on tags, not on every push,
 # and pulling webkit2gtk into the per-push gate would cost minutes for nothing — the
 # engine it wraps is already fully covered headlessly.
-exclude = ["app/src-tauri"]
+exclude = ["app/src-tauri", "fuzz"]
 resolver = "2"
 
 # Shared metadata + dependency versions. Pinning versions here (rather than per crate)
