@@ -144,9 +144,19 @@ pub fn now_ms() -> i64 {
 }
 
 /// This build's timestamp, baked in at release under
-/// `SUNDAYSYNC_TELEMETRY_BUILT_AT` (unix ms). Falls back to now in dev/CI, where
-/// nothing is ever sent. Kept in the shared envelope for parity — E8's validator
-/// mirrors the shared `builtAt` range check.
+/// `SUNDAYSYNC_TELEMETRY_BUILT_AT` (unix ms). Kept in the shared envelope for
+/// parity — the Worker mirrors the shared `builtAt` range check and stores it as
+/// `sync_events.built_at`, which is what "how old is the build this came from"
+/// is answered with.
+///
+/// ⚠️ **`.github/workflows/release.yml` does not set it today.** It bakes
+/// `SUNDAYSYNC_TELEMETRY_URL` and `_KEY` and stops there, so `option_env!` is
+/// `None` in a RELEASE build too and the fallback below runs — meaning `builtAt`
+/// is the moment the payload was built, not the moment the binary was. That is in
+/// range, so nothing 400s; the field is simply not true, and build-age analysis
+/// silently reads every install as brand new. The fallback's "dev/CI, where
+/// nothing is ever sent" is only correct once the workflow sets the variable
+/// (one line, next to the other two bakes).
 fn built_at() -> i64 {
     option_env!("SUNDAYSYNC_TELEMETRY_BUILT_AT")
         .and_then(|s| s.trim().parse::<i64>().ok())
@@ -877,12 +887,67 @@ fn write_state(dir: &Path, state: &PersistState) -> std::io::Result<()> {
     write_atomic(dir, "state.json", &serde_json::to_vec_pretty(state)?)
 }
 
+/// The staging path one atomic write goes through.
+///
+/// ⚠️ Unique **per writer**, not per target file. `{name}.tmp` was a fixed name,
+/// and two app instances then share it — which the macOS `open -n` relaunch
+/// briefly produces, and both instances run the launch drain. One truncates the
+/// other's buffer mid-write and the loser's `rename` publishes a half-written
+/// `state.json`; `read_state` reads that as the default, which fails closed for
+/// consent (right) but silently forgets the install id and any **deletion still
+/// owed** (not right). The pid separates the instances, the counter separates two
+/// writes inside one. The `.tmp` suffix is load-bearing too — every reader filters
+/// staging files out by it.
+fn temp_name(name: &str, seq: u32) -> String {
+    format!("{name}.{}-{seq}.tmp", std::process::id())
+}
+
 /// Atomic write: a reader must never see a half-written file.
-fn write_atomic(dir: &Path, name: &str, body: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(dir: &Path, name: &str, body: &[u8]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!("{name}.tmp"));
+    let tmp = dir.join(temp_name(
+        name,
+        TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+    ));
     std::fs::write(&tmp, body)?;
-    std::fs::rename(&tmp, dir.join(name))
+    let renamed = std::fs::rename(&tmp, dir.join(name));
+    if renamed.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    sweep_stale_temps(dir);
+    renamed
+}
+
+/// Disambiguates two staged writes from the same process.
+static TMP_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Older than this, a `*.tmp` cannot be an in-flight write — the staging write is
+/// synchronous and the rename follows it immediately.
+const TEMP_ORPHAN_AGE: Duration = Duration::from_secs(300);
+
+/// Remove abandoned staging files. A per-writer temp name no longer self-cleans by
+/// being overwritten the way a fixed one did, so a process killed between the write
+/// and the rename would otherwise leave one behind for good. Best-effort: a temp
+/// file is never read by anything (every reader filters on the real name), so
+/// failing to remove one costs a few hundred bytes and nothing else.
+fn sweep_stale_temps(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        if !entry.file_name().to_string_lossy().ends_with(".tmp") {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > TEMP_ORPHAN_AGE);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 // ── The outbox ───────────────────────────────────────────────────────────────
@@ -2314,6 +2379,69 @@ mod tests {
             !still_sendable(dir, &id),
             "a payload carrying the retired install id left the machine"
         );
+    }
+
+    /// ⚠️ The staging file has to be unique PER WRITER, not per target file.
+    /// `state.json.tmp` was a fixed name, and two app instances share it — which
+    /// the macOS `open -n` relaunch briefly produces, and both instances run the
+    /// launch drain. One truncates the other's buffer mid-write and the loser's
+    /// `rename` then publishes a half-written `state.json`. `read_state` reads that
+    /// as the default: consent fails closed (right), but the install id and any
+    /// **deletion still owed** are silently forgotten (very much not right).
+    #[test]
+    fn two_writers_never_stage_through_the_same_temp_path() {
+        let a = temp_name("state.json", 0);
+        let b = temp_name("state.json", 1);
+        assert_ne!(a, b, "two staged writes collided on one temp path");
+        assert!(
+            a.contains(&std::process::id().to_string()),
+            "the pid is what separates two instances, not just two calls: {a}"
+        );
+        // Still invisible to every reader: `record_names` and the state/outbox
+        // readers all key off the real name.
+        for n in [&a, &b] {
+            assert!(n.starts_with("state.json."), "{n}");
+            assert!(n.ends_with(".tmp"), "{n}");
+        }
+    }
+
+    /// The other half of a per-writer temp name: it no longer self-cleans by being
+    /// overwritten, so abandoned ones must be swept — and live ones must not be.
+    #[test]
+    fn an_abandoned_staging_file_is_swept_and_a_fresh_one_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        // A staging file some killed process left behind.
+        let orphan = dir.join("state.json.99999-0.tmp");
+        std::fs::write(&orphan, b"half a payl").unwrap();
+        let old = std::time::SystemTime::now() - TEMP_ORPHAN_AGE - Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&orphan)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        // …and one another instance is writing RIGHT NOW.
+        let live = dir.join("outbox.json.12345-7.tmp");
+        std::fs::write(&live, b"in flight").unwrap();
+
+        write_state(dir, &PersistState::default()).unwrap();
+
+        assert!(!orphan.exists(), "the abandoned staging file was kept");
+        assert!(
+            live.exists(),
+            "a staging file another writer is mid-write on was deleted"
+        );
+        // The write itself landed and left nothing of its own behind.
+        assert_eq!(read_state(dir), PersistState::default());
+        let staged = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with("state.json."))
+            .count();
+        assert_eq!(staged, 0, "the write left its own temp file behind");
     }
 
     #[test]

@@ -162,14 +162,17 @@ pub fn record(telemetry_dir: &Path, kind: &str, message: &str, location: Option<
 }
 
 /// Write one record atomically and prune the ring back to [`MAX_CRASHES`].
+///
+/// Through the shared [`super::write_atomic`] rather than a second copy of
+/// tmp-write-rename: [`SEQ`] restarts at zero in every process, so a private copy
+/// staging through `{name}.tmp` let two app instances collide on one staging path
+/// the same way `state.json.tmp` did. One writer is enough to own the file name;
+/// the shared helper is what makes the staging name a writer's own.
 fn write_record(dir: &Path, record: &CrashReport) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
     let name = record_filename(unix_millis(), SEQ.fetch_add(1, Ordering::Relaxed));
     let body = serde_json::to_vec_pretty(record)
         .unwrap_or_else(|_| b"{\"schema\":1,\"kind\":\"panic\"}".to_vec());
-    let tmp = dir.join(format!("{name}.tmp"));
-    std::fs::write(&tmp, body)?;
-    std::fs::rename(&tmp, dir.join(&name))?;
+    super::write_atomic(dir, &name, &body)?;
     prune_ring(dir);
     Ok(())
 }
