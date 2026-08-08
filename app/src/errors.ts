@@ -25,6 +25,17 @@ export function mapEngineError(raw: string, t: Strings): MappedError {
   if (raw.startsWith("cancelled")) {
     return { kind: "notice", text: t.noticeCancelled };
   }
+  // F14/F11: a client-side invoke timeout (invoke.ts). Recoverable — the user can retry —
+  // so it is a notice, not a red crash. The `Error` prefix survives `String(e)` as
+  // "Error: invoke-timeout: …", so match the label anywhere in the string.
+  if (raw.includes("invoke-timeout")) {
+    return { kind: "notice", text: t.noticeTimeout };
+  }
+  // F6: the backend refused an export because the sources changed under it. The message
+  // starts with this stable prefix (lib.rs STALE_EXPORT_MSG).
+  if (raw.startsWith("the sources changed since this timeline was synced")) {
+    return { kind: "error", text: t.errStaleExport };
+  }
   if (raw.startsWith("no input files")) {
     return { kind: "error", text: t.errNoInput };
   }
