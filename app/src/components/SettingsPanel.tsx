@@ -37,6 +37,10 @@ export function SettingsPanel({
   const [cache, setCache] = useState<CacheStatus | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [sidecar, setSidecar] = useState<SidecarStatus | null>(null);
+  const [cacheCapDraft, setCacheCapDraft] = useState(
+    settings.cacheCapMb === null ? "" : String(settings.cacheCapMb),
+  );
+  const [cacheCapError, setCacheCapError] = useState(false);
 
   const refreshCache = () => {
     invoke<CacheStatus>("cache_status", { dir: getSettings().cacheDir })
@@ -73,6 +77,36 @@ export function SettingsPanel({
     try {
       const freed = await invoke<number>("clear_cache", { dir: getSettings().cacheDir });
       onNotice("ok", t.cacheCleared(formatBytes(freed)));
+      refreshCache();
+    } catch (e) {
+      onNotice("error", String(e));
+    }
+  };
+
+  // D-040: an optional size cap, off by default. Empty commits `null` (off); a positive
+  // whole number of MB is enforced immediately (evicting least-recently-used entries)
+  // and persisted so the shell can re-apply it after future syncs.
+  const commitCacheCap = async () => {
+    const trimmed = cacheCapDraft.trim();
+    if (trimmed === "") {
+      setCacheCapError(false);
+      saveSettings({ cacheCapMb: null });
+      return;
+    }
+    const mb = Number(trimmed);
+    if (!Number.isFinite(mb) || mb <= 0) {
+      setCacheCapError(true);
+      return;
+    }
+    setCacheCapError(false);
+    const rounded = Math.round(mb);
+    saveSettings({ cacheCapMb: rounded });
+    try {
+      const ev = await invoke<{ entries: number; bytes: number }>("enforce_cache_cap", {
+        dir: getSettings().cacheDir,
+        maxBytes: rounded * 1024 * 1024,
+      });
+      if (ev.entries > 0) onNotice("ok", t.cacheEvicted(ev.entries, formatBytes(ev.bytes)));
       refreshCache();
     } catch (e) {
       onNotice("error", String(e));
@@ -183,6 +217,22 @@ export function SettingsPanel({
             </div>
           )}
           <small>{t.cacheHint}</small>
+          <label className="field field--inline">
+            <span>{t.cacheCap}</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              placeholder={t.cacheCapOff}
+              value={cacheCapDraft}
+              aria-invalid={cacheCapError}
+              onChange={(e) => setCacheCapDraft(e.target.value)}
+              onBlur={() => void commitCacheCap()}
+            />
+          </label>
+          {cacheCapError && <small className="error">{t.cacheCapError}</small>}
+          <small>{t.cacheCapHint}</small>
         </div>
 
         <hr className="sep" />

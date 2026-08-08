@@ -6,12 +6,24 @@
 
 use crate::device;
 use crate::error::{Error, Result};
+use crate::extract;
 use crate::probe::{self, AudioStream, Probed, VideoStream};
 use crate::progress::{CancelToken, Progress, ProgressSink, Stage};
 use crate::result::{Device, DeviceKind, Unsynced, UnsyncedReason, SCHEMA_VERSION};
 use crate::sidecar::Sidecar;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+
+/// How often the scan walk emits a progress tick, in files enumerated.
+///
+/// P-5: the walk used to emit nothing, so a 10 000-file folder sat at "0/1" the whole
+/// time. It now reports a live running count. Throttled to one event per this many files
+/// so a pathological (up to [`MAX_FILES`]) directory does not push 100 000 events through
+/// the sink — the count is indicative, not a per-file audit (the probe stage counts every
+/// file exactly once).
+const SCAN_PROGRESS_STRIDE: usize = 128;
 
 /// Guards against a pathological directory tree. Card dumps nest a few levels
 /// (`PRIVATE/M4ROOT/CLIP`); nothing legitimate goes deeper than this.
@@ -82,6 +94,29 @@ pub fn scan_detailed(
     progress: &dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<(ScanManifest, Vec<Probed>)> {
+    scan_detailed_workers(
+        inputs,
+        sidecar,
+        exclude,
+        extract::worker_count(),
+        progress,
+        cancel,
+    )
+}
+
+/// The real scan, with the probe-pool size as a parameter.
+///
+/// Production always passes [`extract::worker_count()`]; the `workers` seam exists so the
+/// determinism test can prove a serial probe (`workers == 1`) and a parallel one produce a
+/// byte-identical manifest (P-2, docs/DECISIONS.md D-041).
+fn scan_detailed_workers(
+    inputs: &[PathBuf],
+    sidecar: &Sidecar,
+    exclude: Option<&Path>,
+    workers: usize,
+    progress: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<(ScanManifest, Vec<Probed>)> {
     if inputs.is_empty() {
         return Err(Error::NoInput);
     }
@@ -92,23 +127,19 @@ pub fn scan_detailed(
         total: inputs.len(),
     });
 
-    let (candidates, missing) = collect(inputs, exclude, cancel)?;
+    let (candidates, missing) = collect(inputs, exclude, progress, cancel)?;
 
     let mut probed: Vec<Probed> = Vec::new();
     let mut unsynced: Vec<Unsynced> = missing;
 
-    let total = candidates.len();
-    for (i, path) in candidates.iter().enumerate() {
-        if cancel.is_cancelled() {
-            return Err(Error::Cancelled);
-        }
-        progress.report(Progress {
-            stage: Stage::Probing,
-            completed: i,
-            total,
-        });
-
-        match probe::probe(sidecar, path, cancel) {
+    // P-2: probe in parallel on the extract worker pool, then fold the results back in
+    // candidate order. `probe_candidates` returns one outcome per candidate, indexed to
+    // the (already sorted) candidate list, so the fold below — and therefore both `probed`
+    // and `unsynced` — is identical to the old serial loop regardless of thread
+    // scheduling. See docs/DECISIONS.md D-041.
+    let outcomes = probe_candidates(sidecar, &candidates, workers, progress, cancel)?;
+    for (path, outcome) in candidates.iter().zip(outcomes) {
+        match outcome {
             // §4.1: no audio stream means nothing to correlate on.
             Ok(p) if !p.has_audio() => unsynced.push(Unsynced {
                 file: path.clone(),
@@ -124,6 +155,7 @@ pub fn scan_detailed(
             }),
         }
     }
+    let total = candidates.len();
     progress.report(Progress {
         stage: Stage::Probing,
         completed: total,
@@ -257,6 +289,84 @@ pub fn apply_device_overrides(
     }
 }
 
+/// Probes every candidate concurrently, returning one outcome per candidate, aligned to
+/// the input order.
+///
+/// P-2: probing used to be a serial loop while extraction ran `min(4, cores)` in parallel,
+/// so a single file that took the full 30 s probe timeout stalled the whole scan with the
+/// other cores idle. This reuses the exact bounded-parallelism shape of
+/// [`crate::extract::Extractor::extract_all`]: indexed result slots (so output never
+/// depends on which worker finishes first), an atomic work cursor, and `worker_count`
+/// threads under a `thread::scope`.
+///
+/// Determinism (D-041): the returned vector is indexed by candidate position, so the
+/// caller's fold rebuilds the manifest in the identical order the old serial loop did,
+/// whatever the thread schedule. Cancellation is preserved — each worker checks the token
+/// before taking work, an in-flight probe is cancelled through `probe`'s own token path
+/// (§7.4), and a set cancel makes the whole call return [`Error::Cancelled`].
+fn probe_candidates(
+    sidecar: &Sidecar,
+    candidates: &[PathBuf],
+    workers: usize,
+    progress: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<Vec<std::result::Result<Probed, probe::ProbeError>>> {
+    let total = candidates.len();
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+
+    // Indexed slots, not a push-order queue: results must align to the (sorted) candidate
+    // list regardless of completion order, or the manifest would depend on scheduling.
+    let slots: Mutex<Vec<Option<std::result::Result<Probed, probe::ProbeError>>>> =
+        Mutex::new((0..total).map(|_| None).collect());
+    let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers.clamp(1, total) {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= total || cancel.is_cancelled() {
+                    break;
+                }
+                let outcome = probe::probe(sidecar, &candidates[i], cancel);
+                if let Ok(mut slots) = slots.lock() {
+                    slots[i] = Some(outcome);
+                }
+                progress.report(Progress {
+                    stage: Stage::Probing,
+                    completed: done.fetch_add(1, Ordering::Relaxed) + 1,
+                    total,
+                });
+            });
+        }
+    });
+
+    // A set token means some slots may be `None` (workers broke early); report it before
+    // the unwrap below rather than surfacing a spurious "no probe result" invariant.
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+
+    slots
+        .into_inner()
+        .map_err(|_| Error::Invariant("probe worker panicked".into()))?
+        .into_iter()
+        .enumerate()
+        .map(|(i, slot)| {
+            slot.ok_or_else(|| {
+                // Only reachable if a worker vanished without recording a result, which
+                // would silently drop a file and violate §7.3.
+                Error::Invariant(format!(
+                    "no probe result recorded for {}",
+                    candidates[i].display()
+                ))
+            })
+        })
+        .collect()
+}
+
 /// Expands the inputs into a deduplicated, sorted candidate list.
 ///
 /// Returns the candidates plus `unsynced` entries for inputs that do not exist at all —
@@ -265,6 +375,7 @@ pub fn apply_device_overrides(
 fn collect(
     inputs: &[PathBuf],
     exclude: Option<&Path>,
+    progress: &dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<(Vec<PathBuf>, Vec<Unsynced>)> {
     let mut files = Vec::new();
@@ -275,7 +386,7 @@ fn collect(
             return Err(Error::Cancelled);
         }
         if input.is_dir() {
-            walk(input, 0, exclude, &mut files, cancel)?;
+            walk(input, 0, exclude, &mut files, progress, cancel)?;
         } else if input.is_file() {
             files.push(input.clone());
         } else {
@@ -299,9 +410,10 @@ fn walk(
     depth: usize,
     exclude: Option<&Path>,
     out: &mut Vec<PathBuf>,
+    progress: &dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<()> {
-    walk_capped(dir, depth, exclude, out, cancel, MAX_FILES)
+    walk_capped(dir, depth, exclude, out, progress, cancel, MAX_FILES)
 }
 
 /// The real walk, with the file ceiling as a parameter so a test can drive the S-8 limit
@@ -311,6 +423,7 @@ fn walk_capped(
     depth: usize,
     exclude: Option<&Path>,
     out: &mut Vec<PathBuf>,
+    progress: &dyn ProgressSink,
     cancel: &CancelToken,
     max_files: usize,
 ) -> Result<()> {
@@ -351,9 +464,20 @@ fn walk_capped(
         // walk. Linked-in media is rare enough that ignoring links is the safe default.
         let Ok(meta) = entry.metadata() else { continue };
         if meta.is_dir() {
-            walk_capped(&path, depth + 1, exclude, out, cancel, max_files)?;
+            walk_capped(&path, depth + 1, exclude, out, progress, cancel, max_files)?;
         } else if meta.is_file() {
             out.push(path);
+            // P-5: emit a live running count so a large tree no longer sits at "0/1" for
+            // the whole walk. The total is unknown mid-walk, so `completed == total` is a
+            // rising indeterminate count (docs/DECISIONS.md P-5 note). Throttled by
+            // `SCAN_PROGRESS_STRIDE` so a huge directory does not flood the sink.
+            if out.len().is_multiple_of(SCAN_PROGRESS_STRIDE) {
+                progress.report(Progress {
+                    stage: Stage::Scanning,
+                    completed: out.len(),
+                    total: out.len(),
+                });
+            }
         }
     }
     Ok(())
@@ -444,7 +568,7 @@ mod tests {
         fs::write(dir.join(".DS_Store"), b"junk").unwrap();
         fs::write(dir.join("._C0001.MP4"), b"appledouble").unwrap();
         fs::write(dir.join("real.bin"), b"x").unwrap();
-        let (found, _) = collect(&[dir], None, &CancelToken::new()).unwrap();
+        let (found, _) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
         assert_eq!(found.len(), 1);
         assert!(found[0].ends_with("real.bin"));
     }
@@ -454,6 +578,7 @@ mod tests {
         let (found, missing) = collect(
             &[PathBuf::from("/no/such/file.mp4")],
             None,
+            &NoProgress,
             &CancelToken::new(),
         )
         .unwrap();
@@ -467,7 +592,8 @@ mod tests {
         let dir = scratch("dedup");
         let file = dir.join("a.bin");
         fs::write(&file, b"x").unwrap();
-        let (found, _) = collect(&[dir.clone(), file], None, &CancelToken::new()).unwrap();
+        let (found, _) =
+            collect(&[dir.clone(), file], None, &NoProgress, &CancelToken::new()).unwrap();
         assert_eq!(found.len(), 1);
     }
 
@@ -580,6 +706,118 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&a).unwrap(),
             serde_json::to_string(&b).unwrap()
+        );
+    }
+
+    #[test]
+    fn parallel_and_serial_probing_produce_an_identical_manifest() {
+        // P-2/D-041: the whole point of parallel probing is that it changes only the wall
+        // clock, never the result. Probing with one worker is the old serial path; probing
+        // with eight is maximally parallel. Both must yield a byte-identical manifest AND an
+        // identical raw `Probed` vector, whatever the thread schedule.
+        let Some(sidecar) = require_ffprobe() else {
+            return;
+        };
+        let dir = scratch("parallel-determinism");
+        // A mixed shoot: several syncable clips plus files that land in `unsynced`, so the
+        // fold across both buckets is exercised, not just the happy path.
+        for n in 1..=8 {
+            write_wav(&dir.join(format!("C000{n}.WAV")), 0.4);
+        }
+        fs::write(dir.join("broken.mp4"), vec![0u8; 256]).unwrap();
+        fs::write(dir.join("empty.mp4"), b"").unwrap();
+        let inputs = std::slice::from_ref(&dir);
+
+        let (serial, serial_probed) =
+            scan_detailed_workers(inputs, &sidecar, None, 1, &NoProgress, &CancelToken::new())
+                .unwrap();
+        let (parallel, parallel_probed) =
+            scan_detailed_workers(inputs, &sidecar, None, 8, &NoProgress, &CancelToken::new())
+                .unwrap();
+
+        assert!(
+            serial.files.len() >= 8,
+            "the syncable clips must have probed"
+        );
+        assert_eq!(
+            serde_json::to_string(&serial).unwrap(),
+            serde_json::to_string(&parallel).unwrap(),
+            "serial and parallel manifests must be byte-identical"
+        );
+        assert_eq!(
+            serial_probed, parallel_probed,
+            "the raw Probed records must match in order too"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_parallel_probe_stops_and_reports_cancelled() {
+        // P-2: cancellation must survive the move to the worker pool. A token tripped
+        // before probing means no probe result is required, and the call returns Cancelled
+        // rather than a spurious "no probe result" invariant.
+        let Some(sidecar) = require_ffprobe() else {
+            return;
+        };
+        let dir = scratch("parallel-cancel");
+        for n in 1..=6 {
+            write_wav(&dir.join(format!("C000{n}.WAV")), 0.3);
+        }
+        let (candidates, _) = collect(
+            std::slice::from_ref(&dir),
+            None,
+            &NoProgress,
+            &CancelToken::new(),
+        )
+        .unwrap();
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        let r = probe_candidates(&sidecar, &candidates, 4, &NoProgress, &cancel);
+        assert!(matches!(r, Err(Error::Cancelled)), "got {r:?}");
+    }
+
+    #[test]
+    fn the_scan_walk_emits_a_rising_file_count() {
+        // P-5: the walk used to emit nothing, so a big folder sat at "0/1" the whole time.
+        // With more than one stride's worth of files it must now report `Scanning` ticks
+        // whose count climbs. No ffprobe needed — this is the walk, not the probe.
+        use std::sync::Mutex as StdMutex;
+        struct Rec(StdMutex<Vec<Progress>>);
+        impl ProgressSink for Rec {
+            fn report(&self, p: Progress) {
+                if let Ok(mut v) = self.0.lock() {
+                    v.push(p);
+                }
+            }
+        }
+
+        let dir = scratch("scan-walk-progress");
+        let n = SCAN_PROGRESS_STRIDE * 2 + 5;
+        for i in 0..n {
+            fs::write(dir.join(format!("f{i:05}.bin")), b"x").unwrap();
+        }
+        let rec = Rec(StdMutex::new(Vec::new()));
+        let (found, _) = collect(&[dir], None, &rec, &CancelToken::new()).unwrap();
+        assert_eq!(found.len(), n);
+
+        let scanning: Vec<usize> = rec
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.stage == Stage::Scanning)
+            .map(|p| p.completed)
+            .collect();
+        assert!(
+            scanning.len() >= 2,
+            "expected several scanning ticks, got {scanning:?}"
+        );
+        assert!(
+            scanning.windows(2).all(|w| w[1] > w[0]),
+            "the reported count must rise: {scanning:?}"
+        );
+        assert!(
+            scanning.iter().all(|&c| c > 0),
+            "no scanning tick should report zero once files are found"
         );
     }
 
@@ -774,7 +1012,15 @@ mod tests {
             fs::write(dir.join(format!("f{n}.bin")), b"x").unwrap();
         }
         let mut out = Vec::new();
-        let r = walk_capped(&dir, 0, None, &mut out, &CancelToken::new(), 10);
+        let r = walk_capped(
+            &dir,
+            0,
+            None,
+            &mut out,
+            &NoProgress,
+            &CancelToken::new(),
+            10,
+        );
         assert!(
             matches!(r, Err(Error::TooManyFiles { limit: 10 })),
             "expected a named ceiling error, got {r:?}"
@@ -794,7 +1040,15 @@ mod tests {
             fs::write(dir.join(format!("f{n}.bin")), b"x").unwrap();
         }
         let mut out = Vec::new();
-        let r = walk_capped(&dir, 0, None, &mut out, &CancelToken::new(), 100);
+        let r = walk_capped(
+            &dir,
+            0,
+            None,
+            &mut out,
+            &NoProgress,
+            &CancelToken::new(),
+            100,
+        );
         assert!(r.is_ok(), "a small tree must scan cleanly, got {r:?}");
         assert_eq!(out.len(), 8);
     }
@@ -824,7 +1078,7 @@ mod tests {
         let handle = std::thread::spawn(move || flag.cancel());
         let start = std::time::Instant::now();
         let mut out = Vec::new();
-        let r = walk_capped(&dir, 0, None, &mut out, &cancel, MAX_FILES);
+        let r = walk_capped(&dir, 0, None, &mut out, &NoProgress, &cancel, MAX_FILES);
         handle.join().unwrap();
         assert!(
             matches!(r, Err(Error::Cancelled)),

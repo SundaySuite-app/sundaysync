@@ -185,7 +185,49 @@ reachable impossible phase — so this is targeted:**
 | F14 | No `invoke` timeout anywhere; only sync/scan are cancel-recoverable, so any no-cancel command (notably `check_sidecar` via F11) has no UI recovery from a hung backend. Fix: a client-side invoke timeout wrapper. | MED | App.tsx |
 | F6 | Export staleness is UI-gated only (`disabled={phase.stale}`); the backend `export_timeline` has no inputs guard, so a bypassing caller exports the previous run. Fix: stamp `LastRun` with an inputs hash, refuse on mismatch. | LOW | lib.rs:332 |
 
-### E5 — Performance at real scale
+### E5 — Performance at real scale ✅ done 2026-08-08
+
+**Done — 2026-08-08 (PR pending).** Two worktree-isolated Opus agents (correlation /
+throughput+cache), integrated by the conductor (who added the app-side cache-eviction UI).
+**Headline: P-1 fixed — §4.3's "reference transform computed once and cached" is finally
+implemented, and the realistic 3 h/20-clip service drops from ~214 s to ~57 s of correlation
+with placements bit-for-bit identical.**
+
+Correlation (D-038/D-039): `Correlator` memoises the reference PHAT block spectra keyed by
+(BLAKE3 content hash, segment length) — a content hash, never a pointer, so two references
+can't alias (§7.5); single-entry, 1.75 GiB-budgeted, streams beyond ~4 h so §7.7's 4 GB
+ceiling (D-034) is never breached. Per-segment correlations fan out over `worker_count()`
+with indexed-slot determinism. `MIN_PSR` untouched (arithmetic identical → D-015 holds).
+Bit-identical proven field-for-field vs the retained `match_clip_exhaustive` oracle over the
+real §8.1 fixtures + edge/negative lags. The **decimated coarse search is deferred (D-039)**
+— it's the one accuracy-affecting change (±1 sample, not bit-identical) and needs the
+adversarial coarse-error-≤-refine-window proof + PSR re-derivation §13.2 demands; it goes to
+E10's real corpus. Only the 8 h/100-file stress day still misses §10's <6 min (~23 min,
+streams) — that's D-039's target.
+
+Throughput/cache (D-040/D-041): probing moved to the bounded extract pool (P-2), proven
+byte-identical serial-vs-parallel; cache eviction closes D-013 (P-4) with
+`Cache::sweep_older_than` (mtime, 90-day sweep on app start, on) + `enforce_size_cap`
+(Settings size cap, off by default) + the `sweep_cache`/`enforce_cache_cap` shell commands
+and a `cacheCapMb` setting; scan-walk now emits progress (P-5, scan half); the lib.rs O(n²)
+probed lookup is a one-pass HashMap (P-6). The two stale-doc items were **already fixed in
+E4** — no action. P-7 bench cold/warm/RSS landed in E4.
+
+**§10 measured table (this machine — 10 cores, worker cap 4, release):**
+
+| Scenario | pre-P-1 correlation | shipping | note |
+| --- | --- | --- | --- |
+| 12 min ref, 12×90 s clips (bench) | 4.22 s exhaustive | 2.29 s cached+parallel | 3.7–4.1× combined |
+| 3 h ref, 20 clips (§10 realistic) | ~214 s | **~57 s** | spectra 1.4 GB, cached |
+| 8 h ref, 100 files (stress) | ~2857 s | ~1406 s | spectra 3.6 GB → streams; D-039 |
+
+Peak memory (3 h ref): ~1.8 GiB (ref audio 0.48 + spectra 1.26 + buffers) — under 4 GB.
+Gates: 164 core + adversarial 9 + concurrency 4 + correlation_perf 1(+1 ignored bench) +
+cache_eviction 4 + parallel_probe 1 + stability 1 + proptest 5 + fixturegen 35 + shell 11 +
+31 vitest; both PATH variants (D-025); **accuracy full-tier + bit-identical oracle green**;
+clippy `-D warnings`; tsc + vite build.
+
+### E5 — Performance at real scale (original plan)
 
 - **Correlation scaling** (the known §10 risk): decimated coarse search (e.g. 1.5 kHz)
   over the full reference → narrow full-rate refine window. Gate: synthetic 3 h
