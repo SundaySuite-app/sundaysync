@@ -11,7 +11,7 @@
 
 use crate::error::{Error, Result};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Marker file stamped into a cache directory so [`Cache::clear`] can tell a real cache
 /// from a folder the user mis-pointed the setting at (S-7, docs/DECISIONS.md D-032). A
@@ -104,6 +104,33 @@ fn hash_path(hasher: &mut blake3::Hasher, path: &Path) {
         // available and still correct for all-UTF-8 paths, which these targets use.
         hasher.update(path.to_string_lossy().as_bytes());
     }
+}
+
+/// What an eviction pass removed: how many finished entries, and how many bytes.
+///
+/// Returned by [`Cache::sweep_older_than`] and [`Cache::enforce_size_cap`] so the shell
+/// can show an honest "freed N MB" line (D-013 asks for the number, not a hand-wave). A
+/// no-op pass returns the [`Default`] zero, which is not an error — an empty or already-
+/// small cache and one that needed no work are the same thing to a settings screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Evicted {
+    pub entries: usize,
+    pub bytes: u64,
+}
+
+impl Evicted {
+    /// Whether the pass removed nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries == 0
+    }
+}
+
+/// One finished cache entry, with the two facts eviction needs: its size and its mtime.
+struct EntryStat {
+    path: PathBuf,
+    len: u64,
+    mtime: SystemTime,
 }
 
 /// The on-disk analysis-audio cache.
@@ -213,17 +240,9 @@ impl Cache {
     /// setting at, say, their Documents folder (D-013's settings UI makes that possible).
     pub fn clear(&self) -> Result<u64> {
         // S-7: `dir` is caller-chosen (D-013's settings UI lets the user point it
-        // anywhere). Before touching a *non-default* directory, require our own marker —
-        // proof this really is a SundaySync cache and not, say, a Documents folder that
-        // happens to hold a few `.tmp` files. The default dir is trusted unconditionally
-        // (the engine created it), so its path stays frictionless. A directory that does
-        // not exist is still a no-op, not a refusal.
-        if !self.is_default_dir() && !self.has_marker() {
-            if self.dir.exists() {
-                return Err(Error::NotACacheDir {
-                    path: self.dir.clone(),
-                });
-            }
+        // anywhere). The shared marker guard refuses a *non-default* directory we never
+        // stamped, and turns a missing directory into a no-op rather than a refusal.
+        if !self.eviction_guard()? {
             return Ok(0);
         }
 
@@ -253,6 +272,138 @@ impl Cache {
             }
         }
         Ok(freed)
+    }
+
+    /// Deletes finished entries whose mtime is older than `age`, returning what went.
+    ///
+    /// This is the D-013 default sweep (the conductor wires a 90-day call on app start):
+    /// the analysis cache is regenerable, so evicting stale entries is non-destructive to
+    /// user data — a swept file simply cold-decodes again if that shoot is ever re-synced.
+    ///
+    /// # Age is measured from mtime, not atime
+    ///
+    /// atime is unreliable as a "last used" signal: `noatime`/`relatime` mounts are the
+    /// modern default and either freeze it or update it lazily, and some filesystems and
+    /// network mounts do not maintain it at all. mtime, by contrast, is written exactly
+    /// once — when the entry is committed by the write-then-rename in [`crate::extract`] —
+    /// and never touched again, so "older than `age`" means "committed more than `age`
+    /// ago", which is the honest, portable reading of a cache entry's age.
+    ///
+    /// Only finished `*.f32` entries are considered. A live extraction's `.tmp` scratch
+    /// file is never touched (skipped by suffix), the marker is spared, and a foreign file
+    /// the user's mis-pointed cache path happens to hold is left alone. Safe under a
+    /// concurrent run: an entry that vanishes between the stat and the unlink is simply not
+    /// counted, never an error. Honors the S-7 marker guard exactly as [`Cache::clear`].
+    pub fn sweep_older_than(&self, age: Duration) -> Result<Evicted> {
+        if !self.eviction_guard()? {
+            return Ok(Evicted::default());
+        }
+        let now = SystemTime::now();
+        let mut evicted = Evicted::default();
+        for entry in self.collect_entries()? {
+            // A future-dated mtime (clock skew, a copied file) makes `duration_since` err;
+            // treat that entry as young and keep it rather than evicting on a bad clock.
+            let too_old = now
+                .duration_since(entry.mtime)
+                .is_ok_and(|elapsed| elapsed > age);
+            if too_old && std::fs::remove_file(&entry.path).is_ok() {
+                evicted.entries += 1;
+                evicted.bytes += entry.len;
+            }
+        }
+        Ok(evicted)
+    }
+
+    /// Evicts least-recently-modified entries until the cache is within `max_bytes`.
+    ///
+    /// The D-013 size cap, which the conductor exposes as an off-by-default Setting: if the
+    /// finished cache already fits under `max_bytes` this is a pure no-op, otherwise the
+    /// oldest entries (by mtime) are removed until the total fits. The tie-break is the
+    /// entry path, so two runs over the same over-cap cache evict the *identical* set — the
+    /// determinism §3 asks of everything the engine does. `max_bytes == 0` clears every
+    /// finished entry, in that same deterministic order.
+    ///
+    /// Same guarantees as [`Cache::sweep_older_than`]: `*.f32` only (never an in-flight
+    /// `.tmp`), the marker and foreign files spared, and a vanished entry is not an error.
+    pub fn enforce_size_cap(&self, max_bytes: u64) -> Result<Evicted> {
+        if !self.eviction_guard()? {
+            return Ok(Evicted::default());
+        }
+        let mut entries = self.collect_entries()?;
+        let mut total: u64 = entries.iter().map(|e| e.len).sum();
+        let mut evicted = Evicted::default();
+        if total <= max_bytes {
+            return Ok(evicted);
+        }
+        // Oldest first; path breaks ties so the evicted set is a function of the inputs,
+        // not of directory-iteration order (which is not stable across filesystems).
+        entries.sort_by(|a, b| a.mtime.cmp(&b.mtime).then_with(|| a.path.cmp(&b.path)));
+        for entry in entries {
+            if total <= max_bytes {
+                break;
+            }
+            if std::fs::remove_file(&entry.path).is_ok() {
+                total = total.saturating_sub(entry.len);
+                evicted.entries += 1;
+                evicted.bytes += entry.len;
+            }
+        }
+        Ok(evicted)
+    }
+
+    /// The S-7 marker guard, shared by [`Cache::clear`] and the eviction passes.
+    ///
+    /// `Ok(true)` means it is safe to delete inside `dir`; `Ok(false)` means the directory
+    /// does not exist yet, so the caller should return a zero no-op. `Err(NotACacheDir)`
+    /// means `dir` exists but is a *non-default* directory we never stamped — deleting
+    /// there could destroy files SundaySync did not write (D-013 lets the user point the
+    /// cache anywhere), so it is refused.
+    fn eviction_guard(&self) -> Result<bool> {
+        if !self.is_default_dir() && !self.has_marker() {
+            if self.dir.exists() {
+                return Err(Error::NotACacheDir {
+                    path: self.dir.clone(),
+                });
+            }
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /// Lists the finished `*.f32` entries with the size and mtime eviction needs.
+    ///
+    /// Skips `.tmp` scratch files (a live extraction owns them), the marker, foreign files,
+    /// and anything whose metadata cannot be read — the same "only what we wrote" caution
+    /// [`Cache::clear`] applies. A missing directory is an empty list, not an error.
+    fn collect_entries(&self) -> Result<Vec<EntryStat>> {
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(Error::Io {
+                    path: self.dir.clone(),
+                    source,
+                })
+            }
+        };
+        let mut out = Vec::new();
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.ends_with(".f32") {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            let Ok(mtime) = meta.modified() else { continue };
+            out.push(EntryStat {
+                path: entry.path(),
+                len: meta.len(),
+                mtime,
+            });
+        }
+        Ok(out)
     }
 
     /// Shared walk for the read-only statistics. Non-recursive on purpose: the cache
@@ -547,5 +698,160 @@ mod tests {
         // definition, so `clear` there never demands a marker. Pure check — no fs writes.
         let cache = Cache::new(Cache::default_dir().unwrap());
         assert!(cache.is_default_dir());
+    }
+
+    // ---- P-4 / D-013 eviction ------------------------------------------------------
+
+    /// Backdates a file's mtime by `secs_ago` seconds. Eviction reads mtime (not atime),
+    /// so this is how a test manufactures a "stale" entry without waiting.
+    fn backdate(path: &Path, secs_ago: u64) {
+        let when = SystemTime::now() - Duration::from_secs(secs_ago);
+        let f = fs::OpenOptions::new().write(true).open(path).unwrap();
+        f.set_modified(when).unwrap();
+    }
+
+    #[test]
+    fn sweep_evicts_stale_entries_and_spares_everything_else() {
+        let dir = scratch("cache-sweep");
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap();
+
+        // Two entries a year old, one fresh; plus an in-flight scratch, a foreign file.
+        fs::write(cache.dir().join("old1.f32"), [0u8; 100]).unwrap();
+        fs::write(cache.dir().join("old2.f32"), [0u8; 40]).unwrap();
+        fs::write(cache.dir().join("fresh.f32"), [0u8; 10]).unwrap();
+        fs::write(cache.dir().join("live.tmp"), [0u8; 999]).unwrap();
+        fs::write(cache.dir().join("keep.txt"), b"foreign").unwrap();
+        backdate(&cache.dir().join("old1.f32"), 400 * 86_400);
+        backdate(&cache.dir().join("old2.f32"), 400 * 86_400);
+        backdate(&cache.dir().join("live.tmp"), 400 * 86_400);
+        backdate(&cache.dir().join("keep.txt"), 400 * 86_400);
+
+        let evicted = cache
+            .sweep_older_than(Duration::from_secs(90 * 86_400))
+            .unwrap();
+        assert_eq!(evicted.entries, 2, "both stale entries removed");
+        assert_eq!(evicted.bytes, 140, "their bytes reported");
+        assert!(!evicted.is_empty());
+
+        assert!(!cache.dir().join("old1.f32").exists());
+        assert!(!cache.dir().join("old2.f32").exists());
+        assert!(cache.dir().join("fresh.f32").exists(), "young entry kept");
+        assert!(
+            cache.dir().join("live.tmp").exists(),
+            "an in-flight scratch file must never be swept"
+        );
+        assert!(cache.dir().join("keep.txt").exists(), "foreign file spared");
+        assert!(
+            cache.dir().join(CACHE_MARKER).is_file(),
+            "the marker itself is never evicted"
+        );
+    }
+
+    #[test]
+    fn sweep_on_a_missing_dir_is_zero_not_an_error() {
+        let cache = Cache::new(PathBuf::from("/no/such/cache/for/sweep"));
+        assert_eq!(
+            cache.sweep_older_than(Duration::from_secs(1)).unwrap(),
+            Evicted::default()
+        );
+    }
+
+    #[test]
+    fn size_cap_evicts_least_recently_modified_until_under() {
+        let dir = scratch("cache-cap");
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap();
+
+        // Four 100-byte entries with strictly increasing mtimes → 400 bytes total.
+        for (name, age) in [
+            ("a.f32", 4000u64),
+            ("b.f32", 3000),
+            ("c.f32", 2000),
+            ("d.f32", 1000),
+        ] {
+            fs::write(cache.dir().join(name), [0u8; 100]).unwrap();
+            backdate(&cache.dir().join(name), age);
+        }
+
+        // Cap at 250 → must drop the two oldest (a, b) to reach 200 ≤ 250.
+        let evicted = cache.enforce_size_cap(250).unwrap();
+        assert_eq!(evicted.entries, 2);
+        assert_eq!(evicted.bytes, 200);
+        assert!(!cache.dir().join("a.f32").exists(), "oldest evicted");
+        assert!(!cache.dir().join("b.f32").exists(), "second-oldest evicted");
+        assert!(cache.dir().join("c.f32").exists(), "newer entries kept");
+        assert!(cache.dir().join("d.f32").exists());
+        assert!(cache.size_bytes().unwrap() <= 250, "now within the cap");
+    }
+
+    #[test]
+    fn size_cap_under_the_cap_is_a_noop() {
+        let dir = scratch("cache-cap-noop");
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap();
+        fs::write(cache.dir().join("a.f32"), [0u8; 100]).unwrap();
+        let evicted = cache.enforce_size_cap(1_000).unwrap();
+        assert_eq!(evicted, Evicted::default(), "nothing to do under the cap");
+        assert!(cache.dir().join("a.f32").exists());
+    }
+
+    #[test]
+    fn size_cap_tie_break_is_deterministic_by_path() {
+        // Two entries sharing an mtime, over the cap by one: the path-lower one must be the
+        // one evicted, every time, so the evicted set is a function of the inputs.
+        let dir = scratch("cache-cap-tie");
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap();
+        let same_age = 5000;
+        fs::write(cache.dir().join("aaa.f32"), [0u8; 100]).unwrap();
+        fs::write(cache.dir().join("bbb.f32"), [0u8; 100]).unwrap();
+        backdate(&cache.dir().join("aaa.f32"), same_age);
+        backdate(&cache.dir().join("bbb.f32"), same_age);
+
+        let evicted = cache.enforce_size_cap(150).unwrap();
+        assert_eq!(evicted.entries, 1);
+        assert!(
+            !cache.dir().join("aaa.f32").exists() && cache.dir().join("bbb.f32").exists(),
+            "the path-lower entry breaks the mtime tie"
+        );
+    }
+
+    #[test]
+    fn size_cap_of_zero_clears_every_finished_entry() {
+        let dir = scratch("cache-cap-zero");
+        let cache = Cache::new(dir.join("cache"));
+        cache.ensure_dir().unwrap();
+        fs::write(cache.dir().join("a.f32"), [0u8; 20]).unwrap();
+        fs::write(cache.dir().join("b.f32"), [0u8; 30]).unwrap();
+        let evicted = cache.enforce_size_cap(0).unwrap();
+        assert_eq!(evicted.entries, 2);
+        assert_eq!(evicted.bytes, 50);
+        assert_eq!(cache.entry_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn eviction_refuses_an_unmarked_non_default_dir() {
+        // S-7: the same guard `clear` uses. A folder we never stamped must not be swept or
+        // capped — it could be a Documents folder the user mis-pointed the cache at.
+        let dir = scratch("cache-evict-unmarked");
+        let target = dir.join("mine");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("keep.f32"), [0u8; 40]).unwrap();
+        backdate(&target.join("keep.f32"), 999 * 86_400);
+
+        let cache = Cache::new(target.clone());
+        assert!(matches!(
+            cache.sweep_older_than(Duration::from_secs(1)),
+            Err(Error::NotACacheDir { .. })
+        ));
+        assert!(matches!(
+            cache.enforce_size_cap(0),
+            Err(Error::NotACacheDir { .. })
+        ));
+        assert!(
+            target.join("keep.f32").exists(),
+            "a refused eviction must delete nothing"
+        );
     }
 }
