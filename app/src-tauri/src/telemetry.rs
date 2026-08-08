@@ -89,6 +89,11 @@ pub const QUEUE_MAX: usize = 50;
 pub const MESSAGE_MAX_CHARS: usize = 200;
 /// Cap for a `file:line:col`.
 pub const LOCATION_MAX_CHARS: usize = 120;
+/// Cap for the version text the shared envelope carries (`appVersion`, on the
+/// payload and on every crash record). The Worker validates it as free text at 32
+/// characters and answers a longer one with a 400 for the WHOLE payload — so the
+/// envelope caps it here rather than trusting whatever the bundle declares.
+pub const VERSION_MAX_CHARS: usize = 32;
 
 /// The env/build var naming the endpoint's BASE url (no trailing path).
 pub const BASE_URL_VAR: &str = "SUNDAYSYNC_TELEMETRY_URL";
@@ -426,6 +431,30 @@ fn is_path_body(c: char) -> bool {
     !HARD_DELIMITERS.contains(&c)
 }
 
+/// Whether `prev` (the char immediately LEFT of a candidate path) opens one.
+///
+/// ⚠️ **This set must stay a SUPERSET of the endpoint's.** The Worker screens
+/// every free-text field with `ABSOLUTE_PATH_RE`
+/// (`sunday-telemetry/src/schema.ts`), anchored at
+///
+/// ```text
+/// (^|[\s"'(<[])
+/// ```
+///
+/// — start of string, whitespace, a double or single quote, an open paren, an
+/// **angle bracket**, or an **open square bracket**. Anything the Worker treats as
+/// a boundary and we do not is a path we leave in a message the Worker then
+/// refuses with `unscrubbed_path`; [`classify`] calls that 400 permanent, so the
+/// outbox drops the whole batch — runs included — without retrying and without
+/// telling anyone. `<` and `[` were the two missing ones, and `[C:\Temp\a.mov]`
+/// is what fell through (see `a_scrubbed_message_never_trips_the_workers_path_screen`).
+fn is_left_boundary(prev: Option<char>) -> bool {
+    match prev {
+        None => true,
+        Some(c) => c.is_whitespace() || matches!(c, '"' | '\'' | '(' | '<' | '['),
+    }
+}
+
 /// Whether an absolute path begins at byte offset `i` in `text` (`lower` is its
 /// ASCII-lowercased copy; `prev` is the char just to the left).
 fn path_starts_at(text: &str, lower: &str, i: usize, prev: Option<char>) -> bool {
@@ -436,9 +465,9 @@ fn path_starts_at(text: &str, lower: &str, i: usize, prev: Option<char>) -> bool
     if rest.starts_with("~/") || rest.starts_with("~\\") {
         return true;
     }
-    // Anchored shapes: only at a left boundary (prev is not path-ish), which keeps
-    // relative paths like `src/place.rs` — identical on every machine — intact.
-    if prev.is_some_and(|c| c != '"' && c != '\'' && c != '(' && !c.is_whitespace()) {
+    // Anchored shapes: only at a left boundary (see [`is_left_boundary`]), which
+    // keeps relative paths like `src/place.rs` — identical on every machine — intact.
+    if !is_left_boundary(prev) {
         return false;
     }
     let b = rest.as_bytes();
@@ -514,6 +543,20 @@ pub fn scrub_free_text(raw: &str, home: Option<&str>, max: usize) -> String {
     let mut out: String = cleaned.chars().take(max).collect();
     out.push('…');
     out
+}
+
+/// `v`, or `0.0` when it is not a finite number.
+///
+/// `serde_json` writes NaN and ±∞ as JSON `null`, and the Worker's `float()` check
+/// answers `null` with `expected_number` — a 400 that drops the WHOLE payload, not
+/// just the offending run. A threshold that is not a number is not worth losing a
+/// batch of reports over, so it lands as zero and stays visible in aggregate.
+fn finite_or_zero(v: f64) -> f64 {
+    if v.is_finite() {
+        v
+    } else {
+        0.0
+    }
 }
 
 // ── The payload ──────────────────────────────────────────────────────────────
@@ -611,7 +654,11 @@ impl TelemetryPayload {
             consent_version: CONSENT_VERSION,
             install_id: sanitize_install_id(install_id),
             built_at: built_at(),
-            app_version: app_version.to_string(),
+            // Through the same scrubber every other free-text field takes: the
+            // Worker validates `appVersion` as free text capped at
+            // [`VERSION_MAX_CHARS`] and path-screened, and a version string it
+            // refuses 400s the entire payload — runs, crashes and all.
+            app_version: scrub_free_text(app_version, home_dir().as_deref(), VERSION_MAX_CHARS),
             os: Os::current(),
             arch: Arch::current(),
             language: detect_language(),
@@ -718,7 +765,7 @@ pub fn sync_report(facts: &RunFacts, at: i64) -> SyncReport {
         unsynced_count: r.unsynced.len() as u32,
         duration_bucket: DurationBucket::from_seconds(r.sequence.duration_seconds),
         run_duration_bucket: RunDurationBucket::from_millis(facts.run_millis),
-        min_psr: r.parameters.min_psr,
+        min_psr: finite_or_zero(r.parameters.min_psr),
         analysis_rate: r.parameters.analysis_rate,
         formats,
         outcomes,
@@ -1462,7 +1509,7 @@ mod tests {
 
     // ── A church-y result, full of things that must NOT leave ─────────────────
 
-    fn identifying_result() -> SyncResult {
+    pub(super) fn identifying_result() -> SyncResult {
         SyncResult {
             schema: SCHEMA_VERSION,
             parameters: Parameters {
@@ -1928,5 +1975,573 @@ mod tests {
         std::fs::write(dir.join("outbox.json"), b"nonsense").unwrap();
         assert_eq!(read_state(dir), PersistState::default());
         assert!(read_outbox(dir).is_empty());
+    }
+}
+
+/// ═══════════════════════════════════════════════════════════════════════════
+///   THE WIRE CONTRACT, RESTATED AGAINST THE DEPLOYED WORKER
+/// ═══════════════════════════════════════════════════════════════════════════
+///
+/// The endpoint is now PRODUCTION TRUTH: `sunday-telemetry/src/schema-sync.ts`
+/// validates every field, every enum spelling and every cap, and answers a
+/// mismatch with a 400. [`classify`] calls a 400 `Permanent`, so the outbox drops
+/// that payload **without retrying and without telling anyone** — a client/server
+/// drift is not a loud failure, it is silent, permanent data loss for every
+/// install it affects.
+///
+/// So the contract is pinned HERE, in the client, from the server's own file:
+/// the key lists, the enum vocabularies, the caps and the free-text path screen
+/// below are transcribed from `schema-sync.ts` (which in turn re-uses
+/// `schema.ts`'s `Check`, `ABSOLUTE_PATH_RE` and timestamp window). A field
+/// renamed on either side fails a test in this module instead of quietly
+/// deleting a month of reports.
+#[cfg(test)]
+mod wire_contract {
+    use super::*;
+    use serde_json::Value;
+
+    // ── Transcribed from sunday-telemetry/src/schema-sync.ts ──────────────────
+
+    /// `SYNC_PAYLOAD_KEYS`. Exactly these — the Worker's `Check::object` rejects a
+    /// missing key AND an unknown one.
+    const PAYLOAD_KEYS: &[&str] = &[
+        "app",
+        "schema",
+        "consentVersion",
+        "installId",
+        "builtAt",
+        "appVersion",
+        "os",
+        "arch",
+        "language",
+        "runs",
+        "crashes",
+    ];
+    /// `RUN_KEYS`.
+    const RUN_KEYS: &[&str] = &[
+        "at",
+        "succeeded",
+        "fileCount",
+        "deviceCount",
+        "placedCount",
+        "unsyncedCount",
+        "durationBucket",
+        "runDurationBucket",
+        "minPsr",
+        "analysisRate",
+        "formats",
+        "outcomes",
+        "psrBands",
+        "driftCorrectionEnabled",
+        "driftClips",
+        "driftCorrectedClips",
+        "mixedFps",
+    ];
+    /// `CRASH_KEYS`. Note: no `task` — that field is SundayRec's.
+    const CRASH_KEYS: &[&str] = &[
+        "schema",
+        "kind",
+        "at",
+        "appVersion",
+        "os",
+        "message",
+        "location",
+        "backtracePresent",
+    ];
+
+    const OS_VALUES: &[&str] = &["macos", "windows", "linux", "other"];
+    const ARCH_VALUES: &[&str] = &["x86_64", "aarch64", "other"];
+    const MEDIA_FORMATS: &[&str] = &[
+        "mp4", "mov", "mkv", "avi", "mts", "wav", "flac", "mp3", "aac", "m4a", "other",
+    ];
+    const OUTCOME_REASONS: &[&str] = &[
+        "low_confidence",
+        "no_audio",
+        "decode_error",
+        "device_overlap",
+    ];
+    const DURATION_BUCKETS: &[&str] = &[
+        "under5m",
+        "b5to15m",
+        "b15to30m",
+        "b30to60m",
+        "b60to120m",
+        "over120m",
+    ];
+    const RUN_DURATION_BUCKETS: &[&str] =
+        &["under10s", "b10to30s", "b30to60s", "b60to300s", "over300s"];
+    const PSR_BANDS: &[&str] = &[
+        "under15", "b15to20", "b20to30", "b30to50", "b50to100", "over100",
+    ];
+
+    /// `MAX_SYNC_RUNS` / `MAX_SYNC_CRASHES`.
+    const WORKER_MAX_RUNS: usize = 20;
+    const WORKER_MAX_CRASHES: usize = 20;
+    /// `MESSAGE_MAX_CHARS` / `LOCATION_MAX_CHARS` / `VERSION_MAX_CHARS` — the
+    /// Worker's `freeText` allows the cap PLUS one trailing `…` (the client's own
+    /// truncation shape) and nothing more.
+    const WORKER_MESSAGE_MAX: usize = 200;
+    const WORKER_LOCATION_MAX: usize = 120;
+    const WORKER_VERSION_MAX: usize = 32;
+    /// `TS_MIN` / `TS_MAX` — 2020-01-01 .. 2100-01-01 UTC, in ms.
+    const TS_MIN: i64 = 1_577_836_800_000;
+    const TS_MAX: i64 = 4_102_444_800_000;
+    /// `MAX_BODY_BYTES`.
+    const WORKER_MAX_BODY_BYTES: usize = 64 * 1024;
+
+    /// The client's collection caps may never exceed the Worker's `too_many`
+    /// thresholds — a compile-time failure, because there is no runtime in which a
+    /// payload the endpoint refuses by size is acceptable.
+    const _: () = assert!(MAX_RUNS <= WORKER_MAX_RUNS);
+    const _: () = assert!(MAX_CRASHES <= WORKER_MAX_CRASHES);
+
+    /// A faithful port of `ABSOLUTE_PATH_RE` from `sunday-telemetry/src/schema.ts`:
+    ///
+    /// ```text
+    /// (^|[\s"'(<[])(\/(Users|home|var|tmp|private|Volumes)\/|[A-Za-z]:[\\/]|\\\\[^\s\\]+\\|~[\\/])
+    /// ```
+    ///
+    /// `freeText` refuses any string this matches with `unscrubbed_path`, which
+    /// 400s the WHOLE payload. This is therefore the exact question every scrubbed
+    /// string has to answer "no" to.
+    fn worker_path_screen_hits(s: &str) -> bool {
+        const ROOTS: &[&str] = &[
+            "/Users/",
+            "/home/",
+            "/var/",
+            "/tmp/",
+            "/private/",
+            "/Volumes/",
+        ];
+        for (i, _) in s.char_indices() {
+            let at_boundary = match s[..i].chars().next_back() {
+                None => true,
+                Some(c) => c.is_whitespace() || matches!(c, '"' | '\'' | '(' | '<' | '['),
+            };
+            if !at_boundary {
+                continue;
+            }
+            let rest = &s[i..];
+            if ROOTS.iter().any(|r| rest.starts_with(r)) {
+                return true;
+            }
+            let b = rest.as_bytes();
+            // `~/` or `~\`
+            if b.len() >= 2 && b[0] == b'~' && matches!(b[1], b'\\' | b'/') {
+                return true;
+            }
+            // `X:\` or `X:/`
+            if b.len() >= 3
+                && b[0].is_ascii_alphabetic()
+                && b[1] == b':'
+                && matches!(b[2], b'\\' | b'/')
+            {
+                return true;
+            }
+            // `\\host\`
+            if let Some(after) = rest.strip_prefix(r"\\") {
+                for (segment, c) in after.chars().enumerate() {
+                    if c == '\\' {
+                        if segment > 0 {
+                            return true;
+                        }
+                        break;
+                    }
+                    if c.is_whitespace() {
+                        break;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    // ── Fixtures ──────────────────────────────────────────────────────────────
+
+    /// A payload exercising every field, every collection and both caps.
+    fn maximal_payload() -> TelemetryPayload {
+        let mut p =
+            TelemetryPayload::header("3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8", "0.2.0-beta.2");
+        for i in 0..MAX_RUNS {
+            p.runs.push(SyncReport {
+                at: TS_MIN + i as i64,
+                succeeded: i % 2 == 0,
+                file_count: 12,
+                device_count: 4,
+                placed_count: 9,
+                unsynced_count: 3,
+                duration_bucket: DurationBucket::B60to120m,
+                run_duration_bucket: RunDurationBucket::B60to300s,
+                min_psr: 15.0,
+                analysis_rate: 12_000,
+                formats: vec![
+                    FormatCount {
+                        format: MediaFormat::Mp4,
+                        count: 8,
+                    },
+                    FormatCount {
+                        format: MediaFormat::Wav,
+                        count: 4,
+                    },
+                ],
+                outcomes: vec![OutcomeCount {
+                    reason: OutcomeReason::DecodeError,
+                    count: 3,
+                }],
+                psr_bands: vec![PsrBandCount {
+                    band: PsrBand::B30to50,
+                    count: 9,
+                }],
+                drift_correction_enabled: true,
+                drift_clips: 7,
+                drift_corrected_clips: 2,
+                mixed_fps: true,
+            });
+        }
+        for i in 0..MAX_CRASHES {
+            p.crashes.push(crash::CrashReport {
+                schema: crash::RECORD_SCHEMA,
+                kind: "panic".into(),
+                at: TS_MIN + i as i64,
+                app_version: "0.2.0-beta.2".into(),
+                os: Os::Macos,
+                // Worst case: the cap in multi-byte characters.
+                message: scrub_free_text(&"æ".repeat(400), None, MESSAGE_MAX_CHARS),
+                location: Some(scrub_free_text(&"ø".repeat(400), None, LOCATION_MAX_CHARS)),
+                backtrace_present: true,
+            });
+        }
+        p
+    }
+
+    fn keys_of(v: &Value) -> Vec<String> {
+        let mut k: Vec<String> = v
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::from)
+            .collect();
+        k.sort();
+        k
+    }
+
+    fn sorted(v: &[&str]) -> Vec<String> {
+        let mut k: Vec<String> = v.iter().map(|s| (*s).to_string()).collect();
+        k.sort();
+        k
+    }
+
+    // ── The tests ─────────────────────────────────────────────────────────────
+
+    /// Every key the client emits, at every level, is exactly the key set the
+    /// Worker demands — no missing field, no extra one.
+    #[test]
+    fn every_key_matches_the_workers_key_lists() {
+        let json: Value = serde_json::to_value(maximal_payload()).unwrap();
+        assert_eq!(keys_of(&json), sorted(PAYLOAD_KEYS), "payload keys drifted");
+        assert_eq!(
+            keys_of(&json["runs"][0]),
+            sorted(RUN_KEYS),
+            "run keys drifted"
+        );
+        assert_eq!(
+            keys_of(&json["crashes"][0]),
+            sorted(CRASH_KEYS),
+            "crash keys drifted"
+        );
+        assert_eq!(
+            keys_of(&json["runs"][0]["formats"][0]),
+            vec!["count".to_string(), "format".to_string()]
+        );
+        assert_eq!(
+            keys_of(&json["runs"][0]["outcomes"][0]),
+            vec!["count".to_string(), "reason".to_string()]
+        );
+        assert_eq!(
+            keys_of(&json["runs"][0]["psrBands"][0]),
+            vec!["band".to_string(), "count".to_string()]
+        );
+        // `app` is the dimension the app registry routes on.
+        assert_eq!(json["app"], "sundaysync");
+        assert_eq!(json["schema"], TELEMETRY_SCHEMA);
+        // `language` and `location` are `Option`s and must serialise as explicit
+        // nulls — the Worker's `nullable` accepts null but `object` still requires
+        // the KEY to be present, so a `skip_serializing_if` here would be a 400.
+        let mut headerless = TelemetryPayload::header(NIL_INSTALL_ID, "0.0.0");
+        headerless.language = None;
+        let v = serde_json::to_value(&headerless).unwrap();
+        assert!(v.as_object().unwrap().contains_key("language"));
+        assert!(v["language"].is_null());
+    }
+
+    /// Every closed enum serialises to a spelling the Worker's `enum()` accepts.
+    /// serde's `snake_case` inserts no underscore between a letter and a digit
+    /// (`B5to15m` → `b5to15m`), which is the exact assumption schema-sync.ts
+    /// documents — so this is where that assumption is checked rather than assumed.
+    #[test]
+    fn every_enum_spelling_is_in_the_workers_vocabulary() {
+        fn wire<T: Serialize>(v: T) -> String {
+            serde_json::to_value(v)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+        for (v, set) in [
+            (wire(Os::Macos), OS_VALUES),
+            (wire(Os::Windows), OS_VALUES),
+            (wire(Os::Linux), OS_VALUES),
+            (wire(Os::Other), OS_VALUES),
+            (wire(Arch::X86_64), ARCH_VALUES),
+            (wire(Arch::Aarch64), ARCH_VALUES),
+            (wire(Arch::Other), ARCH_VALUES),
+        ] {
+            assert!(
+                set.contains(&v.as_str()),
+                "{v:?} is not in the Worker's set"
+            );
+        }
+        // Every MediaFormat the classifier can produce.
+        for ext in [
+            "a.mp4", "a.mov", "a.mkv", "a.avi", "a.mts", "a.m2ts", "a.wav", "a.flac", "a.mp3",
+            "a.aac", "a.m4a", "a.zzz", "a",
+        ] {
+            let v = wire(MediaFormat::from_path(Path::new(ext)));
+            assert!(MEDIA_FORMATS.contains(&v.as_str()), "{ext} → {v:?}");
+        }
+        for r in [
+            UnsyncedReason::LowConfidence,
+            UnsyncedReason::NoAudio,
+            UnsyncedReason::DecodeError,
+            UnsyncedReason::DeviceOverlap,
+        ] {
+            let v = wire(OutcomeReason::from_engine(r));
+            assert!(OUTCOME_REASONS.contains(&v.as_str()), "{v:?}");
+        }
+        // The bucket functions, swept across their whole domain.
+        for secs in [
+            0.0, 299.0, 300.0, 899.0, 900.0, 1799.0, 1800.0, 3599.0, 3600.0, 7199.0, 7200.0, 1e9,
+        ] {
+            let v = wire(DurationBucket::from_seconds(secs));
+            assert!(DURATION_BUCKETS.contains(&v.as_str()), "{secs} → {v:?}");
+        }
+        for ms in [
+            0u128,
+            9_999,
+            10_000,
+            29_999,
+            30_000,
+            59_999,
+            60_000,
+            299_999,
+            300_000,
+            1_000_000_000,
+        ] {
+            let v = wire(RunDurationBucket::from_millis(ms));
+            assert!(RUN_DURATION_BUCKETS.contains(&v.as_str()), "{ms} → {v:?}");
+        }
+        for psr in [
+            0.0, 14.9, 15.0, 19.9, 20.0, 29.9, 30.0, 49.9, 50.0, 99.9, 100.0, 1e6,
+        ] {
+            let v = wire(PsrBand::from_psr(psr));
+            assert!(PSR_BANDS.contains(&v.as_str()), "{psr} → {v:?}");
+        }
+    }
+
+    /// Every cap the Worker enforces holds on the biggest payload the client can
+    /// build, including the free-text lengths counted in CHARS (the Worker counts
+    /// `[...v]`, i.e. Unicode scalars, not UTF-16 units) and the body-size ceiling.
+    #[test]
+    fn every_cap_the_worker_enforces_holds() {
+        let p = maximal_payload();
+        assert_eq!(MESSAGE_MAX_CHARS, WORKER_MESSAGE_MAX);
+        assert_eq!(LOCATION_MAX_CHARS, WORKER_LOCATION_MAX);
+        assert_eq!(VERSION_MAX_CHARS, WORKER_VERSION_MAX);
+
+        // Truncation past the caps still lands inside them.
+        let mut over = p.clone();
+        for i in 0..40 {
+            over.runs.push(over.runs[0].clone());
+            over.crashes.push(over.crashes[0].clone());
+            over.runs.last_mut().unwrap().at = TS_MIN + 1_000 + i;
+        }
+        over.truncate_to_caps();
+        assert_eq!(over.runs.len(), MAX_RUNS);
+        assert_eq!(over.crashes.len(), MAX_CRASHES);
+        // …and keep_last kept the NEWEST.
+        assert_eq!(over.runs.last().unwrap().at, TS_MIN + 1_000 + 39);
+
+        // Free text: at most cap + 1, and the +1 is the ellipsis the Worker allows.
+        for c in &p.crashes {
+            let n = c.message.chars().count();
+            assert!(n <= MESSAGE_MAX_CHARS + 1, "message was {n} chars");
+            if n == MESSAGE_MAX_CHARS + 1 {
+                assert_eq!(c.message.chars().last(), Some('…'));
+            }
+            let loc = c.location.as_deref().unwrap();
+            let n = loc.chars().count();
+            assert!(n <= LOCATION_MAX_CHARS + 1, "location was {n} chars");
+            if n == LOCATION_MAX_CHARS + 1 {
+                assert_eq!(loc.chars().last(), Some('…'));
+            }
+            assert!(c.app_version.chars().count() <= VERSION_MAX_CHARS + 1);
+        }
+        assert!(p.app_version.chars().count() <= VERSION_MAX_CHARS + 1);
+
+        // The per-run histograms cannot outgrow their closed vocabularies: each is
+        // built from a BTreeMap keyed by the enum, so duplicates (a 4xx) are
+        // impossible and the length is bounded by the enum's size.
+        for r in &p.runs {
+            assert!(r.formats.len() <= MEDIA_FORMATS.len());
+            assert!(r.outcomes.len() <= OUTCOME_REASONS.len());
+            assert!(r.psr_bands.len() <= PSR_BANDS.len());
+        }
+
+        // The whole thing fits the Worker's 64 kB body ceiling with room to spare.
+        let bytes = serde_json::to_vec(&p).unwrap().len();
+        assert!(
+            bytes < WORKER_MAX_BODY_BYTES,
+            "the maximal payload is {bytes} bytes, over the Worker's {WORKER_MAX_BODY_BYTES}"
+        );
+    }
+
+    /// Every timestamp the client puts on the wire sits inside the Worker's shared
+    /// window, so a well-clocked machine is never rejected `out_of_range`.
+    #[test]
+    fn timestamps_land_inside_the_workers_window() {
+        let p = maximal_payload();
+        assert!(
+            (TS_MIN..TS_MAX).contains(&p.built_at),
+            "builtAt out of window"
+        );
+        let now = now_ms();
+        assert!(
+            (TS_MIN..TS_MAX).contains(&now),
+            "this machine's clock is outside the Worker's accepted window"
+        );
+    }
+
+    /// ⚠️ THE ONE THAT BITES: the client's scrubber must be at least as aggressive
+    /// as the Worker's path screen, at every LEFT BOUNDARY the screen recognises.
+    ///
+    /// `ABSOLUTE_PATH_RE` anchors on `(^|[\s"'(<[])` — start, whitespace, a quote,
+    /// an open paren, an **angle bracket** or an **open square bracket**. A client
+    /// that only anchors on the first four leaves `[C:\…` and `<\\NAS\…` untouched,
+    /// and every one of those messages is a 400 that silently takes the whole batch
+    /// (runs included) with it.
+    #[test]
+    fn a_scrubbed_message_never_trips_the_workers_path_screen() {
+        let home = Some("/Users/kari");
+        for raw in [
+            // Bare, and after each boundary character the Worker recognises.
+            r"could not open C:\Users\Ola\Opptak\x.mp4",
+            r#"could not open "C:\Users\Ola\Opptak\x.mp4""#,
+            r"could not open (C:\Users\Ola\Opptak\x.mp4)",
+            r"could not open [C:\Users\Ola\Opptak\x.mp4]",
+            r"could not open <C:\Users\Ola\Opptak\x.mp4>",
+            r"sources: [C:\Temp\a.mov, C:\Temp\b.mov]",
+            r"share [\\NAS\Opptak\gudstjeneste.wav] is offline",
+            r"share <\\NAS\Opptak\gudstjeneste.wav> is offline",
+            r"config [~/Opptak/Balkong Kirke] missing",
+            r"config <~\Opptak\Balkong Kirke> missing",
+            "failed [/Users/kari/Opptak/Balkong Kirke/ZOOM0001.WAV]",
+            "failed </Volumes/Backup/Opptak/x.wav>",
+            "failed (/private/var/folders/xy/T/sundaysync-1234/ref.f32)",
+            "failed '/tmp/sundaysync/scratch.bin'",
+            "[/home/rf/opptak/x.mkv] and [/var/tmp/y.mkv]",
+            // The home-replacement route: `~` must not be left bare next to a slash.
+            "kunne ikke åpne /Users/kari/Opptak/Balkong Kirke/ZOOM0001.WAV",
+        ] {
+            let scrubbed = scrub_free_text(raw, home, MESSAGE_MAX_CHARS);
+            assert!(
+                !worker_path_screen_hits(&scrubbed),
+                "the Worker would 400 this as `unscrubbed_path`:\n  raw:      {raw}\n  scrubbed: {scrubbed}"
+            );
+            assert!(
+                scrubbed.contains(PATH_PLACEHOLDER),
+                "nothing was redacted at all:\n  raw:      {raw}\n  scrubbed: {scrubbed}"
+            );
+        }
+
+        // The port itself is honest: it DOES fire on an unscrubbed string, so a
+        // green test above means the scrubber worked, not that the screen is dead.
+        assert!(worker_path_screen_hits(r"open [C:\Users\Ola\x.mp4]"));
+        assert!(worker_path_screen_hits("open /Users/kari/x.wav"));
+        assert!(!worker_path_screen_hits("panicked at src/place.rs:42:9"));
+        assert!(!worker_path_screen_hits(
+            "GET https://telemetry.example/v1 failed"
+        ));
+    }
+
+    /// Every free-text field of a real crash record — message AND location — is
+    /// screen-clean, whichever producer wrote it.
+    #[test]
+    fn every_free_text_field_of_a_crash_is_screen_clean() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        crash::record(
+            dir,
+            "sync_error",
+            r"decode failed for [C:\Users\Ola\Opptak\x.mp4]",
+            // A panic location from a dependency compiled on a Windows runner.
+            Some(
+                r"C:\Users\runneradmin\.cargo\registry\src\index.crates.io-6f17d22bba15001f\x-1.0\src\lib.rs:42:9",
+            ),
+        );
+        crash::record(
+            dir,
+            "frontend",
+            "[TypeError] cannot read </Users/kari/x>",
+            None,
+        );
+        for rec in crash::read_crashes(dir) {
+            assert!(
+                !worker_path_screen_hits(&rec.message),
+                "message would 400: {}",
+                rec.message
+            );
+            if let Some(loc) = &rec.location {
+                assert!(!worker_path_screen_hits(loc), "location would 400: {loc}");
+            }
+        }
+    }
+
+    /// A non-finite `minPsr` serialises as JSON `null`, which the Worker rejects
+    /// with `expected_number` — and that 400 takes the whole batch, not just the
+    /// one run. The projection must therefore never emit one.
+    #[test]
+    fn a_non_finite_min_psr_never_reaches_the_wire() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut result = super::tests::identifying_result();
+            result.parameters.min_psr = bad;
+            let facts = RunFacts {
+                result: &result,
+                run_millis: 1_000,
+                drift_correction_enabled: false,
+            };
+            let report = sync_report(&facts, TS_MIN);
+            let v = serde_json::to_value(&report).unwrap();
+            assert!(
+                v["minPsr"].is_f64() || v["minPsr"].is_i64(),
+                "minPsr serialised as {:?} — the Worker answers 400 `expected_number`",
+                v["minPsr"]
+            );
+        }
+    }
+
+    /// `appVersion` is `freeText(…, 32)` on the Worker: over the cap is a 400 for
+    /// the whole payload. The envelope must cap it rather than trusting whatever
+    /// the bundle identifier happens to say.
+    #[test]
+    fn a_long_app_version_is_capped_to_the_workers_allowance() {
+        let p = TelemetryPayload::header(NIL_INSTALL_ID, &"9".repeat(200));
+        let n = p.app_version.chars().count();
+        assert!(
+            n <= VERSION_MAX_CHARS + 1,
+            "appVersion reached the wire at {n} chars"
+        );
+        if n == VERSION_MAX_CHARS + 1 {
+            assert_eq!(p.app_version.chars().last(), Some('…'));
+        }
     }
 }

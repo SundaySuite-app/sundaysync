@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     home_dir, now_ms, scrub_free_text, Os, LOCATION_MAX_CHARS, MAX_CRASHES, MESSAGE_MAX_CHARS,
+    VERSION_MAX_CHARS,
 };
 
 /// The schema of a [`CrashReport`]. Bumped when a field changes meaning.
@@ -112,7 +113,11 @@ fn persist_panic(info: &PanicHookInfo<'_>) {
         schema: RECORD_SCHEMA,
         kind: "panic".to_string(),
         at: now_ms(),
-        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        app_version: scrub_free_text(
+            env!("CARGO_PKG_VERSION"),
+            home.as_deref(),
+            VERSION_MAX_CHARS,
+        ),
         os: Os::current(),
         message: scrub_free_text(&raw_msg, home.as_deref(), MESSAGE_MAX_CHARS),
         location: raw_loc.map(|l| scrub_free_text(&l, home.as_deref(), LOCATION_MAX_CHARS)),
@@ -132,7 +137,11 @@ pub fn record(telemetry_dir: &Path, kind: &str, message: &str, location: Option<
         schema: RECORD_SCHEMA,
         kind: kind.to_string(),
         at: now_ms(),
-        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        app_version: scrub_free_text(
+            env!("CARGO_PKG_VERSION"),
+            home.as_deref(),
+            VERSION_MAX_CHARS,
+        ),
         os: Os::current(),
         message: scrub_free_text(message, home.as_deref(), MESSAGE_MAX_CHARS),
         location: location.map(|l| scrub_free_text(l, home.as_deref(), LOCATION_MAX_CHARS)),
