@@ -110,6 +110,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// Max retry attempts before an outbox entry is dropped as undeliverable.
 const MAX_ATTEMPTS: u32 = 6;
 
+/// How long a claimed outbox entry stays claimed. Four times [`REQUEST_TIMEOUT`],
+/// so an in-flight POST can never see its own entry come back due.
+const SEND_LEASE_MS: i64 = 60_000;
+
 // ── Data directory (lock-free, for the panic hook) ───────────────────────────
 
 /// The resolved app data dir, cached once. Resolved from [`IDENTIFIER`] via
@@ -949,6 +953,91 @@ fn enqueue(dir: &Path, payload: &TelemetryPayload, now: i64) -> std::io::Result<
     Ok(true)
 }
 
+/// The envelope for a payload about to be QUEUED, or `None` when nothing may be.
+///
+/// Two gates, and the second one is the subtle half:
+///
+/// 1. **Consent must be active at the current scope version.** Nothing is built,
+///    let alone written, without it — not even a header.
+/// 2. **A real install id must exist, and is minted here when it does not.**
+///    "Delete my data" clears the id and deliberately leaves consent alone (D-043:
+///    deleting data and stopping collection are different requests), so
+///    *consent active, no id* is a state the app reaches by design. Filling it
+///    with [`NIL_INSTALL_ID`] — the shared preview id — is not a harmless
+///    placeholder: the endpoint rejects it BY NAME (`nil_install_id`), because
+///    otherwise every previewing install lands in one bucket. That 400 is
+///    permanent, and on the crash-drain path the watermark has already advanced
+///    past the records it carried, so they are lost outright. A deletion retires
+///    the old identity; continued consent means the next report comes from a
+///    fresh, unrelated one.
+///
+/// Returns `None` if the mint cannot be persisted, rather than sending under an id
+/// that will not survive the next launch (which would make every payload look like
+/// a different install).
+fn sendable_header(
+    dir: &Path,
+    state: &mut PersistState,
+    app_version: &str,
+) -> Option<TelemetryPayload> {
+    if !consent_active(&state.consent) {
+        return None;
+    }
+    if state.install_id.is_none() {
+        state.install_id = Some(new_install_id());
+        if write_state(dir, state).is_err() {
+            state.install_id = None;
+            return None;
+        }
+    }
+    let id = state.install_id.as_deref()?;
+    Some(TelemetryPayload::header(id, app_version))
+}
+
+/// The outbox entries due at `now`, each stamped with a delivery LEASE as it is
+/// handed out.
+///
+/// A pump is spawned from three places — launch, the end of a sync, and a
+/// mid-session "yes" — and it deliberately holds no lock across the network call,
+/// so a 15-second POST cannot block the UI's status read. Without a claim, two
+/// overlapping pumps read the same queue and both send it: the Worker stores the
+/// payload twice under two event ids and nothing on either side notices the
+/// double-count. Stamping `next_attempt` forward under the *same* lock that read
+/// the queue makes the claim atomic — and because the outbox is a file, it holds
+/// across two app instances too, which the macOS `open -n` relaunch can briefly
+/// produce.
+///
+/// The lease is a timeout, not a lock: a process killed mid-send leaves its entries
+/// claimed for [`SEND_LEASE_MS`] and they fall due again on their own.
+fn claim_due(dir: &Path, now: i64) -> Vec<OutboxEntry> {
+    let mut queue = read_outbox(dir);
+    let mut claimed = Vec::new();
+    for entry in queue.iter_mut() {
+        if entry.next_attempt <= now {
+            claimed.push(entry.clone());
+            entry.next_attempt = now + SEND_LEASE_MS;
+        }
+    }
+    if !claimed.is_empty() {
+        let _ = write_outbox(dir, &queue);
+    }
+    claimed
+}
+
+/// Whether the entry `id` may still be POSTed **right now** — re-read under the io
+/// lock in the moment before the network call, not once at the top of the pump.
+///
+/// The pump snapshots the queue and then sends entry by entry, up to
+/// [`REQUEST_TIMEOUT`] apiece, which is long enough to outlive the user's decision.
+/// Withdrawing consent and requesting a deletion both purge the outbox; the loop
+/// used to keep posting its owned snapshot regardless, so a payload could leave the
+/// machine after the user said stop — and, after a deletion, still carrying the id
+/// they had just retired. Re-reading here narrows that window to the moment between
+/// this check and `post`, which is as tight as a design holding no lock across an
+/// `.await` can be.
+fn still_sendable(dir: &Path, id: &str) -> bool {
+    consent_active(&read_state(dir).consent) && read_outbox(dir).iter().any(|e| e.id == id)
+}
+
 /// The dedup key: the payload's newest record.
 fn dedup_key(p: &TelemetryPayload) -> String {
     let newest = p
@@ -1200,14 +1289,12 @@ pub fn after_sync(app: &tauri::AppHandle, facts: &RunFacts) {
             Ok(g) => g,
             Err(_) => return,
         };
-        let state = read_state(&dir);
-        if !consent_active(&state.consent) {
-            // Nothing is collected while consent is not active — not even in a
-            // file. The report is simply never built.
+        let mut state = read_state(&dir);
+        // Nothing is collected while consent is not active — not even in a file.
+        // The report is simply never built.
+        let Some(mut payload) = sendable_header(&dir, &mut state, &version) else {
             return;
-        }
-        let id = state.install_id.as_deref().unwrap_or(NIL_INSTALL_ID);
-        let mut payload = TelemetryPayload::header(id, &version);
+        };
         payload.runs.push(sync_report(facts, now));
         enqueue(&dir, &payload, now).unwrap_or(false)
     };
@@ -1253,8 +1340,9 @@ fn drain_launch_crashes(st: &TelemetryInner, dir: &Path, app_version: &str) {
         .map(|c| c.at)
         .max()
         .unwrap_or(state.crash_watermark);
-    let id = state.install_id.as_deref().unwrap_or(NIL_INSTALL_ID);
-    let mut payload = TelemetryPayload::header(id, app_version);
+    let Some(mut payload) = sendable_header(dir, &mut state, app_version) else {
+        return;
+    };
     payload.crashes = crashes;
     if enqueue(dir, &payload, now_ms()).unwrap_or(false) {
         state.crash_watermark = newest;
@@ -1288,15 +1376,23 @@ async fn pump(st: &TelemetryInner, dir: &Path) {
     }
 
     let now = now_ms();
+    // Claimed, not merely read: a concurrent pump (another spawn, or a second app
+    // instance) must not send the same payload again. See [`claim_due`].
     let due: Vec<OutboxEntry> = {
         let _g = lock_state(&st.io, OnPoison::Recover);
-        read_outbox(dir)
-            .into_iter()
-            .filter(|e| e.next_attempt <= now)
-            .collect()
+        claim_due(dir, now)
     };
 
     for entry in due {
+        // Re-checked immediately before the network call rather than once at the
+        // top: consent may have been withdrawn, or the queue purged by a deletion,
+        // while the previous entry was in flight. See [`still_sendable`].
+        {
+            let _g = lock_state(&st.io, OnPoison::Recover);
+            if !still_sendable(dir, &entry.id) {
+                continue;
+            }
+        }
         let outcome = post(client, endpoint, &entry.payload_json).await;
         let _g = lock_state(&st.io, OnPoison::Recover);
         let mut queue = read_outbox(dir);
@@ -1963,6 +2059,179 @@ mod tests {
         assert!(
             consent_active(&after.consent),
             "consent is untouched by a deletion"
+        );
+    }
+
+    /// A minimal queueable payload carrying one crash at `at`.
+    fn queued_payload(at: i64) -> TelemetryPayload {
+        let mut p = TelemetryPayload::header("3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8", "0.2.0");
+        p.crashes.push(crash::CrashReport {
+            schema: crash::RECORD_SCHEMA,
+            kind: "panic".into(),
+            at,
+            app_version: "0.2.0".into(),
+            os: Os::Macos,
+            message: "boom".into(),
+            location: None,
+            backtrace_present: false,
+        });
+        p
+    }
+
+    /// A state file in the shape "consent granted, id minted".
+    fn granted_state() -> PersistState {
+        PersistState {
+            consent: Some(ConsentRecord::decide(true, now_ms())),
+            install_id: Some(new_install_id()),
+            pending_deletions: vec![],
+            crash_watermark: 0,
+        }
+    }
+
+    /// ⚠️ "Delete my data" clears the install id and — by design, D-043 — leaves
+    /// consent ALONE: deleting data and stopping collection are different requests.
+    /// So "consent active, no id" is a state the app reaches on purpose, and the
+    /// next sync used to fill it with [`NIL_INSTALL_ID`] — the shared preview id
+    /// the Worker rejects BY NAME (`nil_install_id`, or the whole fleet lands in one
+    /// bucket). That 400 is permanent, and on the crash-drain path the watermark has
+    /// already moved past those records, so they are gone for good.
+    #[test]
+    fn a_deleted_install_mints_a_fresh_id_instead_of_sending_the_nil_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let retired = new_install_id();
+        let mut state = PersistState {
+            consent: Some(ConsentRecord::decide(true, now_ms())),
+            install_id: None,
+            pending_deletions: vec![retired.clone()],
+            crash_watermark: 0,
+        };
+        write_state(dir, &state).unwrap();
+
+        let payload = sendable_header(dir, &mut state, "0.2.0").expect("consent is active");
+        assert_ne!(
+            payload.install_id, NIL_INSTALL_ID,
+            "the nil id reached a real send path — the Worker 400s it by name and the outbox drops it"
+        );
+        assert_eq!(
+            sanitize_install_id(&payload.install_id),
+            payload.install_id,
+            "and what replaced it must be a real UUID"
+        );
+        assert_ne!(
+            payload.install_id, retired,
+            "a deletion must not be undone by re-minting the id it retired"
+        );
+        // Minted once and persisted, so the next payload is the same install and
+        // not a brand-new one every sync.
+        assert_eq!(
+            read_state(dir).install_id.as_deref(),
+            Some(payload.install_id.as_str())
+        );
+        let again = sendable_header(dir, &mut state, "0.2.0").unwrap();
+        assert_eq!(again.install_id, payload.install_id);
+    }
+
+    /// …and the gate itself still holds: no grant, no envelope, no id minted.
+    #[test]
+    fn without_an_active_grant_nothing_is_queued_and_no_id_is_minted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        for consent in [
+            None,
+            Some(ConsentRecord::decide(false, now_ms())),
+            // A stale grant: the scope may have widened since they answered.
+            Some(ConsentRecord {
+                granted: true,
+                version: CONSENT_VERSION + 1,
+                decided_at: now_ms(),
+            }),
+        ] {
+            let mut state = PersistState {
+                consent,
+                install_id: None,
+                pending_deletions: vec![],
+                crash_watermark: 0,
+            };
+            write_state(dir, &state).unwrap();
+            assert!(sendable_header(dir, &mut state, "0.2.0").is_none());
+            assert_eq!(
+                read_state(dir).install_id,
+                None,
+                "minting an id for someone who has not said yes is itself collection"
+            );
+        }
+    }
+
+    /// ⚠️ A pump is spawned from three places (launch, after a sync, a mid-session
+    /// "yes") and holds no lock across the 15-second POST. Two overlapping pumps
+    /// used to read the same queue and both send it: the Worker stores the payload
+    /// twice under two event ids, and nothing on either side notices the
+    /// double-count. The claim has to be atomic with the read.
+    #[test]
+    fn a_claimed_entry_is_leased_so_two_pumps_cannot_double_send() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let now = 1_800_000_000_000;
+        for i in 0..3 {
+            assert!(enqueue(dir, &queued_payload(100 + i), now).unwrap());
+        }
+
+        let first = claim_due(dir, now);
+        assert_eq!(first.len(), 3);
+        assert!(
+            claim_due(dir, now).is_empty(),
+            "a second, overlapping pump claimed the same entries — every one of them would be POSTed twice"
+        );
+
+        // The lease is a timeout, not a lock: a process killed mid-send must not
+        // strand its payloads forever.
+        let recovered = claim_due(dir, now + SEND_LEASE_MS);
+        assert_eq!(recovered.len(), 3, "an expired lease must free the entry");
+        // Claiming does not lose, reorder or rewrite anything else.
+        assert_eq!(read_outbox(dir).len(), 3);
+        let ids: Vec<&str> = first.iter().map(|e| e.id.as_str()).collect();
+        for e in &recovered {
+            assert!(ids.contains(&e.id.as_str()));
+            assert_eq!(e.attempts, 0, "a claim is not a failed attempt");
+        }
+    }
+
+    /// ⚠️ The pump snapshots the queue and then sends entry by entry, 15 s apiece —
+    /// long enough to outlive the user's decision. Both "no" (which purges the
+    /// outbox) and "delete my data" (which purges it and retires the id) used to
+    /// leave the loop posting its owned snapshot regardless: payloads leaving the
+    /// machine after the user said stop.
+    #[test]
+    fn a_withdrawn_consent_or_a_deletion_stops_a_send_already_in_flight() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut st = granted_state();
+        write_state(dir, &st).unwrap();
+        assert!(enqueue(dir, &queued_payload(100), now_ms()).unwrap());
+        let id = read_outbox(dir)[0].id.clone();
+        assert!(
+            still_sendable(dir, &id),
+            "a queued payload under an active grant"
+        );
+
+        // The user says no between two POSTs.
+        st.consent = Some(ConsentRecord::decide(false, now_ms()));
+        write_state(dir, &st).unwrap();
+        assert!(
+            !still_sendable(dir, &id),
+            "a payload left the machine after consent was withdrawn"
+        );
+
+        // …and a deletion, which purges the outbox and retires the id the queued
+        // payloads carry, stops it for the same reason.
+        st.consent = Some(ConsentRecord::decide(true, now_ms()));
+        write_state(dir, &st).unwrap();
+        assert!(still_sendable(dir, &id));
+        write_outbox(dir, &[]).unwrap();
+        assert!(
+            !still_sendable(dir, &id),
+            "a payload carrying the retired install id left the machine"
         );
     }
 
