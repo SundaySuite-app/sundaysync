@@ -2,7 +2,13 @@
 
 Per [`PLAN.md`](PLAN.md) §13.5, this file always reflects reality. Updated at every phase end.
 
-**Phases 0–6 accepted. 7–8 rebuilt in the UX round and verified launching live. Phase 9 owner-gated.**
+**v1 (phases 0–9) shipped as v0.1.x. The v0.2 program ([V02-PROGRAM.md](V02-PROGRAM.md))
+is at E1–E10 complete — bundled ffmpeg, security hardening, proven 4 GB memory ceiling,
+~4× correlation, drift correction (closes D-016), consent+telemetry client, updater with
+beta ring, Playwright QA in CI, and the real-corpus credibility gate (D-045). v0.2.0-beta.1
+is prepared; the release is owner-gated on the signing secret + tag (see
+[BETA-CHECKLIST-v0.2.md](BETA-CHECKLIST-v0.2.md)). The E8 Worker side and its deploy are
+owner-gated in the shared sunday-telemetry repo.** The v1 record below stands as history.
 
 The UX overhaul (branch `feat/ui-overhaul`) fixed two launch-blocking bugs found in
 review — the missing Tauri 2 capabilities file (dialogs/events/opener were ACL-denied)
