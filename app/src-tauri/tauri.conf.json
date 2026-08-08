@@ -26,6 +26,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "externalBin": ["binaries/ffmpeg", "binaries/ffprobe"],
     "icon": [
@@ -39,5 +40,13 @@
     "category": "Video",
     "shortDescription": "Multicamera audio sync for church and event shoots",
     "longDescription": "Drop in everything from a multicamera shoot and get a synchronized timeline as FCPXML for DaVinci Resolve. Free, local, no timecode required."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENFMEY1OTkxNzM3QkU0RTgKUldUbzVIdHprVmtQenZQTytaUCs3U0ZTNlZkYTQ2eXFST0Jva3M3eXpKOWdqUGdCa29yQzB5eHkK",
+      "endpoints": [
+        "https://updates.sundaysuite.app/v1/update/sundaysync/stable"
+      ]
+    }
   }
 }

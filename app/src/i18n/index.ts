@@ -208,6 +208,25 @@ export const nb = {
   telemetryDeleteConfirm: "Be om at all telemetridata for denne installasjonen slettes?",
   telemetryDeleted: "Forespørsel sendt — dataene slettes.",
   telemetryDeleteFailed: "Kunne ikke sende sletteforespørsel. Prøv igjen senere.",
+
+  // Settings — System / oppdateringer (E9)
+  systemTitle: "System",
+  betaChannelLabel: "Få betaversjoner",
+  betaChannelHint:
+    "Av som standard. Slått på får du tidlige testversjoner før de slippes til alle. De kan være mindre stabile — skru av igjen når som helst for å gå tilbake til vanlige versjoner.",
+  updateCheck: "Se etter oppdatering",
+  updateDownload: (version: string) => `Last ned og installer ${version}`,
+  updateRestart: "Start på nytt og installer",
+  updateIdle: "Trykk «Se etter oppdatering» for å sjekke.",
+  updateChecking: "Ser etter oppdatering …",
+  updateUpToDate: "Du har den nyeste versjonen.",
+  updateAvailable: (version: string) => `Ny versjon tilgjengelig: ${version}.`,
+  updateDownloading: (percent: number) => `Laster ned … ${percent} %`,
+  updateReady: (version: string) =>
+    `${version} er klar. Start appen på nytt for å fullføre.`,
+  updateError: (message: string) => `Kunne ikke oppdatere: ${message}`,
+  updateBannerAvailable: (version: string) =>
+    `Ny versjon ${version} er tilgjengelig. Åpne Innstillinger → System for å installere.`,
 };
 
 export type Strings = typeof nb;
@@ -395,6 +414,24 @@ export const en: Strings = {
   telemetryDeleteConfirm: "Ask for all telemetry data for this installation to be deleted?",
   telemetryDeleted: "Request sent — the data will be deleted.",
   telemetryDeleteFailed: "Could not send the deletion request. Try again later.",
+
+  // Settings — System / updates (E9)
+  systemTitle: "System",
+  betaChannelLabel: "Receive beta versions",
+  betaChannelHint:
+    "Off by default. When on, you get early test builds before they reach everyone. They may be less stable — turn it off again at any time to go back to regular releases.",
+  updateCheck: "Check for updates",
+  updateDownload: (version: string) => `Download and install ${version}`,
+  updateRestart: "Restart and install",
+  updateIdle: "Press “Check for updates” to check.",
+  updateChecking: "Checking for updates …",
+  updateUpToDate: "You are on the latest version.",
+  updateAvailable: (version: string) => `New version available: ${version}.`,
+  updateDownloading: (percent: number) => `Downloading … ${percent}%`,
+  updateReady: (version: string) => `${version} is ready. Restart the app to finish.`,
+  updateError: (message: string) => `Could not update: ${message}`,
+  updateBannerAvailable: (version: string) =>
+    `Version ${version} is available. Open Settings → System to install it.`,
 };
 
 export const dictionaries = { nb, en };
