@@ -213,3 +213,28 @@ jobs:
       - name: npm audit (dev tree, informational)
         working-directory: app
         run: npm audit --audit-level=high || true
+
+  # docs/V02-PROGRAM.md E10: the Playwright QA harness drives the real frontend with the
+  # Tauri IPC mocked (the __TAURI_INTERNALS__ shim), so onboarding/consent/scan/sync/export/
+  # settings flows are gated headlessly without the Rust shell. Its own tsconfig
+  # (app/e2e/tsconfig.json) since the root one only includes src.
+  e2e:
+    name: Playwright e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+      - name: Install Playwright browser
+        working-directory: app
+        run: npx playwright install --with-deps chromium
+      - name: Typecheck e2e
+        working-directory: app
+        run: npm run typecheck:e2e
+      - name: Run Playwright specs
+        working-directory: app
+        run: npm run e2e
