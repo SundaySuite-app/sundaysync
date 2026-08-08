@@ -42,7 +42,10 @@ pub use correlate::{ClipMatch, Correlator, Match, SegmentMatch};
 pub use drift::Drift;
 pub use error::{Error, Result};
 pub use extract::{AnalysisAudio, CachedAudio, ExtractError, Extractor};
-pub use fcpxml::{export as export_fcpxml, Export, ExportError};
+pub use fcpxml::{
+    export as export_fcpxml, export_with_options as export_fcpxml_with_options, Export,
+    ExportError, ExportOptions, TimeMap,
+};
 pub use place::{Candidate, Placed};
 pub use probe::{AudioStream, Probed, VideoStream};
 pub use progress::{CancelToken, NoProgress, Progress, ProgressSink, Stage};

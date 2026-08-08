@@ -80,6 +80,78 @@ fn fixed_result() -> (SyncResult, BTreeMap<PathBuf, f64>) {
     (result, durations)
 }
 
+/// A shoot with one long, badly drifting camera, so the exporter takes the E6 `<timeMap>`
+/// path (D-042). 25 fps (PAL); the camera runs 400 s at 200 ppm — 80 ms of end drift, four
+/// times the 20 ms half-frame gate — so it is corrected, while the recorder is not.
+fn drifting_result() -> (SyncResult, BTreeMap<PathBuf, f64>) {
+    let ppm = -200.0_f64;
+    let cam_seconds = 400.0_f64;
+    let err_ms = ppm * 1e-6 * cam_seconds * 1000.0;
+
+    let mut durations = BTreeMap::new();
+    durations.insert(PathBuf::from("/opptak/Lyd/ZOOM0001.WAV"), 600.0);
+    durations.insert(PathBuf::from("/opptak/Scene/C0001.MP4"), cam_seconds);
+
+    let placements = vec![
+        Placement {
+            file: PathBuf::from("/opptak/Lyd/ZOOM0001.WAV"),
+            device: "rec".into(),
+            offset_seconds: 0.0,
+            confidence: 1.0,
+            psr: f64::INFINITY,
+            drift_ppm: None,
+            projected_end_error_ms: None,
+            chain: Vec::new(),
+            warnings: Vec::new(),
+        },
+        Placement {
+            file: PathBuf::from("/opptak/Scene/C0001.MP4"),
+            device: "cam-a".into(),
+            offset_seconds: 42.0,
+            confidence: 0.9,
+            psr: 40.0,
+            drift_ppm: Some(ppm),
+            projected_end_error_ms: Some(err_ms),
+            chain: Vec::new(),
+            warnings: Vec::new(),
+        },
+    ];
+
+    let result = SyncResult {
+        schema: SCHEMA_VERSION,
+        parameters: Parameters {
+            analysis_rate: 12_000,
+            min_psr: 15.0,
+        },
+        reference: Some(Reference {
+            file: PathBuf::from("/opptak/Lyd/ZOOM0001.WAV"),
+            device: "rec".into(),
+        }),
+        devices: vec![
+            Device {
+                id: "rec".into(),
+                label: "Lyd".into(),
+                kind: DeviceKind::Audio,
+                files: vec![PathBuf::from("/opptak/Lyd/ZOOM0001.WAV")],
+            },
+            Device {
+                id: "cam-a".into(),
+                label: "Scene".into(),
+                kind: DeviceKind::Video,
+                files: vec![PathBuf::from("/opptak/Scene/C0001.MP4")],
+            },
+        ],
+        placements,
+        unsynced: Vec::new(),
+        sequence: Sequence {
+            fps: Rational::new(25, 1).unwrap(),
+            duration_seconds: 600.0,
+        },
+        warnings: Vec::new(),
+    };
+    (result, durations)
+}
+
 #[test]
 fn the_exporter_output_matches_the_golden_file() {
     let (result, durations) = fixed_result();
@@ -112,6 +184,47 @@ fn the_exporter_output_matches_the_golden_file() {
     assert_eq!(
         expected, export.xml,
         "exporter output changed; re-record with UPDATE_GOLDEN=1 if that was intended"
+    );
+}
+
+#[test]
+fn the_drift_corrected_exporter_output_matches_the_golden_file() {
+    // Locks the E6 `<timeMap>` output byte-for-byte (D-042), the same guard the no-drift
+    // golden gives v1. Re-record with `UPDATE_GOLDEN=1` on a deliberate change.
+    let (result, durations) = drifting_result();
+    let export = export_fcpxml(&result, &durations, "Gudstjeneste").unwrap();
+
+    // The clip really did take the correction path — the whole reason this golden exists.
+    assert!(
+        export.xml.contains("<timeMap>"),
+        "no timeMap in the corrected golden"
+    );
+
+    let golden_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/timeline_drift.fcpxml");
+
+    if std::env::var("UPDATE_GOLDEN").is_ok() || !golden_path.exists() {
+        std::fs::create_dir_all(golden_path.parent().unwrap()).unwrap();
+        std::fs::write(&golden_path, &export.xml).unwrap();
+        eprintln!("recorded golden file at {}", golden_path.display());
+        return;
+    }
+
+    let expected = std::fs::read_to_string(&golden_path).unwrap();
+    if expected != export.xml {
+        for (i, (a, b)) in expected.lines().zip(export.xml.lines()).enumerate() {
+            if a != b {
+                eprintln!(
+                    "first difference at line {}:\n  golden: {a}\n  actual: {b}",
+                    i + 1
+                );
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        expected, export.xml,
+        "corrected exporter output changed; re-record with UPDATE_GOLDEN=1 if that was intended"
     );
 }
 

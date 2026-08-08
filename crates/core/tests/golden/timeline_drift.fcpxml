@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.10">
+  <resources>
+    <format id="r0" name="SundaySyncFormat" frameDuration="1/25s" width="1920" height="1080" colorSpace="1-1-1 (Rec. 709)"/>
+    <asset id="a0" name="ZOOM0001" start="0s" duration="15000/25s" hasVideo="0" hasAudio="1" audioSources="1" format="r0">
+      <media-rep kind="original-media" src="file:///opptak/Lyd/ZOOM0001.WAV"/>
+    </asset>
+    <asset id="a1" name="C0001" start="0s" duration="10000/25s" hasVideo="1" hasAudio="1" audioSources="1" format="r0">
+      <media-rep kind="original-media" src="file:///opptak/Scene/C0001.MP4"/>
+    </asset>
+  </resources>
+  <library>
+    <event name="SundaySync">
+      <project name="Gudstjeneste">
+        <sequence format="r0" duration="15000/25s" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+          <spine>
+            <gap name="SundaySync Timeline" offset="0s" duration="15000/25s" start="0s">
+              <asset-clip ref="a0" lane="-1" offset="0/25s" name="ZOOM0001" duration="15000/25s" start="0s" format="r0"/>
+              <asset-clip ref="a1" lane="1" offset="1051/25s" name="C0001" duration="9998/25s" start="0s" format="r0">
+                <timeMap>
+                  <timept time="0s" value="0s" interp="linear"/>
+                  <timept time="19196160/48000s" value="19200000/48000s" interp="linear"/>
+                </timeMap>
+              </asset-clip>
+            </gap>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

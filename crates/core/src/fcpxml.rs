@@ -12,6 +12,7 @@
 //! arithmetic on a chosen timebase, and `f64` never touches a value that ends up in the
 //! file.
 
+use crate::drift::Drift;
 use crate::result::{DeviceKind, SyncResult};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -33,6 +34,43 @@ pub struct SnapResidual {
     pub residual_ms: f64,
 }
 
+/// Export-time behaviour toggles that are not part of the §5 `SyncResult` contract.
+///
+/// Kept separate from `SyncResult` on purpose: the schema is frozen (§0), while these are
+/// UI-driven run switches. The shell reads them off the [`crate::SyncRequest`] it already
+/// holds and passes them here at export time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportOptions {
+    /// E6 / D-042: emit a `<timeMap>` on clips whose measured drift exceeds half a frame,
+    /// correcting the clock drift D-016 flags. `false` reproduces v1 output exactly.
+    pub correct_drift: bool,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        // Matches `SyncRequest::correct_drift`: on by default (D-042).
+        Self {
+            correct_drift: true,
+        }
+    }
+}
+
+/// The retime a corrected clip carries (E6 / D-042).
+///
+/// A `<timeMap>` mapping the clip's timeline span onto its source span. Both endpoints are
+/// integer ticks over [`AUDIO_TIMEBASE`], deliberately *not* frame-aligned: the D-022 spike
+/// proved Resolve preserves a sub-frame `<timept>` exactly (a +250 ppm map round-tripped as
+/// `12003/200s`), and it is the ratio, not the cosmetic frame-quantised clip boundary, that
+/// drives the audio resample.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeMap {
+    /// Timeline end of the clip, i.e. `source_end_ticks × (1 + ppm·1e-6)`, rounded to the
+    /// nearest audio tick. The source plays back at the reciprocal rate (D-019).
+    pub timeline_end_ticks: i64,
+    /// Source end of the clip — its true recorded length in audio ticks.
+    pub source_end_ticks: i64,
+}
+
 /// One exported clip's placement on the timeline.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportedClip {
@@ -41,6 +79,9 @@ pub struct ExportedClip {
     pub offset_ticks: i64,
     pub duration_ticks: i64,
     pub residual: Option<SnapResidual>,
+    /// `Some` when this clip was drift-corrected (E6 / D-042). The reference clip and any
+    /// clip within half a frame of true carry `None` and export exactly as in v1.
+    pub time_map: Option<TimeMap>,
 }
 
 /// The outcome of an export.
@@ -67,7 +108,8 @@ impl std::fmt::Display for ExportError {
     }
 }
 
-/// Renders a `SyncResult` as FCPXML.
+/// Renders a `SyncResult` as FCPXML with the default [`ExportOptions`] (drift correction
+/// on, D-042).
 ///
 /// `durations` supplies each file's length in seconds — the engine knows these from the
 /// probe stage, and the exporter needs them to size clips without re-reading the media.
@@ -76,23 +118,67 @@ pub fn export(
     durations: &BTreeMap<std::path::PathBuf, f64>,
     project_name: &str,
 ) -> Result<Export, ExportError> {
+    export_with_options(result, durations, project_name, ExportOptions::default())
+}
+
+/// Renders a `SyncResult` as FCPXML under explicit [`ExportOptions`].
+///
+/// The shell calls this with `ExportOptions { correct_drift: request.correct_drift }` so the
+/// UI's drift toggle reaches the exporter; the three-argument [`export`] is the same call
+/// with the default (correction on).
+pub fn export_with_options(
+    result: &SyncResult,
+    durations: &BTreeMap<std::path::PathBuf, f64>,
+    project_name: &str,
+    options: ExportOptions,
+) -> Result<Export, ExportError> {
     if result.placements.is_empty() {
         return Err(ExportError::Empty);
     }
 
     let fps = result.sequence.fps;
+    let fps_f64 = fps.as_f64();
     // The sequence timebase is the frame rate: every video position is an integer number
     // of frames, which is what keeps `frameDuration` and every offset exactly consistent.
     let timebase = fps.num();
     let frame_ticks = i64::from(fps.den());
 
+    // E6: a clip's drift correction — if any — decides where its *start* belongs, so it has
+    // to be known before the origin is chosen. `None` means "export as v1 did".
+    let correction_of = |p: &crate::result::Placement| -> Option<Drift> {
+        if !options.correct_drift {
+            return None;
+        }
+        let (Some(ppm), Some(err)) = (p.drift_ppm, p.projected_end_error_ms) else {
+            return None;
+        };
+        let d = Drift {
+            ppm,
+            projected_end_error_ms: err,
+        };
+        // Only clips past half a frame are corrected; the reference carries no drift and so
+        // is never touched. A clip already inside half a frame is left exactly as v1.
+        d.exceeds_half_frame(fps_f64).then_some(d)
+    };
+
+    // The reference-correct start of a clip: its stored offset for an uncorrected clip, or
+    // the median offset re-referenced to the clip start (D-042) for a corrected one.
+    let effective_start = |p: &crate::result::Placement| -> f64 {
+        match correction_of(p) {
+            Some(d) => p.offset_seconds - d.start_reference_shift_seconds(),
+            None => p.offset_seconds,
+        }
+    };
+
     // §6 places clips relative to a timeline that starts at zero, but offsets are
     // relative to the reference and may be negative — a camera rolling before the
     // recorder was armed. Shift the whole timeline so the earliest clip lands at 0.
+    // A corrected clip's *shifted* start is what counts here, so the shift can never push
+    // an offset below zero.
     let origin = result
         .placements
         .iter()
-        .map(|p| p.offset_seconds)
+        .map(&effective_start)
         .fold(f64::INFINITY, f64::min);
     let origin = if origin.is_finite() { origin } else { 0.0 };
 
@@ -132,19 +218,38 @@ pub fn export(
     let mut timeline_end_ticks = 0i64;
 
     for p in &result.placements {
-        let duration_seconds = durations.get(&p.file).copied().unwrap_or(0.0);
-        let position = p.offset_seconds - origin;
+        let source_seconds = durations.get(&p.file).copied().unwrap_or(0.0);
+        let correction = correction_of(p);
+        // A corrected clip occupies `stretch` times its source length on the timeline
+        // (D-042); an uncorrected clip occupies it 1:1.
+        let stretch = correction.map_or(1.0, |d| d.timeline_stretch());
+        let position = effective_start(p) - origin;
 
-        // Snap to the frame grid and record what the snap cost (§6).
+        // Snap the start to the frame grid and record what the snap cost (§6). For a
+        // corrected clip the snapped value is the *re-referenced* start, so the clip's
+        // first sample sits where the reference puts it.
         let exact_frames = position * f64::from(timebase) / f64::from(fps.den());
         let frames = exact_frames.round();
         let residual_ms =
             (frames - exact_frames) * (1000.0 * f64::from(fps.den()) / f64::from(timebase));
 
         let offset_ticks = (frames as i64) * frame_ticks;
+        // The clip's *timeline* length is the stretched span; frame-aligned like every
+        // other duration in the document (D-021). The `<timeMap>` below carries the exact
+        // sub-frame ratio the resample actually uses.
+        let timeline_seconds = source_seconds * stretch;
         let duration_frames =
-            (duration_seconds * f64::from(timebase) / f64::from(fps.den())).ceil() as i64;
+            (timeline_seconds * f64::from(timebase) / f64::from(fps.den())).ceil() as i64;
         let duration_ticks = duration_frames.max(1) * frame_ticks;
+
+        // The retime endpoints, in exact audio ticks (D-042). Rounding to the nearest
+        // 1/48000 s costs at most ~10 µs — four orders of magnitude below the ±10 ms gate,
+        // and dwarfed by the ≥ half-a-frame drift that made the clip eligible at all.
+        let time_map = correction.map(|d| TimeMap {
+            timeline_end_ticks: (source_seconds * d.timeline_stretch() * f64::from(AUDIO_TIMEBASE))
+                .round() as i64,
+            source_end_ticks: (source_seconds * f64::from(AUDIO_TIMEBASE)).round() as i64,
+        });
 
         timeline_end_ticks = timeline_end_ticks.max(offset_ticks + duration_ticks);
 
@@ -155,6 +260,7 @@ pub fn export(
             duration_ticks,
             // Sub-millisecond residuals are noise from float rounding, not a real snap.
             residual: (residual_ms.abs() > 0.001).then_some(SnapResidual { residual_ms }),
+            time_map,
         });
     }
 
@@ -257,14 +363,44 @@ fn render(
             .file
             .file_stem()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        let _ = writeln!(
-            s,
-            r#"              <asset-clip ref="a{i}" lane="{}" offset="{}/{timebase}s" name="{}" duration="{}/{timebase}s" start="0s" format="r0"/>"#,
-            clip.lane,
-            clip.offset_ticks,
-            escape(&name),
-            clip.duration_ticks
-        );
+        // An uncorrected clip is self-closing exactly as in v1; a corrected clip opens so it
+        // can carry its `<timeMap>` child (E6 / D-042). The `<timept>` times are audio ticks,
+        // deliberately a different, finer timebase than the frame-aligned offset/duration —
+        // FCPXML times are independent rationals and Resolve keeps the sub-frame ones exact.
+        match clip.time_map {
+            None => {
+                let _ = writeln!(
+                    s,
+                    r#"              <asset-clip ref="a{i}" lane="{}" offset="{}/{timebase}s" name="{}" duration="{}/{timebase}s" start="0s" format="r0"/>"#,
+                    clip.lane,
+                    clip.offset_ticks,
+                    escape(&name),
+                    clip.duration_ticks
+                );
+            }
+            Some(tm) => {
+                let _ = writeln!(
+                    s,
+                    r#"              <asset-clip ref="a{i}" lane="{}" offset="{}/{timebase}s" name="{}" duration="{}/{timebase}s" start="0s" format="r0">"#,
+                    clip.lane,
+                    clip.offset_ticks,
+                    escape(&name),
+                    clip.duration_ticks
+                );
+                let _ = writeln!(s, "                <timeMap>");
+                let _ = writeln!(
+                    s,
+                    r#"                  <timept time="0s" value="0s" interp="linear"/>"#
+                );
+                let _ = writeln!(
+                    s,
+                    r#"                  <timept time="{}/{AUDIO_TIMEBASE}s" value="{}/{AUDIO_TIMEBASE}s" interp="linear"/>"#,
+                    tm.timeline_end_ticks, tm.source_end_ticks
+                );
+                let _ = writeln!(s, "                </timeMap>");
+                let _ = writeln!(s, "              </asset-clip>");
+            }
+        }
     }
     let _ = writeln!(s, "            </gap>");
     let _ = writeln!(s, "          </spine>");
@@ -649,6 +785,178 @@ mod tests {
         for clip in &e.clips {
             assert!(clip.duration_ticks > 0);
         }
+    }
+
+    /// A recorder plus one long camera carrying a chosen drift. `ppm`/`err` land straight
+    /// onto the camera's `Placement`, exactly as the engine would after `drift::measure`.
+    fn drifting_sample(ppm: f64, source_seconds: f64) -> (SyncResult, BTreeMap<PathBuf, f64>) {
+        let err_ms = ppm * 1e-6 * source_seconds * 1000.0;
+        let mut durations = BTreeMap::new();
+        durations.insert(PathBuf::from("/media/rec.wav"), source_seconds + 10.0);
+        durations.insert(PathBuf::from("/media/cam.mp4"), source_seconds);
+
+        let result = SyncResult {
+            schema: SCHEMA_VERSION,
+            parameters: Parameters {
+                analysis_rate: 12_000,
+                min_psr: 15.0,
+            },
+            reference: Some(Reference {
+                file: PathBuf::from("/media/rec.wav"),
+                device: "rec".into(),
+            }),
+            devices: vec![
+                Device {
+                    id: "rec".into(),
+                    label: "Zoom".into(),
+                    kind: DeviceKind::Audio,
+                    files: vec![PathBuf::from("/media/rec.wav")],
+                },
+                Device {
+                    id: "cam".into(),
+                    label: "A".into(),
+                    kind: DeviceKind::Video,
+                    files: vec![PathBuf::from("/media/cam.mp4")],
+                },
+            ],
+            placements: vec![
+                Placement {
+                    file: PathBuf::from("/media/rec.wav"),
+                    device: "rec".into(),
+                    offset_seconds: 0.0,
+                    confidence: 1.0,
+                    psr: f64::INFINITY,
+                    drift_ppm: None,
+                    projected_end_error_ms: None,
+                    chain: vec![],
+                    warnings: vec![],
+                },
+                Placement {
+                    file: PathBuf::from("/media/cam.mp4"),
+                    device: "cam".into(),
+                    offset_seconds: 20.0,
+                    confidence: 0.9,
+                    psr: 50.0,
+                    drift_ppm: Some(ppm),
+                    projected_end_error_ms: Some(err_ms),
+                    chain: vec![],
+                    warnings: vec![],
+                },
+            ],
+            unsynced: vec![],
+            sequence: Sequence {
+                fps: Rational::new(25, 1).unwrap(),
+                duration_seconds: source_seconds + 10.0,
+            },
+            warnings: vec![],
+        };
+        (result, durations)
+    }
+
+    #[test]
+    fn a_clip_past_half_a_frame_gets_a_timemap_and_a_small_drift_does_not() {
+        // 100 ppm over 400 s is 40 ms of end error — twice the 20 ms half-frame at 25 fps,
+        // so it is corrected. The reference (no drift) and a hypothetical small-drift clip
+        // are not.
+        let (r, d) = drifting_sample(-100.0, 400.0);
+        let e = export(&r, &d, "Service").unwrap();
+
+        assert!(
+            e.xml.contains("<timeMap>"),
+            "the drifting clip must be retimed"
+        );
+        assert!(e
+            .xml
+            .contains(r#"<timept time="0s" value="0s" interp="linear"/>"#));
+        // Exactly one clip is corrected: the camera, not the reference.
+        assert_eq!(e.xml.matches("<timeMap>").count(), 1);
+        assert_eq!(e.clips.iter().filter(|c| c.time_map.is_some()).count(), 1);
+        let cam = e
+            .clips
+            .iter()
+            .find(|c| c.file.ends_with("cam.mp4"))
+            .unwrap();
+        let tm = cam.time_map.expect("cam corrected");
+        // The ratio is the stretch 1 + ppm·1e-6 = 0.9999, carried as an exact rational.
+        assert_eq!(tm.source_end_ticks, 400 * i64::from(AUDIO_TIMEBASE));
+        assert_eq!(tm.timeline_end_ticks, 19_198_080);
+        let ratio = tm.timeline_end_ticks as f64 / tm.source_end_ticks as f64;
+        assert!((ratio - (1.0 - 100e-6)).abs() < 1e-9, "ratio {ratio}");
+
+        // A clip comfortably inside half a frame is never retimed.
+        let (r2, d2) = drifting_sample(-10.0, 60.0); // 0.6 ms of drift
+        let e2 = export(&r2, &d2, "Service").unwrap();
+        assert!(!e2.xml.contains("<timeMap>"));
+        assert!(e2.clips.iter().all(|c| c.time_map.is_none()));
+    }
+
+    #[test]
+    fn the_toggle_off_reproduces_v1_output_with_no_timemap() {
+        // correct_drift = false is the UI's off switch: even a wildly drifting clip exports
+        // exactly as v1 — no `<timeMap>`, self-closing asset-clips, 1:1 duration.
+        let (r, d) = drifting_sample(-500.0, 400.0); // 200 ms of drift, well past the gate
+        let off = export_with_options(
+            &r,
+            &d,
+            "Service",
+            ExportOptions {
+                correct_drift: false,
+            },
+        )
+        .unwrap();
+        assert!(!off.xml.contains("<timeMap>"));
+        assert!(off.clips.iter().all(|c| c.time_map.is_none()));
+        // And the camera's duration is the plain source length (1:1), not stretched.
+        let cam = off
+            .clips
+            .iter()
+            .find(|c| c.file.ends_with("cam.mp4"))
+            .unwrap();
+        assert_eq!(cam.duration_ticks, 400 * i64::from(25)); // 400 s × 25 fps × (1/25 den)
+
+        // On the same input, correction on *does* retime it.
+        let on = export(&r, &d, "Service").unwrap();
+        assert!(on.xml.contains("<timeMap>"));
+    }
+
+    #[test]
+    fn a_corrected_clips_end_lands_where_the_reference_puts_it() {
+        // The property the whole stage exists for. `ppm` is d(offset)/d(position), so source
+        // position p belongs at reference time offset_0 + (1+ppm·1e-6)·p. Reconstruct that
+        // ideal end from the emitted geometry and confirm the retimed clip hits it, while a
+        // 1:1 clip of the same source would be a full drift out.
+        let ppm = -120.0_f64;
+        let l = 400.0_f64;
+        let (r, d) = drifting_sample(ppm, l);
+        let e = export(&r, &d, "Service").unwrap();
+        let cam = e
+            .clips
+            .iter()
+            .find(|c| c.file.ends_with("cam.mp4"))
+            .unwrap();
+        let tm = cam.time_map.expect("corrected");
+
+        let tb = f64::from(AUDIO_TIMEBASE);
+        // The clip start on the timeline, in seconds (offset is in the 25-fps timebase).
+        let start_s = cam.offset_ticks as f64 / 25.0;
+        // Retimed end = start + timeline span from the timeMap.
+        let corrected_end = start_s + tm.timeline_end_ticks as f64 / tb;
+        // A 1:1 export of the same source from the same start.
+        let uncorrected_end = start_s + tm.source_end_ticks as f64 / tb;
+        // Reference-correct end: the clip's first sample sits at `start_s` (the correction
+        // re-referenced it there), and the far end is (1+ppm·1e-6) further along.
+        let ideal_end = start_s + (1.0 + ppm * 1e-6) * l;
+
+        assert!(
+            (corrected_end - ideal_end).abs() < 0.001,
+            "corrected end {corrected_end} vs ideal {ideal_end}"
+        );
+        // The drift this removes is real and large: ~48 ms here.
+        assert!(
+            (uncorrected_end - ideal_end).abs() > 0.010,
+            "uncorrected error only {} s",
+            (uncorrected_end - ideal_end).abs()
+        );
     }
 
     #[test]
