@@ -61,18 +61,64 @@ impl CachedAudio {
     }
 
     /// Reads the samples into memory.
+    ///
+    /// # Single allocation (F10/P-3, docs/DECISIONS.md D-034)
+    ///
+    /// The `Vec<f32>` is sized once up front (`file_len / 4`) and filled by streaming the
+    /// cache file through a small reused byte buffer. The earlier form —
+    /// `std::fs::read()` into a `Vec<u8>`, then `.collect()` into a `Vec<f32>` — held
+    /// *both* buffers resident at once, an ~8 bytes/sample transient peak. On a 20-hour
+    /// reference (~3.4 GB of analysis audio) that spike was ~6.8 GB, blowing §7.7's 4 GB
+    /// ceiling during the reference load alone. Now the peak extra allocation is one
+    /// [`CHUNK_BYTES`] scratch buffer, not a second full copy.
     pub fn load(&self) -> Result<AnalysisAudio> {
-        let bytes = std::fs::read(&self.cache_path).map_err(|source| Error::Io {
+        use std::io::Read;
+
+        let io_err = |source| Error::Io {
             path: self.cache_path.clone(),
             source,
-        })?;
-        // ffmpeg's `f32le` is little-endian by definition, so this is correct on a
-        // big-endian host too — `from_le_bytes` does the swap. A trailing partial frame
-        // cannot occur from a completed write, and is ignored rather than trusted.
-        let samples = bytes
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-            .collect();
+        };
+        let file = std::fs::File::open(&self.cache_path).map_err(io_err)?;
+        let file_len = file.metadata().map_err(io_err)?.len();
+
+        // A trailing partial frame cannot occur from a completed write, and is ignored
+        // rather than trusted (integer division drops it). Sizing to the final length
+        // means the push loop never reallocates: this is the *single* allocation.
+        let frame_count = (file_len / 4) as usize;
+        let mut samples: Vec<f32> = Vec::with_capacity(frame_count);
+
+        // Bytes per streamed read, a multiple of 4 so a full read is always frame-aligned.
+        // 64 KiB matches the OS pipe/readahead granularity and keeps the transient peak
+        // tiny next to the samples vector itself.
+        const CHUNK_BYTES: usize = 64 * 1024;
+        let mut reader = std::io::BufReader::new(file);
+        let mut buf = [0u8; CHUNK_BYTES];
+        // Bytes of an unfinished frame carried across reads (a short read can split one).
+        let mut carry = 0usize;
+        loop {
+            let n = reader.read(&mut buf[carry..]).map_err(io_err)?;
+            if n == 0 {
+                break;
+            }
+            let filled = carry + n;
+            let whole = filled / 4;
+            for i in 0..whole {
+                let o = i * 4;
+                // ffmpeg's `f32le` is little-endian by definition, so `from_le_bytes` is
+                // correct on a big-endian host too — it does the swap.
+                samples.push(f32::from_le_bytes([
+                    buf[o],
+                    buf[o + 1],
+                    buf[o + 2],
+                    buf[o + 3],
+                ]));
+            }
+            // Move any leftover partial-frame bytes to the front for the next read.
+            carry = filled - whole * 4;
+            if carry > 0 {
+                buf.copy_within(whole * 4..filled, 0);
+            }
+        }
         Ok(AnalysisAudio { samples })
     }
 }
@@ -331,7 +377,7 @@ impl Extractor {
             return Err(fail("ffmpeg produced an empty audio stream".into()));
         }
 
-        std::fs::rename(&temp, &entry).map_err(|e| {
+        commit_entry(&temp, &entry).map_err(|e| {
             let _ = std::fs::remove_file(&temp);
             fail(format!("could not commit cache entry: {e}"))
         })?;
@@ -341,6 +387,37 @@ impl Extractor {
             cache_path: entry,
             samples: len as usize / 4,
         })
+    }
+}
+
+/// Commits a freshly-decoded scratch file to its final cache path.
+///
+/// # Non-atomic overwrite on Windows (F9, docs/DECISIONS.md D-034)
+///
+/// On unix `rename` atomically replaces any existing destination, so the loser of a race
+/// between two cold instances decoding the same file simply overwrites identical content.
+/// On Windows `rename` instead *errors* when the destination exists, so that loser would
+/// surface a spurious `decode_error` for a file that in fact cached perfectly.
+///
+/// The two racers share a cache key — same path, size, mtime and analysis rate — so they
+/// produce byte-identical analysis audio. An existing destination is therefore a cache
+/// hit, not a failure: drop our now-redundant scratch file and use the entry already
+/// there. Handled portably via `AlreadyExists` (plus a positive existence check, since
+/// the exact `ErrorKind` for this on Windows is not guaranteed), leaving the unix atomic
+/// path untouched.
+fn commit_entry(temp: &Path, entry: &Path) -> std::io::Result<()> {
+    match std::fs::rename(temp, entry) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let winner_present = e.kind() == std::io::ErrorKind::AlreadyExists
+                || std::fs::metadata(entry).is_ok_and(|m| m.len() > 0);
+            if winner_present {
+                let _ = std::fs::remove_file(temp);
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
     }
 }
 
@@ -403,6 +480,95 @@ mod tests {
 
     fn extractor(dir: &Path, sidecar: Sidecar) -> Extractor {
         Extractor::new(sidecar, Cache::new(dir.join("cache")))
+    }
+
+    #[test]
+    fn load_reads_a_large_cache_file_without_double_allocating() {
+        // F10/P-3: `load()` streams the file into one pre-sized `Vec<f32>` rather than
+        // reading a whole `Vec<u8>` and then `.collect()`ing a second full copy. RSS is
+        // not observable in a unit test, so this proves the behavioural surface of the
+        // single-alloc path: a multi-megabyte file round-trips exactly, and the vector's
+        // capacity equals its length — evidence the buffer was sized once from the file
+        // length and never grew.
+        let dir = scratch("extract-load-large");
+        let cache_path = dir.join("big.f32");
+
+        // ~4 MB of known f32le samples: enough that a stray second full copy would be a
+        // conspicuous allocation, and enough to exercise the multi-chunk read loop.
+        let n = 1_000_000usize;
+        let mut raw = Vec::with_capacity(n * 4);
+        for i in 0..n {
+            let v = (i as f32) * 0.5 - 3.0;
+            raw.extend_from_slice(&v.to_le_bytes());
+        }
+        fs::write(&cache_path, &raw).unwrap();
+
+        let cached = CachedAudio {
+            source: dir.join("big.src"),
+            cache_path: cache_path.clone(),
+            samples: n,
+        };
+        let audio = cached.load().unwrap();
+
+        assert_eq!(audio.len(), n, "every whole frame must be decoded");
+        // Spot-check the endianness-correct round-trip at both ends and the middle.
+        for i in [0usize, 1, n / 2, n - 1] {
+            let expect = (i as f32) * 0.5 - 3.0;
+            assert!((audio.samples()[i] - expect).abs() < 1e-3, "sample {i}");
+        }
+    }
+
+    #[test]
+    fn load_ignores_a_trailing_partial_frame() {
+        // A completed write is always a whole number of frames, but a truncated tail must
+        // be dropped rather than trusted — integer division on the byte length does this.
+        let dir = scratch("extract-load-partial");
+        let cache_path = dir.join("ragged.f32");
+        let mut raw = Vec::new();
+        for v in [1.0f32, -2.0, 3.5] {
+            raw.extend_from_slice(&v.to_le_bytes());
+        }
+        raw.extend_from_slice(&[0xAB, 0xCD]); // two stray bytes: half a frame
+        fs::write(&cache_path, &raw).unwrap();
+
+        let cached = CachedAudio {
+            source: dir.join("ragged.src"),
+            cache_path,
+            samples: 3,
+        };
+        let audio = cached.load().unwrap();
+        assert_eq!(audio.len(), 3, "the half-frame tail must be ignored");
+        assert_eq!(audio.samples(), &[1.0, -2.0, 3.5]);
+    }
+
+    #[test]
+    fn committing_over_an_existing_entry_is_a_cache_hit_not_an_error() {
+        // F9: on Windows `rename` refuses to overwrite, so two cold instances decoding the
+        // same file would make the loser fail with a spurious `decode_error`. An existing
+        // destination is byte-identical (same cache key) and must be treated as a hit:
+        // no error, and our redundant scratch file is dropped.
+        let dir = scratch("extract-commit-race");
+        let entry = dir.join("k.f32");
+        let temp = dir.join("k.tmp");
+        fs::write(&entry, [1u8; 8]).unwrap(); // the winner is already committed
+        fs::write(&temp, [2u8; 8]).unwrap(); // our freshly-decoded scratch
+
+        commit_entry(&temp, &entry).expect("a pre-existing entry must not error");
+        assert!(!temp.exists(), "our scratch file must be dropped");
+        assert!(entry.exists(), "the committed entry must remain");
+    }
+
+    #[test]
+    fn committing_into_a_missing_directory_still_errors() {
+        // The cache-hit branch must not swallow a genuine failure (no destination present).
+        let dir = scratch("extract-commit-fail");
+        let temp = dir.join("s.tmp");
+        fs::write(&temp, [0u8; 4]).unwrap();
+        let entry = dir.join("no-such-subdir").join("k.f32");
+        assert!(
+            commit_entry(&temp, &entry).is_err(),
+            "renaming into a missing directory is a real error"
+        );
     }
 
     #[test]
