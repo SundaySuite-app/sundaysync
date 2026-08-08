@@ -20,9 +20,14 @@ Funn → patch-release på beta-ringen til lista er ren → promoter `v0.2.0` ti
 
 ## Installasjon (macOS)
 
+> **beta.2+ er kodesignert** (Developer ID Richard Fossland, verifisert med codesign/spctl
+> 2026-08-08 natt): appen åpnes via høyreklikk → Åpne eller Systeminnstillinger →
+> «Åpne likevel». Den gamle `xattr -cr`-workarounden trengs KUN for den usignerte beta.1.
+> Notarisering gjenstår (Apple-avtalen — felles suite-blokker).
+
 - [ ] Fersk nedlasting på en maskin **uten** ffmpeg i PATH (eller
       `sudo mv /opt/homebrew/bin/ffmpeg{,.bak}` midlertidig) → appen åpner
-      (høyreklikk → Åpne; ikke notarisert) → onboarding steg 3 viser grønt «innebygd».
+      (høyreklikk → Åpne) → onboarding steg 3 viser grønt «innebygd».
 - [ ] **UI rendrer under CSP** (E3-resten): ingen blank/hvit flate noe sted —
       onboarding, kilder, innstillinger, resultat.
 
