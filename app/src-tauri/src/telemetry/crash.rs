@@ -14,9 +14,18 @@
 //! It runs on an ARBITRARY thread, possibly while unwinding. So: no `AppHandle`
 //! (the directory is resolved lock-free via [`super::telemetry_dir`], which caches
 //! a `dirs`-derived path in a `OnceLock`); no lock this process holds elsewhere
-//! (the ring's ordering comes from the filename, not shared state); and it must
-//! not panic (the whole body runs inside `catch_unwind` — a panic in a panic hook
-//! aborts the process).
+//! (the ring's ordering comes from the filename, not shared state); and — the one
+//! that is not negotiable — **it must not panic**.
+//!
+//! ⚠️ The `catch_unwind` in [`install_hook`] does NOT make that negotiable, and an
+//! earlier version of this comment implied it did. The hook is called with the
+//! runtime's panic count already at one, so a panic raised *inside* it takes the
+//! count to two and std aborts the process on the spot ("panicked while processing
+//! panic") — before any unwinding starts, which is what `catch_unwind` would need
+//! to catch. It is kept as a cheap outer guard, but the actual guarantee is that
+//! nothing in the body can panic: no `unwrap`, no `expect`, no indexing, no
+//! arithmetic that can overflow. Every fallible step here is `let _ =` or
+//! `unwrap_or_else` on purpose, and a new one must be too.
 //!
 //! ## Privacy
 //!
@@ -85,7 +94,9 @@ fn crash_dir() -> Option<PathBuf> {
 pub fn install_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        // A panic inside a panic hook ABORTS; everything here is best-effort.
+        // Best-effort, and see the module docs: this guard cannot catch a panic
+        // raised inside `persist_panic` — std aborts first. The body is written
+        // not to panic.
         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| persist_panic(info)));
         previous(info);
     }));

@@ -1090,6 +1090,31 @@ fn classify(status: u16) -> SendOutcome {
     }
 }
 
+/// Turn one DELETE status into an outbox decision — the same contract as
+/// [`classify`], with one deliberate difference.
+///
+/// A deletion is the USER'S OWN REQUEST, and the parked id is the only record that
+/// it is still owed; clearing it is forgetting it forever. So the question is not
+/// "is this 4xx retryable" but "does this status say something about the ID, or
+/// about this BUILD?":
+///
+/// - `400 invalid_install_id` / `404` — the id is the problem, and no amount of
+///   retrying makes a malformed or unknown id deletable. Clear it.
+/// - **`401` / `403` — the write key is the problem** (`src/index.ts` answers a
+///   missing or wrong `x-write-key` with 401, on the delete route exactly as on
+///   ingest). That is a misconfigured build, not an undeletable id, and treating it
+///   as permanent abandons the deletion the user asked for. It stays owed and is
+///   retried, which is what "we will delete this" means.
+/// - Everything else follows [`classify`]: 2xx clears it (the Worker answers 200
+///   even for an app with no tables yet, precisely so a parked id can drain).
+fn classify_delete(status: u16) -> SendOutcome {
+    if status == 401 || status == 403 {
+        SendOutcome::Transient(format!("endpoint refused the write key: {status}"))
+    } else {
+        classify(status)
+    }
+}
+
 /// The retry backoff for `attempts` failures so far: 1, 2, 4, … minutes, capped.
 fn backoff_ms(attempts: u32) -> i64 {
     let minutes = 1u64 << attempts.min(8);
@@ -1102,11 +1127,25 @@ fn backoff_ms(attempts: u32) -> i64 {
 /// env (dev/CI) falling back to values baked in at release. `None` means this
 /// build has no endpoint — reports queue locally and nothing reaches the network,
 /// which is exactly the state before an endpoint is configured.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Endpoint {
     ingest_url: String,
     base_url: String,
     write_key: String,
+}
+
+/// Debug is written by hand, not derived, for one reason: `write_key` is a
+/// SECRET. A derived `Debug` puts it one `{:?}` — one `dbg!`, one `eprintln!` in a
+/// future error path, one panic message — away from a log file or a crash record.
+/// The url is what a reader ever needs; the key is rendered as its presence.
+impl std::fmt::Debug for Endpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Endpoint")
+            .field("ingest_url", &self.ingest_url)
+            .field("base_url", &self.base_url)
+            .field("write_key", &"<redacted>")
+            .finish()
+    }
 }
 
 impl Endpoint {
@@ -1465,11 +1504,12 @@ async fn drain_deletions(
             .send()
             .await
         {
-            Ok(r) => classify(r.status().as_u16()),
+            Ok(r) => classify_delete(r.status().as_u16()),
             Err(_) => SendOutcome::Transient("could not reach the endpoint".to_string()),
         };
-        // Permanent OR Ok both clear it: a 4xx on a delete means the id is not
-        // deletable (or already gone), and retrying cannot change that.
+        // Permanent OR Ok both clear it: the id is either gone or not deletable,
+        // and retrying cannot change that. A refused write key is NOT one of those
+        // — see [`classify_delete`].
         if !matches!(outcome, SendOutcome::Transient(_)) {
             let _g = lock_state(&st.io, OnPoison::Recover);
             let mut state = read_state(dir);
@@ -1895,6 +1935,47 @@ mod tests {
         assert!(matches!(classify(408), SendOutcome::Transient(_)));
         assert!(matches!(classify(500), SendOutcome::Transient(_)));
         assert!(matches!(classify(503), SendOutcome::Transient(_)));
+    }
+
+    /// ⚠️ A deletion is the user's own request, and the parked id is the only
+    /// record that it is still owed. The endpoint answers a missing or wrong
+    /// `x-write-key` with **401** on the delete route exactly as on ingest
+    /// (`sunday-telemetry/src/index.ts`), and treating that as permanent quietly
+    /// abandons the deletion instead of retrying it. The question is whether the
+    /// status is about the ID or about this BUILD.
+    #[test]
+    fn a_delete_is_only_forgotten_when_the_id_is_the_problem() {
+        // About the build — still owed.
+        assert!(matches!(classify_delete(401), SendOutcome::Transient(_)));
+        assert!(matches!(classify_delete(403), SendOutcome::Transient(_)));
+        // About the id — no retry can make it deletable.
+        assert!(matches!(classify_delete(400), SendOutcome::Permanent(_)));
+        assert!(matches!(classify_delete(404), SendOutcome::Permanent(_)));
+        assert!(matches!(classify_delete(410), SendOutcome::Permanent(_)));
+        // Done. (The Worker answers 200 even for an app with no tables yet, so a
+        // parked id from a machine that never sent anything still drains.)
+        assert_eq!(classify_delete(200), SendOutcome::Ok);
+        // And the shared retryable statuses stay retryable.
+        assert!(matches!(classify_delete(429), SendOutcome::Transient(_)));
+        assert!(matches!(classify_delete(503), SendOutcome::Transient(_)));
+    }
+
+    /// The write key is a secret. A derived `Debug` puts it one `{:?}` away from a
+    /// log line or a crash record, and a crash record is a thing this app UPLOADS.
+    #[test]
+    fn the_write_key_never_appears_in_a_debug_rendering() {
+        let key = "wk-not-a-real-key-0123456789";
+        let e = Endpoint::normalize(
+            Some("https://telemetry.sundaysuite.app".into()),
+            Some(key.into()),
+        )
+        .unwrap();
+        let rendered = format!("{e:?}");
+        assert!(!rendered.contains(key), "the write key leaked: {rendered}");
+        assert!(
+            rendered.contains("telemetry.sundaysuite.app"),
+            "…while the url, which is what a reader needs, is still there: {rendered}"
+        );
     }
 
     #[test]
