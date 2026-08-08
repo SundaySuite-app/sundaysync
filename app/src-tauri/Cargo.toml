@@ -25,6 +25,23 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# E7 telemetry (anonymous, consent-gated). `uuid`/`dirs`/`tempfile` are already
+# resolved in the tree; naming them directly adds features, not crates.
+#
+# `reqwest` uses NATIVE-TLS deliberately, NOT the reqwest default. In reqwest 0.13
+# `default-tls = ["rustls"]`, and rustls pulls `aws-lc-rs`/`ring`, whose non-SPDX
+# licenses ("OpenSSL", a bare LICENSE file) would fail `cargo deny` — deny.toml
+# has no `[licenses.clarify]` for them. native-tls' backends (Security.framework
+# on macOS, SChannel on Windows, the `openssl` crate on Linux) are all on the
+# allow-list. Trade-off: a Linux release build links the system OpenSSL (present
+# on the ubuntu CI runners); switch to the `native-tls-vendored` feature if a
+# build target lacks it.
+reqwest = { version = "0.13", default-features = false, features = ["native-tls"] }
+uuid = { version = "1", features = ["v4"] }
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints.rust]
 unsafe_code = "forbid"

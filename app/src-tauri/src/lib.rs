@@ -5,6 +5,8 @@
 //! move work off the UI thread, translate progress into events, and hand results to the
 //! frontend as JSON.
 
+mod telemetry;
+
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
@@ -126,7 +128,7 @@ impl ProgressSink for EventSink {
 /// one of these, so poison behaviour is uniform instead of the F1 mix where `cancel_sync`
 /// silently no-opped while `export_*` errored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OnPoison {
+pub(crate) enum OnPoison {
     /// Recover the guard via [`std::sync::PoisonError::into_inner`]. Safe for the cancel
     /// token slot, the scan-cancel slot and the sidecar cache: a torn `Option<_>` there
     /// still holds a value that is fine to read or replace, and — the F1 headline — the
@@ -139,7 +141,10 @@ enum OnPoison {
 }
 
 /// The single lock-acquisition helper (D-036). See [`OnPoison`] for the policy.
-fn lock_state<T>(slot: &Mutex<T>, on_poison: OnPoison) -> Result<MutexGuard<'_, T>, String> {
+pub(crate) fn lock_state<T>(
+    slot: &Mutex<T>,
+    on_poison: OnPoison,
+) -> Result<MutexGuard<'_, T>, String> {
     match slot.lock() {
         Ok(guard) => Ok(guard),
         Err(poisoned) => match on_poison {
@@ -372,8 +377,11 @@ fn run_sync(
         request.reference_override.as_deref(),
     );
 
-    let sink = EventSink::new(app, "sync:progress");
+    let correct_drift = request.correct_drift;
+    let sink = EventSink::new(app.clone(), "sync:progress");
+    let started = std::time::Instant::now();
     let outcome = sync_with_durations(&request, &sink, &cancel);
+    let run_millis = started.elapsed().as_millis();
 
     state.clear_cancel();
 
@@ -383,11 +391,26 @@ fn run_sync(
                 result: result.clone(),
                 durations: durations.clone(),
                 inputs_hash,
-                correct_drift: request.correct_drift,
+                correct_drift,
             });
+            // E7: record this completed run as anonymous, bucketed telemetry
+            // (queued and sent only under active consent).
+            telemetry::after_sync(
+                &app,
+                &telemetry::RunFacts {
+                    result: &result,
+                    run_millis,
+                    drift_correction_enabled: correct_drift,
+                },
+            );
             Ok(SyncOutcome { result, durations })
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => {
+            // E7: a failed run is an error class worth counting — scrubbed, local
+            // until a consented drain picks it up.
+            telemetry::record_sync_error(&e.to_string());
+            Err(e.to_string())
+        }
     }
 }
 
@@ -714,9 +737,14 @@ fn default_cache_dir() -> Result<PathBuf, String> {
 /// # Panics
 /// Only if Tauri itself cannot start, which is not a recoverable condition.
 pub fn run() {
+    // E7: arm the crash panic hook as early as possible, before any plugin setup,
+    // so a panic during startup already leaves a scrubbed record on disk.
+    telemetry::install_crash_hook();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(telemetry::TelemetryState::new())
         .setup(|app| {
             // Resolved once, eagerly: the first sync should not pay for two `-version`
             // spawns, and a failure here is not fatal — the state stays empty and every
@@ -751,6 +779,10 @@ pub fn run() {
                 }
             });
 
+            // E7: drain any crashes from the last run into the outbox (under
+            // consent) and pump the queue + owed deletions. Off the main thread.
+            telemetry::on_launch(&app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -765,6 +797,11 @@ pub fn run() {
             export_diagnostics,
             check_sidecar,
             default_cache_dir,
+            telemetry::telemetry_status,
+            telemetry::set_telemetry_consent,
+            telemetry::telemetry_preview,
+            telemetry::report_frontend_error,
+            telemetry::request_telemetry_deletion,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SundaySync");
