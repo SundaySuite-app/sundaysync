@@ -177,8 +177,16 @@ pub struct Extractor {
     /// once. A wall-clock comparison would be a flaky proxy for the same claim.
     in_flight: AtomicUsize,
     peak_in_flight: AtomicUsize,
-    nonce: AtomicU64,
 }
+
+/// Process-wide scratch-file nonce. `Cache::temp_path` keys temp files on
+/// `(cache key, pid, nonce)`; a per-`Extractor` counter starting at 0 would collide
+/// whenever two independently-constructed `Extractor`s run in one process — which happens
+/// on every pair of overlapping `sync()` calls, since each builds its own `Extractor`.
+/// A single process-global counter keeps the nonce unique across all of them, so two
+/// workers (in the same or different `Extractor`s) can never clobber each other's scratch
+/// file. Cross-process uniqueness is still carried by the pid in `temp_path`.
+static SCRATCH_NONCE: AtomicU64 = AtomicU64::new(0);
 
 impl Extractor {
     #[must_use]
@@ -189,7 +197,6 @@ impl Extractor {
             decodes: AtomicUsize::new(0),
             in_flight: AtomicUsize::new(0),
             peak_in_flight: AtomicUsize::new(0),
-            nonce: AtomicU64::new(0),
         }
     }
 
@@ -307,7 +314,7 @@ impl Extractor {
         // `entry` would leave a half-written file that `contains()` would happily serve
         // as truncated audio on the next run — silently syncing against a clip that
         // stops early, which is exactly the silent-wrongness §7.5 forbids.
-        let nonce = self.nonce.fetch_add(1, Ordering::Relaxed);
+        let nonce = SCRATCH_NONCE.fetch_add(1, Ordering::Relaxed);
         let temp = self.cache.temp_path(&key, nonce);
 
         self.decodes.fetch_add(1, Ordering::Relaxed);

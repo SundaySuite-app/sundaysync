@@ -29,3 +29,13 @@ jobs:
         run: cargo test -p sundaysync-core --test accuracy -- --ignored --nocapture
         env:
           SUNDAYSYNC_REQUIRE_FFMPEG: "1"
+
+      # docs/V02-PROGRAM.md E4 / §7.7: the peak-RSS memory ceiling. Also `#[ignore]`d off
+      # the push gate — it generates a multi-hour synthetic day and samples process RSS
+      # for ~3 min, which is a nightly cost, not a per-push one. It proves the D-034
+      # single-alloc load() + anchor cache keep a long-reference sync under 4 GB (measured
+      # 2.383 GB locally, down from 4.636 GB before the fix).
+      - name: Memory ceiling gate (§7.7)
+        run: cargo test -p sundaysync-core --test memory_gate -- --ignored --nocapture
+        env:
+          SUNDAYSYNC_REQUIRE_FFMPEG: "1"

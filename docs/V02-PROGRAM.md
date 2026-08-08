@@ -129,7 +129,31 @@ delete scoped by suffix — so this list is focused, not sprawling):**
 | S-9 | Supply chain: `cargo audit` is in CI ✅ but **no `cargo deny`**, **no `npm audit`**, and Actions are floating-tag-pinned while CI holds `contents: write`. Fix: add `cargo deny` + `npm audit --audit-level=high`; SHA-pin all Actions. | LOW | ci/release.yml |
 | S-7 | `clear_cache` correctly spares foreign files (verified), but `dir` is caller-chosen, so it can delete a user's unrelated `.tmp`/`.f32` in any named dir. Fix: require a SundaySync-cache marker before clearing a non-default dir. | LOW | cache.rs:167 |
 
-### E4 — Engine stability
+### E4 — Engine stability ✅ done 2026-08-08
+
+**Done — 2026-08-08 (PR pending).** Three worktree-isolated agents (engine / shell+frontend /
+fixtures+tests), integrated by the conductor. **Headline proven: the §7.7 4 GB memory ceiling
+now holds — peak RSS 2.383 GB on a 14 h-reference synthetic day, down from 4.636 GB before the
+fix.** Engine (D-034/D-035): single-alloc streaming `load()` (F10/P-3 — the old double-alloc
+spiked a 20 h reference to ~6.8 GB), per-run anchor cache + O(1) `by_path` lookups replacing
+O(n²) I/O and comparator scans (P-6), lossless OS-bytes cache key (F7 collision), Windows
+`AlreadyExists`-rename → cache-hit (F9), bounded `runnable()` (F11 backend); memmap (D-011)
+stays deferred with rationale. Shell+frontend (D-036): uniform `AppState` poison policy so
+`cancel_sync` actually cancels (F1), `Arc::ptr_eq` scan-cancel identity under the lock (F3),
+export inputs-fingerprint backend guard (F6), `invokeWithTimeout` wrapper (F11 frontend/F14).
+Conductor (D-037): process-global `SCRATCH_NONCE` closes a newly-found same-process `Extractor`
+temp-name collision (distinct from F9, reproduces on POSIX). New test surface: adversarial media
+suite (truncated MP4, empty, lying-header WAV, wrong-extension both ways, 8/96/192 kHz,
+mono/5.1/7.1, garbage), the `#[ignore]`d peak-RSS memory gate (now in nightly), 100-run
+cancellation storm, two-instance concurrency (separate-process + same-process regression),
+proptest device-override accounting + hostile paths; `bench` gained cold/warm split, per-stage
+timing, and RSS sampling (P-7). Gates: 149 core + adversarial 9 + concurrency 4 + stability 1 +
+proptest 5 + fixturegen 35 + shell 11 + 31 vitest, both PATH variants (D-025), clippy `-D
+warnings` clean, tsc + vite build clean. Deferred to E5 as planned: P-1 reference-FFT caching /
+decimated search, P-2 parallel probing, P-4 cache eviction (D-013), P-5 progress gaps, P-6
+remaining hot paths, the two stale-doc cleanups.
+
+### E4 — Engine stability (original plan)
 
 - Adversarial media suite: truncated mid-atom MP4s, zero-length streams, 8-hour WAV
   headers with 2 s of data, wrong-extension files, exotic sample rates (8 k/96 k/192 k),

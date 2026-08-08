@@ -4,33 +4,27 @@
 //! content-keyed `.f32` entry) is supposed to make this safe by construction — this
 //! proves it, for the scenario the design actually targets.
 //!
-//! # A genuine finding: same-process instances are NOT currently safe
+//! # A finding surfaced and fixed in E4: same-process instances
 //!
-//! `Cache::temp_path` (`crates/core/src/cache.rs:123`) names a scratch file from
-//! `(cache key, process::id(), nonce)`, and its own doc comment states the intent: "the
-//! pid and counter keep two concurrent SundaySync **processes** — or two **workers**
-//! [within one `Extractor`'s pool] racing on the same file — from clobbering each other's
-//! scratch file." That leaves a real gap: two separate [`Extractor`] instances constructed
-//! in the *same* OS process each start their own `nonce` counter at 0
-//! (`crates/core/src/extract.rs`, the `Extractor::nonce` field). Since `process::id()` is
-//! identical for both (same process) and both instances typically process their file
-//! lists in the same order, the Nth file each processes collides on the exact same
-//! `<key>.<pid>-<nonce>.tmp` scratch path — proven below by
-//! [`two_extractors_in_one_process_can_collide_on_temp_names`], which is `#[ignore]`d
-//! because it currently and *reliably* fails, not flakily: one worker's `fs::rename` moves
-//! the shared temp path out from under the other's still-running ffmpeg, which then fails
-//! its own `fs::metadata` check with "No such file or directory" — a spurious
-//! `decode_error` on a perfectly good file. This is a *new* finding, distinct from F9
-//! (Windows' non-atomic-overwrite `rename`, docs/V02-PROGRAM.md's E2 stability backlog) —
-//! it reproduces on POSIX too, and needs its own fix in `Extractor`'s nonce
-//! generation (e.g. seed each instance's counter from a process-wide atomic rather than
-//! always starting at 0) before same-process multi-instance use is safe. Not fixed here:
-//! `crates/core/src/*.rs` is out of this agent's ownership.
+//! `Cache::temp_path` (`crates/core/src/cache.rs`) names a scratch file from
+//! `(cache key, process::id(), nonce)`. This test suite surfaced a real gap: the nonce
+//! used to be a per-[`Extractor`] counter starting at 0, so two separate `Extractor`
+//! instances constructed in the *same* OS process (identical `process::id()`) collided on
+//! the Nth file's `<key>.<pid>-<nonce>.tmp` scratch path — one worker's `fs::rename` moved
+//! the shared temp out from under the other's still-running ffmpeg, which then failed its
+//! `fs::metadata` check with a spurious `decode_error` on a perfectly good file. Distinct
+//! from F9 (Windows' non-atomic-overwrite `rename`): it reproduced on POSIX too.
 //!
-//! This is realistic, not contrived: `sync_with_durations` constructs a *fresh*
-//! `Extractor` on every call (`crates/core/src/lib.rs`), so two overlapping `sync()`
-//! calls in one running app — a re-sync fired before the first finishes, for instance —
-//! hit exactly this path.
+//! Fixed in E4 (D-037): the nonce is now a single process-global `AtomicU64`
+//! (`SCRATCH_NONCE` in `crates/core/src/extract.rs`), unique across every `Extractor` in
+//! the process, so two same-process instances can never share a scratch path. The pid in
+//! `temp_path` still carries cross-process uniqueness.
+//! [`two_extractors_in_one_process_do_not_collide_on_temp_names`] proves it below.
+//!
+//! This mattered in practice, not just in theory: `sync_with_durations` constructs a
+//! *fresh* `Extractor` on every call (`crates/core/src/lib.rs`), so two overlapping
+//! `sync()` calls in one running app — a re-sync fired before the first finishes, for
+//! instance — hit exactly this path.
 //!
 //! # What this file actually gates on
 //!
@@ -335,14 +329,10 @@ fn two_full_sync_runs_in_separate_processes_agree() {
     assert_eq!(serde_json::to_string(&again).unwrap(), a);
 }
 
-// ---- Documented, currently-failing finding: same-process instances -----------------------
+// ---- Regression for the E4 same-process nonce fix (D-037) --------------------------------
 
 #[test]
-#[ignore = "E4 finding, not F9: Extractor::nonce is instance-local while process::id() is \
-            shared within one process, so two same-process Extractor instances collide on \
-            temp-file names — see this file's module doc. Needs a src fix in \
-            crates/core/src/extract.rs (out of this agent's ownership); un-ignore once fixed."]
-fn two_extractors_in_one_process_can_collide_on_temp_names() {
+fn two_extractors_in_one_process_do_not_collide_on_temp_names() {
     let Some(sidecar) = require_ffmpeg() else {
         return;
     };
