@@ -195,10 +195,27 @@ pub fn export_with_options(
     let mut audio_lane = 0i32;
     let mut lanes: BTreeMap<String, i32> = BTreeMap::new();
 
+    let kind_of_device: BTreeMap<&str, DeviceKind> = result
+        .devices
+        .iter()
+        .map(|d| (d.id.as_str(), d.kind))
+        .collect();
+
     let reference_device = result.reference.as_ref().map(|r| r.device.clone());
     if let Some(dev) = &reference_device {
-        audio_lane -= 1;
-        lanes.insert(dev.clone(), audio_lane);
+        // §6 puts "the reference feed" on lane −1, but that sentence is about an audio
+        // feed. §4.4 picks the *longest file*, so a shoot with no recorder makes a camera
+        // the reference — and §6's other rule, "video devices on positive lanes", is the
+        // one that then applies. It keeps first pick either way; only the sign follows the
+        // kind. Anything not declared video keeps the audio lane it has always had.
+        let lane = if kind_of_device.get(dev.as_str()) == Some(&DeviceKind::Video) {
+            video_lane += 1;
+            video_lane
+        } else {
+            audio_lane -= 1;
+            audio_lane
+        };
+        lanes.insert(dev.clone(), lane);
     }
     for device in &result.devices {
         if lanes.contains_key(&device.id) {
@@ -307,6 +324,27 @@ fn render(
     let frame_duration = format!("{}/{}s", fps.den(), fps.num());
     let mut s = String::new();
 
+    // `hasVideo` describes the *media*, so it is read off the device kind §4.5 determined,
+    // not off the sign of the lane the clip landed on. Those agree for every camera on a
+    // positive lane, but not for a camera that §4.4 chose as the reference — and an asset
+    // declared audio-only imports into Resolve with no picture at all.
+    let kind_of_device: BTreeMap<&str, DeviceKind> = result
+        .devices
+        .iter()
+        .map(|d| (d.id.as_str(), d.kind))
+        .collect();
+    let device_of_file: BTreeMap<&Path, &str> = result
+        .placements
+        .iter()
+        .map(|p| (p.file.as_path(), p.device.as_str()))
+        .collect();
+    let has_video_of = |file: &Path| -> i32 {
+        let kind = device_of_file
+            .get(file)
+            .and_then(|dev| kind_of_device.get(dev));
+        i32::from(kind == Some(&DeviceKind::Video))
+    };
+
     let _ = writeln!(s, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
     let _ = writeln!(s, "<!DOCTYPE fcpxml>");
     let _ = writeln!(s, r#"<fcpxml version="{FCPXML_VERSION}">"#);
@@ -332,7 +370,7 @@ fn render(
             .file
             .file_stem()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        let has_video = i32::from(clip.lane > 0);
+        let has_video = has_video_of(&clip.file);
         let _ = writeln!(
             s,
             r#"    <asset id="a{i}" name="{}" start="0s" duration="{dur_ticks}/{timebase}s" hasVideo="{has_video}" hasAudio="1" audioSources="1" format="r0">"#,
@@ -423,9 +461,45 @@ fn render(
 /// alone, plus `/` as the path separator.
 #[must_use]
 pub fn file_url(path: &Path) -> String {
+    // Whether this platform separates path components with a backslash. Read from
+    // `MAIN_SEPARATOR` rather than `cfg!(windows)` so both branches compile — and are
+    // tested — everywhere, instead of the Windows one only existing on a Windows host.
+    let windows_style = std::path::MAIN_SEPARATOR == '\\';
+    encode_file_url(&path.to_string_lossy(), windows_style)
+}
+
+/// The platform-independent core of [`file_url`], so both separator conventions can be
+/// tested from any host.
+///
+/// Two things beyond percent-encoding decide whether the URL is usable at all:
+///
+/// - **The path must be rooted.** `file://` is followed by an *authority*, so a URL whose
+///   path does not start with `/` puts the first segment where the hostname goes. A
+///   Windows path encoded verbatim (`file://C%3A%5Cmedia%5Ca.mp4`) has an authority of
+///   `C%3A%5Cmedia%5Ca.mp4` and an empty path — nothing for Resolve to relink.
+/// - **Separators must be `/`.** Only on Windows, though: a backslash is a perfectly legal
+///   character in a POSIX filename, so substituting it there would rewrite the name.
+///
+/// A Windows UNC path (`\\nas\share\…`) already carries its own authority, so it becomes
+/// `file://nas/share/…` rather than growing an empty one.
+fn encode_file_url(path: &str, windows_style: bool) -> String {
+    let separated = if windows_style {
+        path.replace('\\', "/")
+    } else {
+        path.to_owned()
+    };
+    // A UNC path's leading `//` *is* the authority delimiter; anything else is a plain
+    // path that needs an empty authority and a rooted path.
+    let unc = windows_style && separated.starts_with("//");
+    // For a UNC path the leading `//` is the delimiter `file://` already carries, so the
+    // server name follows it directly.
+    let body = if unc { &separated[2..] } else { &separated[..] };
+
     let mut out = String::from("file://");
-    let s = path.to_string_lossy();
-    for byte in s.as_bytes() {
+    if !unc && !body.starts_with('/') {
+        out.push('/');
+    }
+    for byte in body.as_bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
                 out.push(*byte as char);
@@ -663,6 +737,134 @@ mod tests {
         assert!(lane_of("cam a") > 0, "video belongs on a positive lane");
         assert!(lane_of("cam-b") > 0);
         assert_ne!(lane_of("cam a"), lane_of("cam-b"), "one lane per camera");
+    }
+
+    /// A shoot with no recorder: three cameras, so §4.4's "longest audio duration" lands
+    /// on a *camera*. Nothing here is an audio device.
+    fn camera_only_sample() -> (SyncResult, BTreeMap<PathBuf, f64>) {
+        let mut durations = BTreeMap::new();
+        durations.insert(PathBuf::from("/media/cam-a.mp4"), 600.0);
+        durations.insert(PathBuf::from("/media/cam-b.mp4"), 300.0);
+
+        let device = |id: &str, file: &str| Device {
+            id: id.into(),
+            label: id.into(),
+            kind: DeviceKind::Video,
+            files: vec![PathBuf::from(file)],
+        };
+        let placed = |file: &str, dev: &str, offset: f64| Placement {
+            file: PathBuf::from(file),
+            device: dev.into(),
+            offset_seconds: offset,
+            confidence: 0.9,
+            psr: 50.0,
+            drift_ppm: None,
+            projected_end_error_ms: None,
+            chain: vec![],
+            warnings: vec![],
+        };
+
+        let result = SyncResult {
+            schema: SCHEMA_VERSION,
+            parameters: Parameters {
+                analysis_rate: 12_000,
+                min_psr: 15.0,
+            },
+            reference: Some(Reference {
+                file: PathBuf::from("/media/cam-a.mp4"),
+                device: "cam-a".into(),
+            }),
+            devices: vec![
+                device("cam-a", "/media/cam-a.mp4"),
+                device("cam-b", "/media/cam-b.mp4"),
+            ],
+            placements: vec![
+                placed("/media/cam-a.mp4", "cam-a", 0.0),
+                placed("/media/cam-b.mp4", "cam-b", 12.0),
+            ],
+            unsynced: vec![],
+            sequence: Sequence {
+                fps: Rational::new(25, 1).unwrap(),
+                duration_seconds: 600.0,
+            },
+            warnings: vec![],
+        };
+        (result, durations)
+    }
+
+    #[test]
+    fn a_camera_chosen_as_the_reference_still_exports_as_video() {
+        // §4.4 picks the longest file, so a shoot with no recorder makes a *camera* the
+        // reference. §6's "reference feed on lane -1" is about an audio feed; a camera
+        // belongs on a video lane, and — the part that actually loses picture — its asset
+        // must declare hasVideo="1". An asset-clip declared audio-only imports into
+        // Resolve without an image, which is silent wrongness (§7.5) of the most visible
+        // kind: the main camera of the shoot simply is not there.
+        let (r, d) = camera_only_sample();
+        let e = export(&r, &d, "Service").unwrap();
+
+        assert!(
+            !e.xml.contains(r#"hasVideo="0""#),
+            "every device in this shoot is a camera, so nothing may declare hasVideo=0:\n{}",
+            e.xml
+        );
+        let reference_clip = e
+            .clips
+            .iter()
+            .find(|c| c.file == PathBuf::from("/media/cam-a.mp4"))
+            .unwrap();
+        assert!(
+            reference_clip.lane > 0,
+            "a camera used as the reference belongs on a video lane, got {}",
+            reference_clip.lane
+        );
+        // And the other camera keeps a lane of its own.
+        let other = e
+            .clips
+            .iter()
+            .find(|c| c.file == PathBuf::from("/media/cam-b.mp4"))
+            .unwrap();
+        assert!(other.lane > 0);
+        assert_ne!(reference_clip.lane, other.lane);
+    }
+
+    #[test]
+    fn has_video_follows_the_device_kind_not_the_lane_sign() {
+        // The mixed case stays exactly as before: the recorder is audio, the cameras are
+        // video, and each asset says so.
+        let (r, d) = sample();
+        let e = export(&r, &d, "Service").unwrap();
+        assert_eq!(e.xml.matches(r#"hasVideo="1""#).count(), 2, "two cameras");
+        assert_eq!(e.xml.matches(r#"hasVideo="0""#).count(), 1, "one recorder");
+    }
+
+    #[test]
+    fn a_windows_path_becomes_a_usable_file_url() {
+        // Windows is a shipping bundle target, and `C:\media\a.mp4` percent-encoded
+        // verbatim yields `file://C%3A%5Cmedia%5Ca.mp4` — a URL whose *authority* is the
+        // whole path and whose path is empty. Resolve cannot relink a single asset from
+        // that. Separators become `/` and the path keeps its leading slash.
+        let url = encode_file_url(r"C:\opptak\Blåveis\C0001.MP4", true);
+        assert!(
+            url.starts_with("file:///"),
+            "the path must not be parsed as a host: {url}"
+        );
+        assert!(!url.contains("%5C"), "backslashes must not survive: {url}");
+        assert_eq!(url, "file:///C%3A/opptak/Bl%C3%A5veis/C0001.MP4");
+
+        // A UNC path keeps its own shape rather than growing a spurious segment.
+        assert_eq!(
+            encode_file_url(r"\\nas\opptak\a.mp4", true),
+            "file://nas/opptak/a.mp4"
+        );
+    }
+
+    #[test]
+    fn a_backslash_in_a_unix_filename_is_not_a_separator() {
+        // `\` is a perfectly legal character in a POSIX filename, so the Windows
+        // substitution must never run on a Unix path — it would rewrite the name.
+        let url = encode_file_url("/media/a\\b.mp4", false);
+        assert_eq!(url, "file:///media/a%5Cb.mp4");
     }
 
     #[test]
