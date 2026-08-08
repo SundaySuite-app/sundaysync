@@ -19,8 +19,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // A fixed default so `fixturegen quick out/` is reproducible without ceremony.
-    let seed: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0x5EED);
+    let seed = match parse_seed(args.get(2)) {
+        Ok(seed) => seed,
+        Err(bad) => {
+            eprintln!("error: `{bad}` is not a seed (expected a whole number, 0..2^64)");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let spec = match tier {
         "quick" => shoot::quick_suite(seed),
@@ -57,4 +62,46 @@ fn main() -> ExitCode {
 
     println!("{} clips -> {}", truth.clips.len(), dir.display());
     ExitCode::SUCCESS
+}
+
+/// The default seed, so `fixturegen quick out/` is reproducible without ceremony.
+const DEFAULT_SEED: u64 = 0x5EED;
+
+/// Reads the optional seed argument, returning the offending text if it is not a seed.
+///
+/// The earlier form was `args.get(2).and_then(|s| s.parse().ok()).unwrap_or(DEFAULT_SEED)`,
+/// which silently swallowed a typo: `fixturegen quick out/ 1e6` generated the
+/// *default*-seeded suite, into a directory named after the default seed, with no hint
+/// that the seed asked for had been discarded. §8.1's whole premise is that a fixture is
+/// reproducible from its seed, so a seed the user typed and did not get is exactly the
+/// kind of quiet wrongness this suite exists to rule out. An unusable seed is now a loud
+/// refusal; an absent one still means the default.
+fn parse_seed(arg: Option<&String>) -> Result<u64, &str> {
+    match arg {
+        None => Ok(DEFAULT_SEED),
+        Some(text) => text.parse().map_err(|_| text.as_str()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_absent_seed_is_the_default_and_a_bad_one_is_refused() {
+        assert_eq!(parse_seed(None), Ok(DEFAULT_SEED));
+        assert_eq!(parse_seed(Some(&"42".to_string())), Ok(42));
+        assert_eq!(
+            parse_seed(Some(&u64::MAX.to_string())),
+            Ok(u64::MAX),
+            "the whole seed space must be reachable"
+        );
+        for bad in ["1e6", "0x5EED", "-1", "", "12.5", "18446744073709551616"] {
+            assert_eq!(
+                parse_seed(Some(&bad.to_string())),
+                Err(bad),
+                "`{bad}` must be refused, not silently replaced by the default"
+            );
+        }
+    }
 }

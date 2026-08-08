@@ -82,12 +82,33 @@ pub struct TruthClip {
     pub codec: Codec,
     /// True start in event time. The engine reports offsets relative to whichever file
     /// it picks as reference, so comparisons must be made on *differences* of these.
+    ///
+    /// `f64::NAN` for an `uncorrelated` file, which has no true start at all.
+    /// `serde_json` writes a non-finite float as `null` but — asymmetrically — refuses
+    /// to read `null` back into an `f64`, so a `truth.json` containing the §8.1
+    /// no-correlation case could be *written* by this type and not *parsed* by it. That
+    /// broke the contract this file's own module doc states (the emitted `truth.json` is
+    /// "the same shape" every consumer reads) and would have failed the moment anything
+    /// pointed `serde_json::from_str::<Truth>` at a `fixturegen`-produced corpus — which
+    /// `crates/core/tests/concurrency.rs` already does, on shoots that happen not to
+    /// carry the uncorrelated file yet. Reading `null` back as NaN closes it without
+    /// changing the on-disk shape or any consumer's field type.
+    #[serde(deserialize_with = "offset_or_nan")]
     pub offset_seconds: f64,
     pub duration_seconds: f64,
     pub drift_ppm: f64,
     pub snr_db: Option<f64>,
     /// True when the audio is unrelated to the event and must land in `unsynced`.
     pub uncorrelated: bool,
+}
+
+/// Reads `TruthClip::offset_seconds`, mapping the `null` a non-finite float serialises to
+/// back onto `f64::NAN`. See that field's documentation for why it exists.
+fn offset_or_nan<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<f64>::deserialize(deserializer)?.unwrap_or(f64::NAN))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -463,6 +484,58 @@ pub fn suite_dir(root: &Path, name: &str, seed: u64) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_truth_json_carrying_the_uncorrelated_case_round_trips() {
+        // The §8.1 no-correlation file has no true start, recorded as NaN — which
+        // `serde_json` writes as `null` and refuses to read back into an `f64`. Every
+        // `truth.json` the `fixturegen` binary emits carries exactly that clip, so
+        // without the field's `deserialize_with` this type could write a corpus it could
+        // not then read. `concurrency.rs` parses `shoot::Truth` from disk today.
+        let truth = Truth {
+            name: "quick".into(),
+            seed: 1,
+            master_rate: MASTER_RATE,
+            duration_seconds: 90.0,
+            clips: vec![
+                TruthClip {
+                    file: "recorder_0001.wav".into(),
+                    device: "recorder".into(),
+                    codec: Codec::Wav,
+                    offset_seconds: 0.0,
+                    duration_seconds: 90.0,
+                    drift_ppm: 0.0,
+                    snr_db: Some(45.0),
+                    uncorrelated: false,
+                },
+                TruthClip {
+                    file: "unrelated.wav".into(),
+                    device: "unrelated".into(),
+                    codec: Codec::Wav,
+                    offset_seconds: f64::NAN,
+                    duration_seconds: 25.0,
+                    drift_ppm: 0.0,
+                    snr_db: None,
+                    uncorrelated: true,
+                },
+            ],
+        };
+
+        let json = serde_json::to_string_pretty(&truth).unwrap();
+        assert!(
+            json.contains("\"offset_seconds\": null"),
+            "the on-disk shape must not change: {json}"
+        );
+        let back: Truth = serde_json::from_str(&json).expect("truth.json must parse back");
+
+        assert_eq!(back.clips.len(), 2);
+        assert_eq!(back.clips[0].offset_seconds, 0.0);
+        assert!(
+            back.clips[1].offset_seconds.is_nan(),
+            "the uncorrelated clip's absent offset must read back as NaN"
+        );
+        assert!(back.clips[1].uncorrelated);
+    }
 
     #[test]
     fn quick_suite_is_shaped_for_the_hard_cases() {
