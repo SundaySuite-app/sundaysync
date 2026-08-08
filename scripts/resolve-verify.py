@@ -141,13 +141,20 @@ def resolve_import_report(xml_path: str, project_name: str, resolve=None):
             for i in range(1, tl.GetTrackCount(ttype) + 1):
                 for it in (tl.GetItemListInTrack(ttype, i) or []):
                     pos_frames = it.GetStart() - start
+                    dur_frames = it.GetDuration()
+                    # E6 drift correction (docs/V02-PROGRAM.md): alignment must hold at the
+                    # clip END, not only its START, so report both edges. A drift-corrected
+                    # clip carries a <timeMap> retime; its timeline END is where an
+                    # uncorrected clock error would have drifted out of sync.
                     report.append(
                         {
                             "track": f"{ttype}{i}",
                             "name": it.GetName(),
                             "start_frames": pos_frames,
                             "start_seconds": round(pos_frames / fps, 4),
-                            "duration_frames": it.GetDuration(),
+                            "duration_frames": dur_frames,
+                            "end_frames": pos_frames + dur_frames,
+                            "end_seconds": round((pos_frames + dur_frames) / fps, 4),
                         }
                     )
         return report
