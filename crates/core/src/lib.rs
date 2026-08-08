@@ -37,7 +37,7 @@ pub mod result;
 pub mod scan;
 pub mod sidecar;
 
-pub use cache::{Cache, CacheKey};
+pub use cache::{Cache, CacheKey, Evicted};
 pub use correlate::{ClipMatch, Correlator, Match, SegmentMatch};
 pub use drift::Drift;
 pub use error::{Error, Result};
@@ -130,10 +130,16 @@ pub fn sync_with_durations(
     let mut unsynced = manifest.unsynced.clone();
     let mut candidates = Vec::new();
 
+    // P-6: index the probe records by path once, rather than a linear `find` per file —
+    // the old `probed.iter().find(...)` inside this loop was O(n²) over the file set. The
+    // lookup result is identical; only the cost changes.
+    let probe_by_path: std::collections::HashMap<&PathBuf, &Probed> =
+        probed.iter().map(|p| (&p.path, p)).collect();
+
     for (entry, outcome) in manifest.files.iter().zip(extracted) {
         match outcome {
             Ok(audio) => {
-                let Some(p) = probed.iter().find(|p| p.path == entry.file) else {
+                let Some(p) = probe_by_path.get(&entry.file).copied() else {
                     // Every entry in `files` came from `probed`, so this cannot happen
                     // without a bug — and §7.3 says a lost file must be loud, not silent.
                     return Err(Error::Invariant(format!(
