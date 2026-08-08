@@ -50,17 +50,59 @@ impl CacheKey {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos());
 
+        Ok(Self::from_parts(
+            &abs,
+            meta.len(),
+            mtime_nanos,
+            analysis_rate,
+        ))
+    }
+
+    /// Hashes the four identity fields into a key. Split out from [`CacheKey::for_file`]
+    /// so the collision-freedom of the path encoding (F7) can be unit-tested on fabricated
+    /// non-UTF-8 paths without a real file on disk.
+    fn from_parts(abs: &Path, len: u64, mtime_nanos: u128, analysis_rate: u32) -> Self {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(abs.to_string_lossy().as_bytes());
-        hasher.update(&meta.len().to_le_bytes());
+        hash_path(&mut hasher, abs);
+        hasher.update(&len.to_le_bytes());
         hasher.update(&mtime_nanos.to_le_bytes());
         hasher.update(&analysis_rate.to_le_bytes());
-        Ok(Self(hasher.finalize().to_hex().to_string()))
+        Self(hasher.finalize().to_hex().to_string())
     }
 
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+/// Feeds a path's *raw* OS bytes into the hasher (F7, docs/DECISIONS.md D-035).
+///
+/// The earlier code hashed `to_string_lossy()`, which replaces every invalid byte with
+/// `U+FFFD`. Two distinct non-UTF-8 paths differing only in their invalid bytes then
+/// hashed to the same key and collided — the second file would be served the first's
+/// cached audio, a silent-wrongness bug (§7.5). Hashing the lossless OS encoding removes
+/// the collision: raw bytes on unix, UTF-16 code units on Windows. Changing the encoding
+/// changes cache *filenames*, which only means a one-time cold re-decode — nothing on
+/// disk or in the fixtures pins a specific `{hash}.f32` name.
+fn hash_path(hasher: &mut blake3::Hasher, path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        hasher.update(path.as_os_str().as_bytes());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        for unit in path.as_os_str().encode_wide() {
+            hasher.update(&unit.to_le_bytes());
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        // No lossless OS-string accessor on this target; the lossy form is the best
+        // available and still correct for all-UTF-8 paths, which these targets use.
+        hasher.update(path.to_string_lossy().as_bytes());
     }
 }
 
@@ -323,6 +365,30 @@ mod tests {
         fs::write(&f, b"hello world, a different length").unwrap();
         let after = CacheKey::for_file(&f, ANALYSIS_RATE).unwrap();
         assert_ne!(before, after, "size change must invalidate the entry");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_paths_differing_only_in_invalid_bytes_do_not_collide() {
+        // F7: hashing `to_string_lossy()` mapped every invalid byte to U+FFFD, so two
+        // distinct non-UTF-8 paths differing only there collided — the second file was
+        // served the first's cached audio. Hashing the raw OS bytes keeps them distinct.
+        // Tested through `from_parts` so no real (and possibly OS-rejected) non-UTF-8 file
+        // has to exist; only the path encoding is under test here.
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let a = PathBuf::from(OsStr::from_bytes(b"/media/clip\xff.wav"));
+        let b = PathBuf::from(OsStr::from_bytes(b"/media/clip\xfe.wav"));
+        // Same lossy string (both bytes render as U+FFFD) — the old bug's precondition.
+        assert_eq!(a.to_string_lossy(), b.to_string_lossy());
+
+        let ka = CacheKey::from_parts(&a, 100, 7, ANALYSIS_RATE);
+        let kb = CacheKey::from_parts(&b, 100, 7, ANALYSIS_RATE);
+        assert_ne!(ka, kb, "distinct raw paths must hash to distinct keys");
+
+        // And the encoding is still deterministic for one path.
+        assert_eq!(ka, CacheKey::from_parts(&a, 100, 7, ANALYSIS_RATE));
     }
 
     #[test]
