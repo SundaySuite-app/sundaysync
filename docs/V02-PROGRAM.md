@@ -386,7 +386,31 @@ Mirror of SundayRec E3, adapted:
 - No version/OS leakage on update checks (no `{{current_version}}` in the URL —
   SundayRec's privacy stance).
 
-### E10 — QA foundation + real corpus
+### E10 — QA foundation + real corpus ✅ done 2026-08-08 (corpus loop stays open by design)
+
+**QA half merged** (PR #13 → `122e2f0`): Playwright harness — a `__TAURI_INTERNALS__` shim
+mocking invoke + events, 36 specs (onboarding, consent, drop→scan→sources, override+stale,
+sync progress + cancel-as-notice, export + stale refusal, settings persistence), gated in CI
+as the `e2e` job.
+
+**Corpus half run on real footage** (owner-delivered 2026-04-05 multicam baptism) — and it
+did its job: **§8.2 was violated and is now fixed (D-045).** Three false placements observed
+(PSR 15.2/15.4 with physically impossible drift; PSR 19.0 on a single-segment 14-s clip an
+hour from its metadata). Fix: `place::admissible` — the drift-credibility gate
+(`|ppm| ≤ 500`, residual-around-the-line ≤ 15 ms; fitting the line first preserves D-016's
+legitimate long-drift case) plus a stricter `min_psr × 5/3` floor for matches with no
+segment evidence. Re-run: all three refused, full §8.1 accuracy suites unchanged-green (the
+over-tightening guard). Also settled **D-009** with real files: `.lrv` proxy sidecars are
+skipped by the walk (explicit files still honoured). KNOWN_LIMITATIONS now documents that a
+produced/edited mix is not a valid reference (the engine refuses instead of mis-placing).
+**Still open, honestly:** recall on real corpora is unmeasured (this corpus's cameras were
+mostly in different rooms/times — zero placements is the *correct* answer for it); MIN_PSR
+recalibration (D-015) and the provisional 5/3 factor refine as more corpus arrives — the
+E12 loop's job. `sundaysync bench` cold/warm numbers on network-mounted real media were
+dominated by I/O (5:06 cold for ref+70-min cam, ~34 s warm-cache re-sync), consistent with
+the decode-bound model.
+
+### E10 — QA foundation + real corpus (original plan)
 
 - Playwright harness on SundayRec's E5 pattern (`__TAURI_INTERNALS__` shim; ~20–30
   specs): onboarding flow, drop→scan→sources, override + stale marking, sync
@@ -448,20 +472,23 @@ cache/telemetry retention verification, UNVERIFIED-list burn-down.
       injection mode. Interrupted by an owner reboot mid-stage, resumed cleanly. 180 root +
       5 shell + 27 vitest green; cargo-deny clean both workspaces; CSP builds + embeds.
       One follow-up: vitest v4 bump to clear dev-tree audit noise.
-- [ ] E4 Engine stability
-- [ ] E5 Performance at scale (+ D-013 eviction decision)
-- [ ] E6 Drift correction (+ D-016 closure; owner sign-off on mechanism)
-- [ ] E7 Consent + telemetry client (+ owner: consent text)
-- [ ] E8 Telemetry Worker side
-- [ ] E9 Updater + beta ring (+ kill-switch drill)
-- [ ] E10 QA foundation + real corpus (owner delivers footage)
-- [ ] E11 v0.2.0-beta.1 → stable (owner test checklist)
-- [ ] E12 Continuous operations (recurring)
-
-## Standing owner items (asked at the marked stages, never silently)
-
-E5: cache-eviction shape · E6: correction mechanism after spike · E7: consent text +
-behandlingsansvarlig · E10: corpus delivery + truth sign-off · E11: beta validation
-on real hardware. Apple signing/notarization stays a separate suite-level item
-(team 784GN847G4) — v0.2 ships with the same right-click-to-open caveat unless that
-lands in the meantime.
+- [x] **E4 Engine stability — 2026-08-08.** §7.7's 4 GB ceiling proven (2.383 GB, was 4.636);
+      details in the E4 section above. PR #8.
+- [x] **E5 Performance — 2026-08-08.** P-1 fixed: 3 h service ~214 s → ~57 s, bit-identical;
+      cache eviction closes D-013. PR #9. Decimated search deferred (D-039).
+- [x] **E6 Drift correction — 2026-08-08.** `<timeMap>`, spike-proven + live-verified in
+      Resolve 21; closes D-016. PR #10.
+- [x] **E7 Consent + telemetry client — 2026-08-08.** Opt-in consent v1, anonymous bucketed
+      payload, sends nothing until E8 deploys. PR #11.
+- [~] **E8 Worker side — built, owner-gated.** `e8/sundaysync-on-app-dimension` in
+      sunday-telemetry (validator conformed to the E7 client on the owner-chosen app
+      registry; client posts to the app-scoped door). Remaining: owner-sanctioned merge,
+      deploy, `WRITE_KEY_SUNDAYSYNC` mint, live verify.
+- [x] **E9 Updater + beta ring — 2026-08-08.** App-scoped rings, NSIS-on-beta, signing
+      pubkey placeholder (owner mints the real secret — see D-044's security note). PR #12.
+- [x] **E10 QA + corpus — 2026-08-08.** Playwright harness in CI (PR #13); real-corpus run
+      found and fixed the §8.2 violation (credibility gate + single-segment floor, D-045,
+      PR #14); corpus loop stays open by design.
+- [ ] E11 v0.2.0-beta.1 → stable (owner checklist: CSP render check, drift-corrected real
+      export, updater self-update, consent flows, signing secret first)
+- [ ] E12 Continuous operations

@@ -65,6 +65,44 @@ pub fn confidence_from_psr(psr: f64, min_psr: f64) -> f64 {
     (1.0 - min_psr / psr).clamp(0.0, 1.0)
 }
 
+/// D-045: the stricter PSR bar for matches that carry no consistency evidence.
+///
+/// A clip short enough to correlate as a single whole-clip pass (under
+/// [`crate::correlate::WHOLE_CLIP_LIMIT_SECONDS`], or with fewer than
+/// [`drift::MIN_SEGMENTS_FOR_DRIFT`] segments for any reason) gives the credibility gate
+/// nothing to check: one peak, no segments to agree or disagree. Its PSR is the *only*
+/// evidence, so it must clear a higher bar. The factor is multiplicative so §9's
+/// `min_psr` knob keeps its meaning: at the default 15 the effective floor is 25.
+///
+/// Calibration honesty (D-015 stays open): the number comes from the first real corpus,
+/// where every observed FALSE placement scored 15.2–19.0 while synthetic TRUE matches
+/// score ≫ 25 (the full §8.1 accuracy suites pass unchanged under this factor, which is
+/// the regression guard against over-tightening). One service is not a calibration — the
+/// factor is provisional and E10's corpus loop refines it — but shipping a floor that
+/// refuses every false placement observed so far beats shipping none.
+pub const NO_DRIFT_EVIDENCE_PSR_FACTOR: f64 = 5.0 / 3.0;
+
+/// D-045: is this match good enough to *place*?
+///
+/// Two ideas, both born from the first real corpus (see D-045):
+/// - A match with ≥ 3 segments must have a **credible** drift regression
+///   ([`drift::Drift::credible`]): segments that scatter, or imply a physically
+///   impossible clock, mean the peaks are not one rigid recording against another —
+///   an edited/produced mix used as a reference produced exactly that, at PSR 15.2.
+/// - A match with **no** drift evidence (single whole-clip peak or < 3 segments) must
+///   clear [`NO_DRIFT_EVIDENCE_PSR_FACTOR`] × `min_psr`, because there is nothing else
+///   to catch a lucky sidelobe — a 14 s clip placed an hour from where its metadata put
+///   it, at PSR 19.0.
+///
+/// Refusal here lands the clip in `unsynced` as `low_confidence` — which is precisely
+/// what it is.
+fn admissible(m: &crate::correlate::ClipMatch, clip_samples: usize, min_psr: f64) -> bool {
+    match drift::measure(&m.segments, clip_samples) {
+        Some(d) => m.psr >= min_psr && d.credible(),
+        None => m.psr >= min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR,
+    }
+}
+
 /// §4.4 reference selection: longest audio, dedicated audio files preferred on ties,
 /// path as the final tiebreaker.
 ///
@@ -153,7 +191,8 @@ pub fn place(
 
         let audio = candidate.audio.load()?;
         match correlator.match_clip(audio.samples(), ref_audio.samples(), segment_count) {
-            Some(m) if m.psr >= min_psr => {
+            // D-045: PSR alone is not sufficient evidence — see `admissible`.
+            Some(m) if admissible(&m, audio.len(), min_psr) => {
                 placements.push(build_placement(Resolved {
                     candidate,
                     offset_samples: m.offset_samples,
@@ -243,7 +282,9 @@ pub fn place(
                 else {
                     continue;
                 };
-                if m.psr < min_psr {
+                // D-045: same gates as pass 1 — an inadmissible anchor match is a
+                // non-match; the next anchor may still produce a real one.
+                if !admissible(&m, audio.len(), min_psr) {
                     continue;
                 }
 

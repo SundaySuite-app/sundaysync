@@ -155,6 +155,10 @@ pub fn export_with_options(
         let d = Drift {
             ppm,
             projected_end_error_ms: err,
+            // Not carried in §5 (and not needed here): D-045's gate refuses any placement
+            // whose residual exceeded the limit, so a placement that reaches the exporter
+            // is credible by construction. Zero is a statement, not a guess.
+            residual_mad_ms: 0.0,
         };
         // Only clips past half a frame are corrected; the reference carries no drift and so
         // is never touched. A clip already inside half a frame is left exactly as v1.

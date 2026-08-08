@@ -21,7 +21,7 @@
 //!
 //! ## The shared Worker (E8 dependency)
 //!
-//! Payloads POST to the shared telemetry Worker's `/v1/ingest`
+//! Payloads POST to the shared telemetry Worker's `/v1/apps/sundaysync/ingest`
 //! (`sunday-telemetry`), the same endpoint SundayRec rides. That Worker's
 //! `validatePayload` today knows only SundayRec's shape and rejects any unknown
 //! field with a 400. SundaySync's payload carries an `app: "sundaysync"` marker
@@ -96,7 +96,7 @@ pub const BASE_URL_VAR: &str = "SUNDAYSYNC_TELEMETRY_URL";
 pub const WRITE_KEY_VAR: &str = "SUNDAYSYNC_TELEMETRY_KEY";
 /// The header the shared Worker reads the write key from. The Worker names it for
 /// SundayRec today; E8 confirms the shared/per-app key strategy.
-pub const WRITE_KEY_HEADER: &str = "x-sundayrec-key";
+pub const WRITE_KEY_HEADER: &str = "x-write-key";
 
 /// Per-request timeout. A telemetry POST is a couple of kB to an edge Worker; if
 /// it has not answered in fifteen seconds the outbox will try again later.
@@ -996,14 +996,18 @@ impl Endpoint {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())?;
         Some(Self {
-            ingest_url: format!("{base}/v1/ingest"),
+            // E8: the app-scoped door on the shared Worker's app registry — NOT the
+            // frozen legacy `/v1/ingest` alias (that one means "sundayrec" and its
+            // validator would 400 this payload as unknown fields). The write key is the
+            // app's own (`WRITE_KEY_SUNDAYSYNC` on the Worker), sent as `x-write-key`.
+            ingest_url: format!("{base}/v1/apps/sundaysync/ingest"),
             base_url: base,
             write_key,
         })
     }
 
     fn delete_url(&self, install_id: &str) -> String {
-        format!("{}/v1/install/{install_id}", self.base_url)
+        format!("{}/v1/apps/sundaysync/install/{install_id}", self.base_url)
     }
 }
 
@@ -1779,11 +1783,14 @@ mod tests {
             Some(" k ".into()),
         )
         .unwrap();
-        assert_eq!(e.ingest_url, "https://telemetry.sundaysuite.app/v1/ingest");
+        assert_eq!(
+            e.ingest_url,
+            "https://telemetry.sundaysuite.app/v1/apps/sundaysync/ingest"
+        );
         assert_eq!(e.write_key, "k");
         assert_eq!(
             e.delete_url("abc"),
-            "https://telemetry.sundaysuite.app/v1/install/abc"
+            "https://telemetry.sundaysuite.app/v1/apps/sundaysync/install/abc"
         );
     }
 
