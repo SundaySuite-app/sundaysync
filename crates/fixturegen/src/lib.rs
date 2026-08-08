@@ -7,11 +7,14 @@
 //! This is the backbone of CI: the accuracy gates in §8.2 are measured against it, so a
 //! flaw here is invisible and expensive. Everything is reproducible from the seed alone.
 
+pub mod day;
+pub mod hostile;
 pub mod rng;
 pub mod shoot;
 pub mod signal;
 pub mod wav;
 
+pub use day::DaySpec;
 pub use rng::Rng;
 pub use shoot::{ClipSpec, Codec, DeviceSpec, ShootSpec, Truth, TruthClip};
 pub use signal::{Colour, MASTER_RATE};
