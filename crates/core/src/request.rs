@@ -74,6 +74,20 @@ pub struct SyncRequest {
     /// (D-023): resolving an app-relative path is the shell's job, and the engine only
     /// ever sees two verified paths.
     pub sidecar: Option<Sidecar>,
+    /// §4.6 / E6: correct measured clock drift on export by emitting a per-clip
+    /// `<timeMap>` (D-042).
+    ///
+    /// **Default `true`**: correction is on, and applies only to clips whose measured
+    /// drift exceeds half a frame ([`crate::Drift::exceeds_half_frame`]) — a clip already
+    /// inside half a frame is left untouched. Setting this `false` is the user-facing
+    /// "off" switch the UI exposes: no clip is ever retimed and the export is byte-for-byte
+    /// what v1 produced.
+    ///
+    /// The engine measures drift regardless of this flag; it governs *export* only, so the
+    /// shell reads it back at export time and passes it to
+    /// [`crate::fcpxml::export_with_options`]. It is deliberately not part of the frozen §5
+    /// `SyncResult` schema.
+    pub correct_drift: bool,
 }
 
 impl SyncRequest {
@@ -87,6 +101,7 @@ impl SyncRequest {
             device_overrides: BTreeMap::new(),
             segment_count: crate::correlate::SEGMENT_COUNT,
             sidecar: None,
+            correct_drift: true,
         }
     }
 
@@ -97,5 +112,17 @@ impl SyncRequest {
             analysis_rate: ANALYSIS_RATE,
             min_psr: self.min_psr,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drift_correction_is_on_by_default() {
+        // E6 contract: the toggle defaults ON so the "trustworthy long clips" behaviour is
+        // what a user gets without touching advanced mode. The UI's switch turns it off.
+        assert!(SyncRequest::new(vec![]).correct_drift);
     }
 }

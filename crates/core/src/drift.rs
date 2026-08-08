@@ -49,6 +49,38 @@ impl Drift {
         }
         self.projected_end_error_ms.abs() > (1000.0 / fps) / 2.0
     }
+
+    /// E6 / D-042: the factor a corrected clip's *timeline* span exceeds its *source* span.
+    ///
+    /// # Why this factor, and why not its reciprocal
+    ///
+    /// `ppm` is `d(offset)/d(position in clip)`, so the reference time a source position
+    /// `p` should land at is `offset_0 + (1 + ppm·1e-6)·p` (position plus its required
+    /// offset). A source span of length `L` therefore has to occupy `L·(1 + ppm·1e-6)` of
+    /// timeline for its far end to land where the reference puts it. That timeline stretch
+    /// is exactly the resample D-019 pins from the other side: source samples play back at
+    /// `1 / (1 + ppm·1e-6)`, the reciprocal of this. Emitting the reciprocal here would move
+    /// the end the wrong way and *double* the error — the mistake D-019 warns about, pinned
+    /// by [`tests::correction_cancels_the_end_error_and_inversion_doubles_it`].
+    #[must_use]
+    pub fn timeline_stretch(&self) -> f64 {
+        1.0 + self.ppm * 1e-6
+    }
+
+    /// E6 / D-042: how far to move a corrected clip's start, in seconds, to turn §4.3's
+    /// *median* placement into a *start* placement.
+    ///
+    /// The correlator estimates the offset at the clip's midpoint (§4.3 takes the median),
+    /// so the placement sits half a clip's drift away from where the clip's *first* sample
+    /// belongs. The `<timeMap>` pivots on the clip start (`time="0s" value="0s"`), so the
+    /// start must first be moved to the reference-correct position or the stretch pivots
+    /// about the wrong point and both ends end up half a drift out. That half-drift is
+    /// exactly `projected_end_error_ms / 2`; the exporter subtracts this from the median
+    /// offset. See D-016 for the median-vs-start framing this resolves.
+    #[must_use]
+    pub fn start_reference_shift_seconds(&self) -> f64 {
+        self.projected_end_error_ms / 2000.0
+    }
 }
 
 /// Least-squares fit of measured offset against position within the clip.
@@ -203,6 +235,61 @@ mod tests {
             .collect();
         let d = measure(&segs, clip).unwrap();
         assert!((d.ppm - 50.0).abs() < 5.0, "measured {:.2} ppm", d.ppm);
+    }
+
+    #[test]
+    fn correction_cancels_the_end_error_and_inversion_doubles_it() {
+        // The D-019 sign trap, proven rather than eyeballed. Ground truth comes from this
+        // module's own definition of `ppm` (`d(offset)/d(position)`): a source position `p`
+        // belongs at reference time `offset_0 + (1 + ppm·1e-6)·p`. Nothing here depends on
+        // the ambiguous "stretched by N ppm" framing — only on what `measure` produces.
+        //
+        // Both signs of drift, and the two real full-tier measurements from D-019, are
+        // exercised. If `timeline_stretch` were inverted the corrected end would move the
+        // wrong way and the error would roughly double instead of vanishing.
+        let l = 400.0_f64; // source length, seconds
+        let offset_0 = 3.0_f64; // reference time of the clip's first sample
+        for ppm in [40.0_f64, -40.0, -58.69, 24.75] {
+            let slope = ppm * 1e-6;
+            let d = Drift {
+                ppm,
+                projected_end_error_ms: slope * l * 1000.0,
+            };
+
+            // Reference-correct timeline position of the source END.
+            let ideal_end = offset_0 + (1.0 + slope) * l;
+            // §4.3 places on the median, i.e. the offset at the midpoint.
+            let median_offset = offset_0 + slope * l / 2.0;
+            // The full end-to-end drift this clip carries.
+            let full_drift = (slope * l).abs();
+
+            // Correction: re-reference the start, then stretch the span.
+            let corrected_start = median_offset - d.start_reference_shift_seconds();
+            let corrected_end = corrected_start + l * d.timeline_stretch();
+            let corrected_err = (corrected_end - ideal_end).abs();
+
+            // Uncorrected, start-anchored 1:1 — the D-016 framing. This is a full drift out.
+            let uncorrected_end = corrected_start + l;
+            let uncorrected_err = (uncorrected_end - ideal_end).abs();
+
+            // The inverted ratio: the exact bug D-019 warns about — end moves the wrong way,
+            // ending up ~twice the drift out instead of on target.
+            let inverted_end = corrected_start + l / d.timeline_stretch();
+            let inverted_err = (inverted_end - ideal_end).abs();
+
+            assert!(
+                corrected_err < 1e-9,
+                "ppm {ppm}: corrected end still {corrected_err:.6} s out"
+            );
+            assert!(
+                (uncorrected_err - full_drift).abs() < 1e-9,
+                "ppm {ppm}: uncorrected end should be one full drift ({full_drift:.6} s) out, was {uncorrected_err:.6} s"
+            );
+            assert!(
+                inverted_err > 1.8 * full_drift,
+                "ppm {ppm}: inverting the ratio must roughly double the error, got {inverted_err:.6} s vs one drift {full_drift:.6} s"
+            );
+        }
     }
 
     #[test]
