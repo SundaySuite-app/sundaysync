@@ -1,6 +1,15 @@
 import { test, expect } from "@playwright/test";
-import { boot, BOOT_FIXTURES, emit, scanManifest, SETTLED_SETTINGS } from "./harness";
-import { en } from "../src/i18n";
+import {
+  boot,
+  BOOT_FIXTURES,
+  controlled,
+  emit,
+  resolveControlled,
+  scanManifest,
+  SETTLED_SETTINGS,
+  waitForPending,
+} from "./harness";
+import { en, stageLabel } from "../src/i18n";
 
 // Drop -> scan -> sources (§9.1/§9.2): the probe-only `scan_inputs` preview that shows
 // what the app understood from a drop BEFORE any sync commits to it.
@@ -125,5 +134,51 @@ test.describe("drop, scan, sources", () => {
     await expect(sources.locator(".device-group__name").filter({ hasText: "Camera A" })).toBeHidden();
     // No result exists yet, so there is nothing to mark stale — no such banner appears.
     await expect(page.getByText(en.staleResult)).toBeHidden();
+  });
+});
+
+// `scan_inputs`'s own `EventSink` (channel `scan:progress`, lib.rs) reports real stage +
+// completed/total ticks during the probe, exactly like `run_sync`'s `sync:progress` does
+// — but nothing in the renderer listened for it: the scanning phase showed a static
+// spinner no matter how far into a large card dump the backend actually was.
+test.describe("scan progress", () => {
+  async function reachScanning(page: import("@playwright/test").Page) {
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: controlled("scan_inputs"),
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await waitForPending(page, "scan_inputs");
+  }
+
+  test("progress events drive the stage label and the completed/total fraction", async ({
+    page,
+  }) => {
+    await reachScanning(page);
+
+    // Before any event: indeterminate, the scanning-specific idle label — not the
+    // generic "Syncing" one `ProgressBar` falls back to for `run_sync`.
+    await expect(page.locator(".progress__label")).toHaveText(en.scanningInputs);
+    await expect(page.locator(".progress__fill--indeterminate")).toBeVisible();
+
+    await emit(page, "scan:progress", { stage: "Probing", completed: 3, total: 8 });
+
+    await expect(page.locator(".progress__label")).toContainText(stageLabel(en, "Probing"));
+    await expect(page.locator(".progress__label")).toContainText("3/8");
+    const bar = page.getByRole("progressbar");
+    await expect(bar).toHaveAttribute("aria-valuenow", "3");
+    await expect(bar).toHaveAttribute("aria-valuemax", "8");
+  });
+
+  test("resolving the pending scan lands on the sources view", async ({ page }) => {
+    await reachScanning(page);
+    await emit(page, "scan:progress", { stage: "Probing", completed: 8, total: 8 });
+    await resolveControlled(page, "scan_inputs", scanManifest());
+
+    await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
   });
 });

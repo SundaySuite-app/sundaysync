@@ -10,8 +10,18 @@ import type { ProgressEvent } from "../types";
  * `t.cancel === "Avbryt"`, both of which are exactly what the dictionary exists to
  * prevent.
  */
-export function ProgressBar({ t, progress }: { t: Strings; progress: ProgressEvent | null }) {
-  const label = progress ? stageLabel(t, progress.stage) : t.syncing;
+export function ProgressBar({
+  t,
+  progress,
+  idleLabel,
+}: {
+  t: Strings;
+  progress: ProgressEvent | null;
+  /** Shown before the first event arrives. Defaults to the sync-run label so the
+   *  existing `run_sync` caller does not need to change. */
+  idleLabel?: string;
+}) {
+  const label = progress ? stageLabel(t, progress.stage) : (idleLabel ?? t.syncing);
   const determinate = progress !== null && progress.total > 0;
   const pct = determinate ? Math.round((progress.completed / progress.total) * 100) : null;
 
