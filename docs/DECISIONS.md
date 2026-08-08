@@ -1120,3 +1120,44 @@ stores it on the run so a later export uses the same setting. With it off, outpu
 
 **Verification harness.** `scripts/resolve-verify.py` now reports each clip's **END**
 alignment (start + duration), not only its start — that is where uncorrected drift shows.
+
+## D-043 — E7: consent + anonymous telemetry client
+
+**E7, mirror of SundayRec's telemetry client.** SundaySync ships an **opt-in, off-until-granted**
+telemetry client (data controller: **SundaySuite**), versioned at **consent v1** — a scope bump
+re-asks everyone, and a "no" at v1 never silently becomes a "yes" at v2. A random UUIDv4
+install-id is minted **only on grant** (`NIL_INSTALL_ID` otherwise) and is deletable by id (local
+clear + remote `DELETE /v1/install/:id`, issued even with consent off since it carries only a
+retired random id).
+
+**The payload is anonymous and bucketed by construction.** From a completed `SyncResult` the
+projection reads only counts, closed enums, and coarse bands — never a filename, path, device or
+folder label, project name, or recording timestamp. Fields: file/device counts, total-duration and
+run-duration buckets, §5 unsynced-reason histogram, PSR distribution bands, drift-correction
+flags (`enabled`/`clips`/`corrected`), a **file-format histogram** (extensions only, a closed set),
+`mixedFps`. Crash messages are the sole free text — scrubbed (paths → `<path>`) and length-capped,
+on both the Rust panic-hook ring and the frontend `window.onerror`/`unhandledrejection` path. A
+load-bearing test builds a `SyncResult` full of church paths/labels and asserts none of those
+strings appear anywhere in the serialized payload.
+
+**Consent copy ↔ payload reconciled (owner, 2026-08-08).** The approved v1 copy enumerated
+"buffertreff" (cache hit-rate), which v1 does **not** collect, and omitted the file-format histogram,
+which it **does** send. Owner chose to make the copy exactly truthful: drop the cache-hit line, add
+"hvilke filformater (kun filendelser, aldri filnavn)". The copy now names precisely what leaves the
+machine — the SundayRec "consent covers what is sent" rule.
+
+**Transport.** Rides the shared `sunday-telemetry` Worker `/v1/ingest` with a top-level
+`app:"sundaysync"` marker. A ≤50 outbox drops-oldest and treats a non-2xx as logged-and-kept/dropped
+(4xx permanent, 429/5xx backed-off) — **never silently discarded** (the ellipsis-bug lesson). State
+persists to JSON under the app data dir. `reqwest` is pinned to `native-tls` so the license
+allow-list (cargo-deny) stays satisfied.
+
+**Worker dependency (E8).** The shared Worker does **not yet** accept sundaysync payloads — its
+validator's key list is closed, so every sundaysync send is a permanent 400 until E8 ships the app
+dimension + sundaysync validator + tables. That is by design (client built in E7, Worker taught in
+E8); the client logs the 400 locally and sends nothing in production until a release ships against a
+deployed Worker. **E8 status:** a Worker branch (`e8/sundaysync-app-dimension` in the sunday-telemetry
+repo) is built and tested but **parked, not merged, not deployed** — it collides with concurrent
+app-dimension work on that shared repo (`audit/wire-seams` has its own `src/apps.ts` + `0006`
+migration), and its validator shape still needs reconciling field-for-field against this client. Both
+are owner/cross-program coordination items.

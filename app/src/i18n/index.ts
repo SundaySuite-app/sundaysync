@@ -165,6 +165,49 @@ export const nb = {
   obFfmpegMissing: "ffmpeg ble ikke funnet",
   obFfmpegHow: "Installer med Homebrew:",
   obCheckAgain: "Sjekk igjen",
+
+  // Telemetry consent (E7 CONSENT-UX) — copy v1, owner-approved verbatim. Formatted into
+  // paragraphs/bullets for readability; the meaning, the "aldri …" point and the
+  // "Behandlingsansvarlig: SundaySuite" line must not change without re-approval.
+  consentTitle: "Hjelpe oss å gjøre SundaySync bedre?",
+  consentIntro: "Appen kan sende anonym bruks- og feilinformasjon.",
+  consentNeverLabel:
+    "Aldri filnavn, mapper, enhetsnavn eller noe fra innholdet ditt — bare tekniske tall:",
+  consentPoints: [
+    "App- og motorversjon",
+    "Operativsystem",
+    "Hvor mange filer og enheter, og total varighet (i grove intervaller)",
+    "Om synkroniseringen lyktes",
+    "PSR- og drift-fordeling",
+    "Hvilke filformater (kun filendelser, aldri filnavn)",
+    "Eventuelle feil eller krasj",
+  ] as string[],
+  consentFooter:
+    "Hver installasjon får en tilfeldig ID uten kobling til deg eller menigheten. Du kan når som helst skru det av i Innstillinger eller be om at dataene slettes. Alt lagres i EU.",
+  consentController: "Behandlingsansvarlig: SundaySuite.",
+  consentAccept: "Ja, hjelp gjerne",
+  consentDecline: "Nei takk",
+
+  // Settings — telemetry section
+  telemetryTitle: "Anonym bruksstatistikk",
+  telemetryToggleLabel: "Del anonym bruksstatistikk",
+  telemetryToggleHint:
+    "Av til du slår det på. Du kan når som helst se nøyaktig hva som ville blitt sendt, eller be om at dataene slettes.",
+  telemetryStatus: (granted: boolean, queued: number): string => {
+    if (!granted) return "Av";
+    if (queued <= 0) return "På";
+    return queued === 1 ? "På · 1 i kø" : `På · ${queued} i kø`;
+  },
+  telemetryUnavailable: "Ikke tilgjengelig i denne versjonen.",
+  telemetryShowPreview: "Vis hva vi sender",
+  telemetryPreviewTitle: "Dette sender vi",
+  telemetryPreviewLoading: "Henter …",
+  telemetryPreviewEmpty: "Ingenting å vise ennå.",
+  telemetryShowConsent: "Vis samtykketeksten igjen",
+  telemetryDelete: "Slett mine data",
+  telemetryDeleteConfirm: "Be om at all telemetridata for denne installasjonen slettes?",
+  telemetryDeleted: "Forespørsel sendt — dataene slettes.",
+  telemetryDeleteFailed: "Kunne ikke sende sletteforespørsel. Prøv igjen senere.",
 };
 
 export type Strings = typeof nb;
@@ -311,6 +354,47 @@ export const en: Strings = {
   obFfmpegMissing: "ffmpeg was not found",
   obFfmpegHow: "Install with Homebrew:",
   obCheckAgain: "Check again",
+
+  // Telemetry consent (E7 CONSENT-UX) — faithful English mirror of the approved nb copy.
+  consentTitle: "Help us make SundaySync better?",
+  consentIntro: "The app can send anonymous usage and error information.",
+  consentNeverLabel:
+    "Never filenames, folders, device names, or anything from your content — only technical numbers:",
+  consentPoints: [
+    "App and engine version",
+    "Operating system",
+    "How many files and devices, and total duration (in coarse buckets)",
+    "Whether the sync succeeded",
+    "PSR and drift distribution",
+    "Which file formats (extensions only, never filenames)",
+    "Any errors or crashes",
+  ] as string[],
+  consentFooter:
+    "Each installation gets a random ID with no link to you or your congregation. You can turn it off in Settings at any time, or ask for the data to be deleted. Everything is stored in the EU.",
+  consentController: "Data controller: SundaySuite.",
+  consentAccept: "Yes, happy to help",
+  consentDecline: "No thanks",
+
+  // Settings — telemetry section
+  telemetryTitle: "Anonymous usage statistics",
+  telemetryToggleLabel: "Share anonymous usage statistics",
+  telemetryToggleHint:
+    "Off until you turn it on. You can see exactly what would be sent, or ask for the data to be deleted, at any time.",
+  telemetryStatus: (granted: boolean, queued: number): string => {
+    if (!granted) return "Off";
+    if (queued <= 0) return "On";
+    return queued === 1 ? "On · 1 queued" : `On · ${queued} queued`;
+  },
+  telemetryUnavailable: "Not available in this version.",
+  telemetryShowPreview: "Show what we send",
+  telemetryPreviewTitle: "This is what we send",
+  telemetryPreviewLoading: "Loading …",
+  telemetryPreviewEmpty: "Nothing to show yet.",
+  telemetryShowConsent: "Show the consent text again",
+  telemetryDelete: "Delete my data",
+  telemetryDeleteConfirm: "Ask for all telemetry data for this installation to be deleted?",
+  telemetryDeleted: "Request sent — the data will be deleted.",
+  telemetryDeleteFailed: "Could not send the deletion request. Try again later.",
 };
 
 export const dictionaries = { nb, en };

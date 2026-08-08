@@ -5,6 +5,13 @@ import type { Lang, Strings } from "../i18n";
 import { formatBytes } from "../i18n";
 import { getSettings, parseMinPsrInput, saveSettings } from "../settings";
 import { describeSidecar } from "../sidecarStatus";
+import {
+  getTelemetryPreview,
+  getTelemetryStatus,
+  requestTelemetryDeletion,
+  setTelemetryConsent,
+  type TelemetryStatus,
+} from "../telemetry";
 import type { CacheStatus, SidecarStatus } from "../types";
 import { Dialog } from "./Dialog";
 
@@ -21,12 +28,14 @@ export function SettingsPanel({
   onClose,
   onLangChange,
   onShowOnboarding,
+  onShowConsent,
   onNotice,
 }: {
   t: Strings;
   onClose: () => void;
   onLangChange: (lang: Lang | null) => void;
   onShowOnboarding: () => void;
+  onShowConsent: () => void;
   onNotice: (kind: "ok" | "error", text: string) => void;
 }) {
   const settings = getSettings();
@@ -42,6 +51,12 @@ export function SettingsPanel({
   );
   const [cacheCapError, setCacheCapError] = useState(false);
   const [correctDrift, setCorrectDrift] = useState(settings.correctDrift);
+  const [telemetry, setTelemetry] = useState<TelemetryStatus | null>(null);
+  const [telemetryBusy, setTelemetryBusy] = useState(false);
+  const [telemetryPreview, setTelemetryPreview] = useState<string | null>(null);
+  const [telemetryPreviewLoading, setTelemetryPreviewLoading] = useState(false);
+  const [showTelemetryPreview, setShowTelemetryPreview] = useState(false);
+  const [confirmTelemetryDelete, setConfirmTelemetryDelete] = useState(false);
 
   const refreshCache = () => {
     invoke<CacheStatus>("cache_status", { dir: getSettings().cacheDir })
@@ -54,6 +69,38 @@ export function SettingsPanel({
       .then(setSidecar)
       .catch(() => setSidecar(null));
   }, []);
+  useEffect(() => {
+    getTelemetryStatus().then(setTelemetry);
+  }, []);
+
+  const toggleTelemetry = async (granted: boolean) => {
+    setTelemetryBusy(true);
+    const status = await setTelemetryConsent(granted);
+    setTelemetryBusy(false);
+    if (status) {
+      setTelemetry(status);
+    } else {
+      onNotice("error", t.telemetryUnavailable);
+    }
+  };
+
+  const openTelemetryPreview = async () => {
+    setShowTelemetryPreview(true);
+    setTelemetryPreviewLoading(true);
+    const text = await getTelemetryPreview();
+    setTelemetryPreviewLoading(false);
+    setTelemetryPreview(text);
+  };
+
+  const deleteTelemetryData = async () => {
+    setConfirmTelemetryDelete(false);
+    const ok = await requestTelemetryDeletion();
+    onNotice(ok ? "ok" : "error", ok ? t.telemetryDeleted : t.telemetryDeleteFailed);
+    if (ok) {
+      const status = await getTelemetryStatus();
+      if (status) setTelemetry(status);
+    }
+  };
 
   const commitMinPsr = () => {
     const parsed = parseMinPsrInput(minPsrDraft);
@@ -129,7 +176,8 @@ export function SettingsPanel({
   };
 
   return (
-    <Dialog titleId="settings-title" onClose={onClose} closeLabel={t.close}>
+    <>
+      <Dialog titleId="settings-title" onClose={onClose} closeLabel={t.close}>
       <h2 id="settings-title">{t.settings}</h2>
       <div className="settings">
         <label className="field">
@@ -253,6 +301,65 @@ export function SettingsPanel({
 
         <hr className="sep" />
 
+        <div className="field">
+          <span>{t.telemetryTitle}</span>
+          <label className="field field--check">
+            <span className="field__row">
+              <input
+                type="checkbox"
+                checked={telemetry?.granted ?? false}
+                disabled={telemetryBusy || !telemetry}
+                onChange={(e) => void toggleTelemetry(e.target.checked)}
+              />
+              <span>{t.telemetryToggleLabel}</span>
+            </span>
+            <small>{t.telemetryToggleHint}</small>
+          </label>
+          <small className="subtle">
+            {telemetry ? t.telemetryStatus(telemetry.granted, telemetry.queued) : t.telemetryUnavailable}
+          </small>
+          <div className="actions">
+            <button type="button" className="secondary" onClick={() => void openTelemetryPreview()}>
+              {t.telemetryShowPreview}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                onClose();
+                onShowConsent();
+              }}
+            >
+              {t.telemetryShowConsent}
+            </button>
+            {confirmTelemetryDelete ? (
+              <>
+                <span className="subtle">{t.telemetryDeleteConfirm}</span>
+                <button type="button" className="danger" onClick={() => void deleteTelemetryData()}>
+                  {t.telemetryDelete}
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setConfirmTelemetryDelete(false)}
+                >
+                  {t.cancel}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setConfirmTelemetryDelete(true)}
+              >
+                {t.telemetryDelete}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <hr className="sep" />
+
         <div className="actions">
           <button
             type="button"
@@ -278,6 +385,31 @@ export function SettingsPanel({
           </small>
         )}
       </div>
-    </Dialog>
+      </Dialog>
+
+      {showTelemetryPreview && (
+        <Dialog
+          titleId="telemetry-preview-title"
+          onClose={() => setShowTelemetryPreview(false)}
+          closeLabel={t.close}
+        >
+          <h2 id="telemetry-preview-title">{t.telemetryPreviewTitle}</h2>
+          {telemetryPreviewLoading ? (
+            <p>{t.telemetryPreviewLoading}</p>
+          ) : (
+            <pre
+              style={{
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontSize: "0.8125rem",
+                lineHeight: 1.5,
+              }}
+            >
+              {telemetryPreview ?? t.telemetryPreviewEmpty}
+            </pre>
+          )}
+        </Dialog>
+      )}
+    </>
   );
 }
