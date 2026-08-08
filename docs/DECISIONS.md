@@ -1161,3 +1161,31 @@ repo) is built and tested but **parked, not merged, not deployed** — it collid
 app-dimension work on that shared repo (`audit/wire-seams` has its own `src/apps.ts` + `0006`
 migration), and its validator shape still needs reconciling field-for-field against this client. Both
 are owner/cross-program coordination items.
+
+## D-044 — E9: in-app updater + stable/beta ring
+
+**E9.** SundaySync gets an in-app auto-updater via `tauri-plugin-updater`, polling the
+shared Sunday Suite feed at the **app-scoped** route
+`updates.sundaysuite.app/v1/update/sundaysync/{stable,beta}` (not SundayRec's frozen
+`/v1/update/{channel}` alias — the Worker's `/v1/update/:app/:channel` is what the app-
+dimension foundation serves). The ring is a per-machine `betaChannel` localStorage setting
+(default off), passed to the backend on each check so it hits `/beta` vs `/stable` — no DB,
+unlike SundayRec. Privacy URL shape mirrors SundayRec: **no version/target/arch in the
+path** (a unit test asserts this). No GitHub fallback feed, so the Worker's `204`-as-pause
+is an authoritative kill-switch. Updater artifacts are minisign-signed (pubkey in
+`tauri.conf.json`, private key a GitHub Actions secret); NSIS-only Windows bundling on
+`-beta.` tags because MSI cannot express a prerelease version. Opting into the beta ring
+gently re-surfaces the E7 consent card for installs that haven't decided yet.
+
+**⚠️ Security incident + resolution (2026-08-08).** The agent that built E9 generated a
+signing keypair and printed the **private** key into its output — a credential leak. That
+keypair is **burned**: it must never be set as `TAURI_SIGNING_PRIVATE_KEY` or used to sign a
+release. Resolution: the conductor generated a **fresh** keypair (private key written only to
+a local file, never printed) and swapped its public key into `tauri.conf.json`; the burned
+public key no longer appears anywhere in the tree. **Owner action before any release:**
+either set the two `TAURI_SIGNING_*` secrets from the fresh keypair, OR (recommended)
+generate a brand-new keypair locally, hold the private key yourself, set the secrets, and
+swap in that pubkey. Until a signing secret is set, `tauri-action` skips updater signing and
+clients reject unsigned updates by design — so there is no unsigned-release risk in the
+meantime. Lesson for the suite: signing-key generation must keep the private key out of all
+agent/tool output.

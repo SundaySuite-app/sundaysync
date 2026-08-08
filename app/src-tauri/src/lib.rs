@@ -734,6 +734,252 @@ fn default_cache_dir() -> Result<PathBuf, String> {
     sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())
 }
 
+// ── E9: in-app auto-updater (docs/V02-PROGRAM.md E9) ────────────────────────
+//
+// Mirrors SundayRec's proven updater, adapted to SundaySync's DB-free world: the
+// release channel is not read from a database here. The frontend owns the
+// `betaChannel` setting (localStorage, see settings.ts) and passes `beta` on every
+// call, so this layer stays a thin, stateless bridge over `tauri-plugin-updater`.
+// Terminal states are returned directly; the transient "checking"/"downloading"
+// UI states the renderer drives itself (it listens to `update:progress` for the
+// live download percent), matching how the sync pipeline already reports progress.
+
+/// Base URL of the Sunday Suite update feed.
+///
+/// `option_env!` reads the environment at COMPILE time: the value baked in when the
+/// binary was built is the only one it will ever use. A plain release ships the
+/// production Worker; a build aimed at the local E2E ring sets `SUNDAYSYNC_UPDATE_BASE`
+/// at build time. Setting it in the *running* app does nothing — this has caught
+/// people on the sibling app before, which is why it says so out loud.
+fn update_base() -> &'static str {
+    option_env!("SUNDAYSYNC_UPDATE_BASE").unwrap_or("https://updates.sundaysuite.app")
+}
+
+/// The feed URL for one ring: `{base}/v1/update/sundaysync/{stable|beta}`.
+///
+/// PRIVACY (mirrors SundayRec exactly): the path carries no `{{current_version}}`,
+/// target or arch — nothing about this install leaks in the URL. It is the
+/// **app-scoped** route (`/sundaysync/…`), deliberately NOT SundayRec's frozen
+/// `/v1/update/{channel}` alias.
+fn channel_feed_url(base: &str, beta: bool) -> String {
+    let channel = if beta { "beta" } else { "stable" };
+    format!("{base}/v1/update/sundaysync/{channel}")
+}
+
+/// Clamped download percentage for the progress event. `total == 0` (the server
+/// sent no `Content-Length`) reads as 0 rather than dividing by zero.
+fn update_percent(downloaded: u64, total: u64) -> u8 {
+    if total == 0 {
+        return 0;
+    }
+    (downloaded.saturating_mul(100) / total).min(100) as u8
+}
+
+/// The update phases the renderer renders. Serialised tagged so the frontend gets a
+/// discriminated union (`{ phase: "available", version: "0.2.0" }`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "phase", rename_all = "camelCase")]
+enum UpdateStatus {
+    /// This build is current — includes the 204/paused-ring "nothing promoted" case.
+    UpToDate,
+    /// A newer signed release is offered on the chosen ring.
+    Available { version: String },
+    /// Downloaded + staged; the app must relaunch to apply it.
+    ReadyToInstall { version: String },
+    /// The check or download failed (network, signature, feed). Carries a message.
+    Error { message: String },
+}
+
+/// Download-progress payload for the `update:progress` event.
+#[derive(Debug, Clone, Serialize)]
+struct UpdateProgress {
+    version: String,
+    percent: u8,
+}
+
+/// An updater pointed at exactly one ring's feed.
+///
+/// The endpoint is set here, at run time, rather than taken from `tauri.conf.json`:
+/// the ring is a per-machine setting and the config is baked into the bundle, so a
+/// config-only feed could never follow the beta toggle. There is deliberately **no
+/// fallback to any other feed** when the Worker is unreachable — the one scenario the
+/// Worker exists for is "stop serving this version to everyone", and a client that
+/// quietly asked elsewhere would fetch precisely the build the kill-switch was pulled
+/// for. A check that cannot reach the Worker surfaces as a failed check.
+fn build_updater(app: &AppHandle, beta: bool) -> Result<tauri_plugin_updater::Updater, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let feed = channel_feed_url(update_base(), beta);
+    let url = tauri::Url::parse(&feed).map_err(|e| format!("update feed url {feed}: {e}"))?;
+    app.updater_builder()
+        .endpoints(vec![url])
+        .map_err(|e| format!("updater endpoint {feed}: {e}"))?
+        .build()
+        .map_err(|e| format!("updater init: {e}"))
+}
+
+/// Check the chosen ring for a newer signed release.
+///
+/// Dev builds short-circuit to `upToDate` so a developer never sees a feed error from
+/// `tauri dev` (there is no signed release to update to). The plugin's `check()` does
+/// the semver comparison itself and only yields `Some` when the feed is genuinely
+/// newer; a 204 (nothing promoted, or a paused ring — the kill-switch) becomes
+/// `Ok(None)`, i.e. "nothing to update to", not an error the user has to interpret.
+#[tauri::command]
+async fn update_check(app: AppHandle, beta: bool) -> Result<UpdateStatus, String> {
+    if cfg!(debug_assertions) {
+        return Ok(UpdateStatus::UpToDate);
+    }
+    let updater = build_updater(&app, beta)?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(UpdateStatus::Available {
+            version: update.version.clone(),
+        }),
+        Ok(None) => Ok(UpdateStatus::UpToDate),
+        Err(e) => Ok(UpdateStatus::Error {
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// Download + install the pending update, emitting `update:progress` as the bytes
+/// stream in, and leave the status at `readyToInstall`. The renderer then offers
+/// "restart & install" (`update_relaunch`).
+///
+/// The ring is re-resolved from the passed `beta` rather than carried over from the
+/// check: the user may have toggled the channel between the check and the click, and
+/// the download must come from the ring they are on NOW.
+#[tauri::command]
+async fn update_download_install(app: AppHandle, beta: bool) -> Result<UpdateStatus, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    if cfg!(debug_assertions) {
+        return Ok(UpdateStatus::UpToDate);
+    }
+    let updater = build_updater(&app, beta)?;
+    let update = match updater.check().await {
+        Ok(Some(u)) => u,
+        Ok(None) => return Ok(UpdateStatus::UpToDate),
+        Err(e) => {
+            return Ok(UpdateStatus::Error {
+                message: e.to_string(),
+            })
+        }
+    };
+
+    let version = update.version.clone();
+    // `on_download` is `Fn` (not `FnMut`), so the running total lives in an atomic.
+    let downloaded = Arc::new(AtomicU64::new(0));
+    let app_for_progress = app.clone();
+    let ver_for_progress = version.clone();
+    let result = update
+        .download_and_install(
+            move |chunk_len, content_length| {
+                let total = content_length.unwrap_or(0);
+                let so_far =
+                    downloaded.fetch_add(chunk_len as u64, Ordering::SeqCst) + chunk_len as u64;
+                let _ = app_for_progress.emit(
+                    "update:progress",
+                    UpdateProgress {
+                        version: ver_for_progress.clone(),
+                        percent: update_percent(so_far, total),
+                    },
+                );
+            },
+            || {},
+        )
+        .await;
+
+    match result {
+        Ok(()) => Ok(UpdateStatus::ReadyToInstall { version }),
+        Err(e) => Ok(UpdateStatus::Error {
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// Relaunch the app so a staged update takes effect.
+///
+/// On macOS `app.restart()` does not actually restart (rig-verified on the sibling
+/// app: the bundle is replaced but the old process keeps running), so a detached
+/// helper re-opens the updated bundle once we exit via the normal path. Every other
+/// platform uses `app.restart()`.
+#[tauri::command]
+fn update_relaunch(app: AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        // current_exe = <bundle>.app/Contents/MacOS/<bin> → the .app is 3 up.
+        let bundle = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.ancestors().nth(3).map(PathBuf::from))
+            .filter(|p| p.extension().is_some_and(|e| e == "app"));
+        if let Some(bundle) = bundle {
+            let quoted = format!("'{}'", bundle.to_string_lossy().replace('\'', r"'\''"));
+            let script = format!("sleep 0.7; open -n {quoted}");
+            if std::process::Command::new("/bin/sh")
+                .args(["-c", &script])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .is_ok()
+            {
+                app.exit(0);
+                return;
+            }
+            // Helper spawn failed — fall through to restart() (worse odds, not none).
+        }
+    }
+    app.restart();
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    #[test]
+    fn feed_url_is_app_scoped_and_leaks_nothing() {
+        let base = "https://updates.sundaysuite.app";
+        assert_eq!(
+            channel_feed_url(base, false),
+            "https://updates.sundaysuite.app/v1/update/sundaysync/stable"
+        );
+        assert_eq!(
+            channel_feed_url(base, true),
+            "https://updates.sundaysuite.app/v1/update/sundaysync/beta"
+        );
+        // Privacy: no version/target/arch placeholders in the path (SundayRec parity).
+        for beta in [false, true] {
+            let url = channel_feed_url(base, beta);
+            assert!(!url.contains("{{"));
+            assert!(!url.contains("current_version"));
+            assert!(!url.contains("target"));
+            assert!(!url.contains("arch"));
+            // App-scoped route, not the frozen `/v1/update/{channel}` alias.
+            assert!(url.contains("/v1/update/sundaysync/"));
+        }
+    }
+
+    #[test]
+    fn update_base_defaults_to_the_worker() {
+        // No `SUNDAYSYNC_UPDATE_BASE` is baked into a test build, so this pins what a
+        // plain build ships: the Worker, never a GitHub feed.
+        assert_eq!(update_base(), "https://updates.sundaysuite.app");
+        assert!(!update_base().contains("github.com"));
+    }
+
+    #[test]
+    fn percent_is_clamped_and_zero_safe() {
+        assert_eq!(update_percent(0, 0), 0);
+        assert_eq!(update_percent(50, 0), 0);
+        assert_eq!(update_percent(0, 100), 0);
+        assert_eq!(update_percent(50, 100), 50);
+        assert_eq!(update_percent(100, 100), 100);
+        // A server that over-reports never pushes the bar past 100.
+        assert_eq!(update_percent(150, 100), 100);
+    }
+}
+
 /// # Panics
 /// Only if Tauri itself cannot start, which is not a recoverable condition.
 pub fn run() {
@@ -744,6 +990,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // E9: the in-app auto-updater. Its endpoint is overridden per-ring at run
+        // time (see `build_updater`), but the plugin still needs registering so the
+        // updater builder + signature check are available.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(telemetry::TelemetryState::new())
         .setup(|app| {
             // Resolved once, eagerly: the first sync should not pay for two `-version`
@@ -797,6 +1047,9 @@ pub fn run() {
             export_diagnostics,
             check_sidecar,
             default_cache_dir,
+            update_check,
+            update_download_install,
+            update_relaunch,
             telemetry::telemetry_status,
             telemetry::set_telemetry_consent,
             telemetry::telemetry_preview,

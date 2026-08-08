@@ -37,6 +37,13 @@ export interface Settings {
    * a frame, so this is a safety valve, not a per-clip control.
    */
   correctDrift: boolean;
+  /**
+   * E9 (D-044): follow the **beta** update ring instead of **stable**. Off by default —
+   * an untouched install only ever sees promoted stable releases. When on, the update
+   * check hits `.../v1/update/sundaysync/beta` (see update.ts). Per-machine, like every
+   * other advanced setting.
+   */
+  betaChannel: boolean;
   onboardingDone: boolean;
 }
 
@@ -47,6 +54,7 @@ export const DEFAULTS: Settings = {
   cacheDir: null,
   cacheCapMb: null,
   correctDrift: true,
+  betaChannel: false,
   onboardingDone: false,
 };
 
@@ -71,6 +79,9 @@ function load(): Settings {
       // Defaults to on: only an explicit stored `false` disables it, so a fresh or corrupt
       // blob keeps drift correction (D-042's on-by-default).
       correctDrift: p.correctDrift !== false,
+      // Defaults to off: only an explicit stored `true` opts into the beta ring (D-044),
+      // so a fresh or corrupt blob stays on stable.
+      betaChannel: p.betaChannel === true,
       onboardingDone: p.onboardingDone === true,
     };
   } catch {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Lang, Strings } from "../i18n";
 import { formatBytes } from "../i18n";
 import { getSettings, parseMinPsrInput, saveSettings } from "../settings";
@@ -12,8 +13,35 @@ import {
   setTelemetryConsent,
   type TelemetryStatus,
 } from "../telemetry";
+import {
+  checkForUpdate,
+  downloadAndInstall,
+  relaunchForUpdate,
+  subscribeProgress,
+  type UpdateStatus,
+} from "../update";
 import type { CacheStatus, SidecarStatus } from "../types";
 import { Dialog } from "./Dialog";
+
+/** Localised one-line status under the update controls. */
+function updateStatusText(t: Strings, u: UpdateStatus): string {
+  switch (u.phase) {
+    case "idle":
+      return t.updateIdle;
+    case "checking":
+      return t.updateChecking;
+    case "upToDate":
+      return t.updateUpToDate;
+    case "available":
+      return t.updateAvailable(u.version);
+    case "downloading":
+      return t.updateDownloading(u.percent);
+    case "readyToInstall":
+      return t.updateReady(u.version);
+    case "error":
+      return t.updateError(u.message);
+  }
+}
 
 /**
  * §9 advanced mode as a settings dialog — every field persisted (D-029), every field
@@ -57,6 +85,9 @@ export function SettingsPanel({
   const [telemetryPreviewLoading, setTelemetryPreviewLoading] = useState(false);
   const [showTelemetryPreview, setShowTelemetryPreview] = useState(false);
   const [confirmTelemetryDelete, setConfirmTelemetryDelete] = useState(false);
+  const [betaChannel, setBetaChannel] = useState(settings.betaChannel);
+  const [update, setUpdate] = useState<UpdateStatus>({ phase: "idle" });
+  const [updateBusy, setUpdateBusy] = useState(false);
 
   const refreshCache = () => {
     invoke<CacheStatus>("cache_status", { dir: getSettings().cacheDir })
@@ -72,6 +103,53 @@ export function SettingsPanel({
   useEffect(() => {
     getTelemetryStatus().then(setTelemetry);
   }, []);
+
+  // E9: live download percent while an update installs. Subscribe once; the backend emits
+  // `update:progress` from its download closure.
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    subscribeProgress((p) => {
+      setUpdate({ phase: "downloading", version: p.version, percent: p.percent });
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // E9: opting into the beta ring is the natural moment to re-offer telemetry (a beta
+  // tester is a good person to hear from). Gentle: only re-surfaces the consent card for an
+  // install that hasn't answered yet (`consentVersion === null`), never re-nags someone who
+  // already decided, and never blocks the toggle itself.
+  const toggleBeta = (on: boolean) => {
+    setBetaChannel(on);
+    saveSettings({ betaChannel: on });
+    if (on && telemetry && telemetry.consentVersion === null) {
+      onShowConsent();
+    }
+  };
+
+  const runUpdateCheck = async () => {
+    setUpdateBusy(true);
+    setUpdate({ phase: "checking" });
+    const status = await checkForUpdate(getSettings().betaChannel);
+    setUpdate(status);
+    setUpdateBusy(false);
+  };
+
+  const runDownloadInstall = async () => {
+    setUpdateBusy(true);
+    setUpdate((s) =>
+      s.phase === "available" ? { phase: "downloading", version: s.version, percent: 0 } : s,
+    );
+    const status = await downloadAndInstall(getSettings().betaChannel);
+    setUpdate(status);
+    setUpdateBusy(false);
+  };
 
   const toggleTelemetry = async (granted: boolean) => {
     setTelemetryBusy(true);
@@ -356,6 +434,53 @@ export function SettingsPanel({
               </button>
             )}
           </div>
+        </div>
+
+        <hr className="sep" />
+
+        <div className="field">
+          <span>{t.systemTitle}</span>
+          <label className="field field--check">
+            <span className="field__row">
+              <input
+                type="checkbox"
+                checked={betaChannel}
+                onChange={(e) => toggleBeta(e.target.checked)}
+              />
+              <span>{t.betaChannelLabel}</span>
+            </span>
+            <small>{t.betaChannelHint}</small>
+          </label>
+          <div className="actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={updateBusy}
+              onClick={() => void runUpdateCheck()}
+            >
+              {t.updateCheck}
+            </button>
+            {update.phase === "available" && (
+              <button
+                type="button"
+                className="primary"
+                disabled={updateBusy}
+                onClick={() => void runDownloadInstall()}
+              >
+                {t.updateDownload(update.version)}
+              </button>
+            )}
+            {update.phase === "readyToInstall" && (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void relaunchForUpdate()}
+              >
+                {t.updateRestart}
+              </button>
+            )}
+          </div>
+          <small className="subtle">{updateStatusText(t, update)}</small>
         </div>
 
         <hr className="sep" />

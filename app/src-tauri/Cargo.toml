@@ -23,6 +23,15 @@ sundaysync-core = { path = "../../crates/core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+# E9 in-app auto-updater (docs/V02-PROGRAM.md E9). Standard Tauri plugin.
+#
+# `default-features = false` + `native-tls` for the SAME licensing reason the reqwest
+# entry below spells out: the plugin's default is `rustls-tls`, and rustls pulls
+# `aws-lc-rs`/`ring`, whose non-SPDX licenses ("OpenSSL", a bare LICENSE file) are NOT
+# on deny.toml's allow-list — a rustls-tls updater would fail `cargo deny`. native-tls
+# reuses the platform TLS stack already vendored in for `reqwest` (Security.framework
+# on macOS, SChannel on Windows, system OpenSSL on the Linux CI runners).
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # E7 telemetry (anonymous, consent-gated). `uuid`/`dirs`/`tempfile` are already

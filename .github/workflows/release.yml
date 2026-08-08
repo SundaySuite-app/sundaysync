@@ -6,13 +6,24 @@
 # The tag triggers builds on macOS (Apple Silicon) and Windows, and publishes a
 # GitHub Release with the installers attached.
 #
-# ── STATUS: TEST BUILDS, deliberately unsigned ─────────────────────────────────
-# Phase 9 (PLAN §11) owns signing, notarization and the updater — all gated on
-# owner-held certificates and keys. Until then these artifacts are for testing:
+# ── STATUS: unsigned installers; updater WIRED, activates on the signing secret ─
+# Code-signing + notarization are still a follow-up (owner-held Apple certs), so
+# these installers are unsigned for now:
 #
 #   macOS:   Gatekeeper will block the unsigned app. Right-click → Open (once),
 #            or: xattr -cr /Applications/SundaySync.app
 #   Windows: SmartScreen will warn. "More info" → "Run anyway".
+#
+# The in-app AUTO-UPDATER is wired (E9, docs/V02-PROGRAM.md): tauri.conf.json
+# carries the `plugins.updater` block (pubkey + endpoints) and
+# `bundle.createUpdaterArtifacts: true`, and this workflow sets
+# `uploadUpdaterJson: true` so `latest.json` ships with every release. The ONE
+# missing piece is the CI secret TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD) — until
+# it exists tauri-action skips updater signing and installed clients reject the
+# artifacts (an unsigned update is refused by design). Clients poll the Sunday
+# Suite feed at updates.sundaysuite.app/v1/update/sundaysync/{stable,beta}; a
+# release is only served once an owner promotes its tag, so publishing here does
+# not by itself push anything to anyone.
 #
 # ffmpeg and ffprobe are BUNDLED as of v0.1.2 (D-031): each runner fetches its
 # own SHA-256-pinned pair below, and tauri's `externalBin` places them next to
@@ -69,18 +80,26 @@ jobs:
         working-directory: app
         run: node scripts/fetch-ffmpeg.mjs
 
-      # tauri-action builds the bundle and attaches it to a draft-free prerelease.
-      # No signing secrets exist yet, so it produces unsigned installers (see header).
+      # tauri-action builds the bundle, signs the updater artifacts when the signing
+      # secret exists, and attaches everything (installers + latest.json) to the release.
       - name: Build and publish
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing (E9) — REQUIRED for auto-update to be accepted. Signs
+          # latest.json + the per-platform artifacts with the keypair from
+          # `npm run tauri signer generate` (the PUBLIC key is in tauri.conf.json).
+          # Absent → tauri-action still builds, but the updater artifacts are unsigned
+          # and installed clients refuse them. The private key must NEVER be committed;
+          # it lives only in Actions secrets. See docs header + the E9 report.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}
-          releaseName: "SundaySync ${{ github.ref_name }} (test build)"
+          releaseName: "SundaySync ${{ github.ref_name }}"
           releaseBody: |
-            **Testbygg — usignert.** Se README for hva appen gjør.
+            **Usignert installer.** Se README for hva appen gjør.
 
             **macOS:** Gatekeeper blokkerer usignerte apper. Høyreklikk → Åpne første gang,
             eller kjør `xattr -cr /Applications/SundaySync.app`.
@@ -90,8 +109,24 @@ jobs:
             appen; introduksjonen bekrefter det med en selvtest.
 
             ---
-            **Test build — unsigned.** macOS: right-click → Open the first time, or
+            **Unsigned installer.** macOS: right-click → Open the first time, or
             `xattr -cr /Applications/SundaySync.app`. Windows: SmartScreen → "More info"
             → "Run anyway". Everything bundled — nothing else to install; the app's
             onboarding self-test confirms it.
-          prerelease: true
+          # A `-beta.N` tag ships as a GitHub pre-release; a plain `vX.Y.Z` tag ships as a
+          # normal release. The updater feed (the Worker) serves only tags an owner has
+          # explicitly promoted, so this flag is only about how github.com labels the
+          # release — but a stable release must not be mislabelled a prerelease, hence the
+          # tracking rather than the old hardcoded `true`.
+          prerelease: ${{ contains(github.ref_name, '-beta.') }}
+          # Ships latest.json (the updater feed manifest) alongside the installers. The
+          # input is `uploadUpdaterJson` — the similarly-named `includeUpdaterJson` is NOT
+          # a real tauri-action input and is silently ignored (a footgun the sibling app
+          # hit). Without this the updater artifacts build but no manifest is published.
+          uploadUpdaterJson: true
+          # `--bundles nsis` on Windows BETA builds only. MSI's ProductVersion is three
+          # numeric fields and cannot express a `-beta.N` suffix — tauri refuses the MSI
+          # bundle outright ("pre-release identifier ... must be numeric-only"), which
+          # would fail every Windows beta at the bundling step. NSIS is what the updater
+          # installs from anyway; stable releases are untouched and still ship both.
+          args: ${{ (matrix.platform == 'windows-latest' && contains(github.ref_name, '-beta.')) && '--bundles nsis' || '' }}
