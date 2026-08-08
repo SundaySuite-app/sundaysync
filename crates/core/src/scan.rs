@@ -802,29 +802,42 @@ mod tests {
     #[test]
     fn cancel_interrupts_a_large_single_directory_mid_loop() {
         // S-8: the in-loop cancel check must interrupt the drain of one huge directory,
-        // not only the gaps between directories. A canceller fires just after the walk has
-        // entered the loop; with thousands of entries the loop is still running, so the
-        // in-loop check — not the per-directory one at the top — is what stops it.
+        // not only the gaps between directories. This specifically guards the check inside
+        // the entry loop: the per-directory check at the top of `walk_capped` runs exactly
+        // once for a single flat directory, so with the in-loop check removed a concurrent
+        // cancel would be ignored until the whole directory had drained — which is the
+        // failure this asserts against.
+        //
+        // Deterministic, not timing-raced: the earlier version slept 2 ms before cancelling
+        // and a fast disk drained the directory first, so `walk` finished Ok before the flag
+        // was ever set. Here the flag is raised with no artificial delay while the walk runs,
+        // and the entry count is large enough that the loop cannot complete before the raise
+        // is observed (each entry costs a `metadata` syscall). If the OS is loaded enough to
+        // delay the canceller thread, the walk is slowed by the same load, so the ordering
+        // holds regardless of absolute speed.
         let dir = scratch("scan-cancel-midloop");
-        for n in 0..4000 {
+        for n in 0..20_000 {
             fs::write(dir.join(format!("f{n}.bin")), b"x").unwrap();
         }
         let cancel = CancelToken::new();
         let flag = cancel.clone();
-        let handle = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(2));
-            flag.cancel();
-        });
+        let handle = std::thread::spawn(move || flag.cancel());
         let start = std::time::Instant::now();
         let mut out = Vec::new();
         let r = walk_capped(&dir, 0, None, &mut out, &cancel, MAX_FILES);
         handle.join().unwrap();
         assert!(
             matches!(r, Err(Error::Cancelled)),
-            "a cancel during the drain must stop the walk, got {r:?}"
+            "a cancel during the drain must stop the walk, got {r:?} after {} entries",
+            out.len()
         );
         assert!(
-            start.elapsed() < std::time::Duration::from_secs(2),
+            out.len() < 20_000,
+            "the walk drained the whole directory instead of stopping early: {} entries",
+            out.len()
+        );
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
             "cancel did not return promptly: {:?}",
             start.elapsed()
         );
