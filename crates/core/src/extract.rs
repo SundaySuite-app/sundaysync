@@ -14,7 +14,7 @@
 //!
 //! [`AnalysisAudio`] is deliberately opaque. It holds a `Vec<f32>` today; if Phase 3's
 //! access pattern turns out to want the memory-mapping §7.7 mentions, that becomes an
-//! implementation detail rather than an API break. See docs/DECISIONS.md D-012.
+//! implementation detail rather than an API break. See docs/DECISIONS.md D-011.
 
 use crate::cache::{Cache, CacheKey};
 use crate::error::{Error, Result};
@@ -272,6 +272,19 @@ impl Extractor {
             [
                 "-v".as_ref(),
                 "error".as_ref(),
+                // S-1 (docs/DECISIONS.md D-032): restrict the input demuxer to the local
+                // `file` protocol, exactly as the probe stage does. §4.1 does not reject
+                // by extension, so the same dropped file that reached probe reaches
+                // ffmpeg here; without this, an HLS/concat script masquerading as media
+                // would make ffmpeg fetch remote URLs (SSRF) or read arbitrary `file:///…`
+                // paths (local-file disclosure) during extraction. The output is a temp
+                // *file*, so `file` alone is the minimal set that keeps decoding working —
+                // no `pipe` is needed. `-safe 1` is NOT added here: unlike ffprobe, this
+                // ffmpeg rejects it as "Option not found" on non-concat input, and the
+                // concat demuxer's own safe-mode default already blocks unsafe names.
+                // Must precede `-i`.
+                "-protocol_whitelist".as_ref(),
+                "file".as_ref(),
                 "-i".as_ref(),
                 path.as_os_str(),
                 // §4.2 verbatim: first audio stream, mono, ANALYSIS_RATE, raw f32le.

@@ -114,6 +114,26 @@ pub fn probe(
 ) -> std::result::Result<Probed, ProbeError> {
     // `-v error` keeps the informational banner off stderr so what remains is a real
     // diagnostic worth showing the user.
+    //
+    // The three security flags before `-i` close the passive-input attack surface the E2
+    // threat model flagged (S-1/S-2, docs/DECISIONS.md D-032). §4.1 deliberately does not
+    // reject by extension, so a dropped "media" file may really be an HLS playlist or a
+    // `concat`/`ffconcat` script — and ffprobe, left to its defaults, would follow it:
+    //
+    //   * `-protocol_whitelist file` restricts every demuxer this probe engages to the
+    //     local `file` protocol only, so a nested `http(s)://` segment reference cannot
+    //     turn a passive probe into an outbound request (SSRF). This propagates to the
+    //     HLS demuxer's nested-protocol whitelist, verified to refuse `http` with
+    //     "Protocol 'http' not on whitelist 'file'".
+    //   * `-safe 1` pins the concat demuxer's safe mode on (it already defaults on, but a
+    //     future or system ffprobe with a looser default must not reopen the hole),
+    //     rejecting absolute and `file:`-protocol paths a concat script would otherwise
+    //     read — local-file disclosure. Verified harmless on ffprobe for wav/mp4/flac/aac.
+    //   * `-i` makes the path a flag *value* rather than a bare trailing positional, so a
+    //     file literally named `-show_data_hex` can no longer be parsed as an ffprobe
+    //     option (argument injection).
+    //
+    // The whitelist must precede `-i`, as it governs the input demuxer.
     let args = [
         "-v".as_ref(),
         "error".as_ref(),
@@ -121,6 +141,11 @@ pub fn probe(
         "json".as_ref(),
         "-show_format".as_ref(),
         "-show_streams".as_ref(),
+        "-protocol_whitelist".as_ref(),
+        "file".as_ref(),
+        "-safe".as_ref(),
+        "1".as_ref(),
+        "-i".as_ref(),
         path.as_os_str(),
     ];
 

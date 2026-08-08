@@ -1,0 +1,78 @@
+# cargo-deny configuration for SundaySync.
+#
+# Two workspaces exist in this repo: the root engine/CLI workspace (crates/core,
+# crates/cli, crates/fixturegen) and app/src-tauri, which is excluded from the root
+# workspace on purpose (docs/DECISIONS.md) and has its own, much larger dependency
+# tree (Tauri + webview plumbing). Both are checked with this same config:
+#
+#   cargo deny check
+#   (cd app/src-tauri && cargo deny check)
+#
+# docs/V02-PROGRAM.md E3 / S-9: cargo audit already runs in CI; this adds license
+# hygiene, duplicate-dependency visibility, and advisory enforcement for RustSec.
+#
+# Note on GPL: the shipped app bundles GPL-licensed ffmpeg/ffprobe *binaries* fetched
+# at build time (scripts/fetch-ffmpeg.mjs) as external sidecar processes invoked over
+# argv — they are not linked into the Rust binary and carry no Cargo dependency entry.
+# GPL is deliberately NOT in the crate license allow-list below; that list covers only
+# crates.io dependencies actually linked into the Rust code.
+
+[graph]
+# Check every target so we don't miss e.g. Windows-only deps in the Tauri workspace.
+all-features = true
+
+[advisories]
+# RustSec advisory database (https://github.com/rustsec/advisory-db).
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# A known, unpatched vulnerability must fail the build.
+yanked = "deny"
+ignore = [
+]
+
+[licenses]
+version = 2
+# Anything not explicitly allowed below fails the check. Keep this list to the
+# permissive licenses actually present in the dependency trees (see per-repo comments
+# in CI / the E3 stage report for how this list was derived) rather than a blanket
+# allow.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "OpenSSL",
+]
+confidence-threshold = 0.8
+
+[[licenses.clarify]]
+# ring's LICENSE file is an OpenSSL-style mix (its own permissive text plus inherited
+# OpenSSL/ISC/MIT fragments from the code it derives from) that the SPDX detector
+# can't score cleanly. This is the well-known clarification other cargo-deny configs
+# use for ring.
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[bans]
+# Duplicate transitive versions are noisy in any dependency tree this size (Tauri
+# alone pulls in several generations of windows-sys / syn / etc via unrelated
+# subtrees) and not worth failing the build over yet. Warn so drift is visible without
+# blocking CI; revisit as "deny" once the tree is actively pruned.
+multiple-versions = "warn"
+wildcards = "warn"
+deny = [
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
