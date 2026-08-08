@@ -179,7 +179,7 @@ export const nb = {
     "Hvor mange filer og enheter, og total varighet (i grove intervaller)",
     "Om synkroniseringen lyktes",
     "PSR- og drift-fordeling",
-    "Buffertreff",
+    "Hvilke filformater (kun filendelser, aldri filnavn)",
     "Eventuelle feil eller krasj",
   ] as string[],
   consentFooter:
@@ -366,7 +366,7 @@ export const en: Strings = {
     "How many files and devices, and total duration (in coarse buckets)",
     "Whether the sync succeeded",
     "PSR and drift distribution",
-    "Cache hits",
+    "Which file formats (extensions only, never filenames)",
     "Any errors or crashes",
   ] as string[],
   consentFooter:

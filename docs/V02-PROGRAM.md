@@ -310,7 +310,29 @@ spike against real DaVinci Resolve before any engine code:
 - **Owner decision in this stage:** mechanism sign-off after the spike report
   (especially if outcome 3 is the only one that works).
 
-### E7 — Consent + telemetry client
+### E7 — Consent + telemetry client ✅ done 2026-08-08
+
+**Done — 2026-08-08 (PR pending).** Two worktree agents (Opus shell-core / Sonnet consent-UX),
+mirror of SundayRec's telemetry client. Opt-in, off-until-granted, consent v1 (versioned),
+data controller SundaySuite. Random UUIDv4 install-id minted only on grant (NIL otherwise),
+deletable by id. Anonymous bucketed payload from `SyncResult` (counts/enums/bands only — a
+load-bearing test proves no path/filename/label leaks); crash messages the sole free text,
+scrubbed + capped on both the Rust panic-hook ring and the frontend
+`window.onerror`/`unhandledrejection` path. ≤50 outbox, drop-oldest, non-2xx logged-not-silently-
+dropped. Standalone `ConsentCard` (shown when `consentVersion === null`, so already-onboarded
+upgraders are still asked); Settings section with toggle, "show what we send" (preview JSON), and
+"delete my data". Owner reconciled the consent copy to be exactly truthful (D-043: dropped the
+un-collected cache-hit line, named the file-format histogram). reqwest pinned to native-tls for the
+cargo-deny allow-list. Gates: shell 34 (18 new) + 47 vitest + tsc + build; cargo-deny + audit clean.
+
+**Deliberately NOT live yet:** the client rides the shared Worker `/v1/ingest` with `app:"sundaysync"`,
+but the Worker doesn't accept sundaysync payloads until **E8**. **E8 is parked** — a built+tested
+Worker branch exists (`e8/sundaysync-app-dimension`) but collides with concurrent app-dimension work
+on the shared `sunday-telemetry` repo (`audit/wire-seams`'s own `src/apps.ts` + `0006` migration) and
+its validator still needs field-for-field reconciliation against this client. Both are owner/cross-
+program coordination items surfaced to the owner before any merge/deploy.
+
+### E7 — Consent + telemetry client (original plan)
 
 Mirror of SundayRec E3, adapted:
 
