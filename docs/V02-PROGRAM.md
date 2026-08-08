@@ -472,20 +472,23 @@ cache/telemetry retention verification, UNVERIFIED-list burn-down.
       injection mode. Interrupted by an owner reboot mid-stage, resumed cleanly. 180 root +
       5 shell + 27 vitest green; cargo-deny clean both workspaces; CSP builds + embeds.
       One follow-up: vitest v4 bump to clear dev-tree audit noise.
-- [ ] E4 Engine stability
-- [ ] E5 Performance at scale (+ D-013 eviction decision)
-- [ ] E6 Drift correction (+ D-016 closure; owner sign-off on mechanism)
-- [ ] E7 Consent + telemetry client (+ owner: consent text)
-- [ ] E8 Telemetry Worker side
-- [ ] E9 Updater + beta ring (+ kill-switch drill)
-- [ ] E10 QA foundation + real corpus (owner delivers footage)
-- [ ] E11 v0.2.0-beta.1 → stable (owner test checklist)
-- [ ] E12 Continuous operations (recurring)
-
-## Standing owner items (asked at the marked stages, never silently)
-
-E5: cache-eviction shape · E6: correction mechanism after spike · E7: consent text +
-behandlingsansvarlig · E10: corpus delivery + truth sign-off · E11: beta validation
-on real hardware. Apple signing/notarization stays a separate suite-level item
-(team 784GN847G4) — v0.2 ships with the same right-click-to-open caveat unless that
-lands in the meantime.
+- [x] **E4 Engine stability — 2026-08-08.** §7.7's 4 GB ceiling proven (2.383 GB, was 4.636);
+      details in the E4 section above. PR #8.
+- [x] **E5 Performance — 2026-08-08.** P-1 fixed: 3 h service ~214 s → ~57 s, bit-identical;
+      cache eviction closes D-013. PR #9. Decimated search deferred (D-039).
+- [x] **E6 Drift correction — 2026-08-08.** `<timeMap>`, spike-proven + live-verified in
+      Resolve 21; closes D-016. PR #10.
+- [x] **E7 Consent + telemetry client — 2026-08-08.** Opt-in consent v1, anonymous bucketed
+      payload, sends nothing until E8 deploys. PR #11.
+- [~] **E8 Worker side — built, owner-gated.** `e8/sundaysync-on-app-dimension` in
+      sunday-telemetry (validator conformed to the E7 client on the owner-chosen app
+      registry; client posts to the app-scoped door). Remaining: owner-sanctioned merge,
+      deploy, `WRITE_KEY_SUNDAYSYNC` mint, live verify.
+- [x] **E9 Updater + beta ring — 2026-08-08.** App-scoped rings, NSIS-on-beta, signing
+      pubkey placeholder (owner mints the real secret — see D-044's security note). PR #12.
+- [x] **E10 QA + corpus — 2026-08-08.** Playwright harness in CI (PR #13); real-corpus run
+      found and fixed the §8.2 violation (credibility gate + single-segment floor, D-045,
+      PR #14); corpus loop stays open by design.
+- [ ] E11 v0.2.0-beta.1 → stable (owner checklist: CSP render check, drift-corrected real
+      export, updater self-update, consent flows, signing secret first)
+- [ ] E12 Continuous operations
