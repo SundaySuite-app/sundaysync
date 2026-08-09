@@ -82,6 +82,30 @@ pub fn confidence_from_psr(psr: f64, min_psr: f64) -> f64 {
 /// refuses every false placement observed so far beats shipping none.
 pub const NO_DRIFT_EVIDENCE_PSR_FACTOR: f64 = 5.0 / 3.0;
 
+/// D-049: the *lower* PSR bar for matches whose drift regression vouches for them.
+///
+/// The second corpus round settled what D-015 left open: on real material the PSR ranges
+/// of true and false matches **overlap** — observed true matches at min-segment-PSR
+/// 13.3, 13.9, 15.6, 17.6, 19.4, 21.0, 21.9, 25.4, 34.5, 73.1; observed false ones at
+/// 15.2, 15.4, 19.0. No threshold on PSR alone can separate them, so PSR stops being the
+/// judge where better evidence exists. Every observed false match was killed by the
+/// credibility gate (impossible ppm / scattered residuals), and every observed true match
+/// carried a physiological clock (−104 … +1.3 ppm, agreeing with PluralEyes' independent
+/// measurement to ±2 ppm). What PSR = 15 actually cost was recall: §4.3 scores a clip by
+/// its *minimum* segment, so one quiet stretch (banter between songs) dragged a true
+/// 23-minute clip to 13.9 and refused it.
+///
+/// So a match with ≥ 3 segments **and** a credible regression may clear
+/// `min_psr × 2/3` (10 at the default): five segments that each found a peak, whose
+/// offsets lie on a line only a real clock could draw, are jointly far stronger evidence
+/// than any single number. The floor is not zero because one theoretical false mode
+/// remains — strongly periodic material could lock sidelobes onto a consistent
+/// zero-slope line — and a PSR floor plus the residual limit is what keeps that
+/// improbable. The synthetic full tier's `unrelated.wav` (PSR 9.2) still refuses under
+/// this factor, which is the standing guard against over-loosening; the corpus loop
+/// (E12) watches the periodic-lock mode with real concert material.
+pub const CREDIBLE_EVIDENCE_PSR_FACTOR: f64 = 2.0 / 3.0;
+
 /// D-045: is this match good enough to *place*?
 ///
 /// Two ideas, both born from the first real corpus (see D-045):
@@ -111,7 +135,9 @@ fn admissible(m: &crate::correlate::ClipMatch, clip_samples: usize, min_psr: f64
         return m.psr >= min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR;
     }
     match drift::measure(&m.segments, clip_samples) {
-        Some(d) => m.psr >= min_psr && d.credible(),
+        // D-049: with a credible clock vouching for the segments, PSR is corroboration,
+        // not the judge — the bar drops to CREDIBLE_EVIDENCE_PSR_FACTOR × min_psr.
+        Some(d) => m.psr >= min_psr * CREDIBLE_EVIDENCE_PSR_FACTOR && d.credible(),
         // Enough segments to check, and the check did not come back: a failed credibility
         // test, not an absent one. §7.5 says refuse.
         None => false,
@@ -454,6 +480,34 @@ fn evict_device_overlaps(
                 .then_with(|| placements[*a].file.cmp(&placements[*b].file))
         });
 
+        // D-050: a multitrack recorder dump is exempt. §4.4's rule rests on a physical
+        // impossibility — one camera cannot record two overlapping clips — but a folder
+        // of per-channel exports (Ch01…Ch16, Tr1/Tr2/TrL_R) breaks the "folder = one
+        // device" assumption the other way: THREE or more clips that each cover ≥ 90 %
+        // of one another cannot come from one camera either, and are exactly what a
+        // multitrack session looks like. Evicting them to a single channel (observed on
+        // the 2013 corpus: 9 of 16 board channels thrown away) discards audio the user
+        // deliberately exported; keeping them puts each channel on its own lane, which
+        // is what a music edit wants. Two full-overlap clips stay under the rule — that
+        // shape IS producible by one device family (the Insta360's dual-lens pair), and
+        // there the eviction is correct.
+        let is_multitrack_dump = sorted.len() >= 3
+            && sorted.iter().enumerate().all(|(i, &a)| {
+                sorted.iter().skip(i + 1).all(|&b| {
+                    let (sa, sb) = (placements[a].offset_seconds, placements[b].offset_seconds);
+                    let (ea, eb) = (
+                        sa + duration_of(&placements[a].file),
+                        sb + duration_of(&placements[b].file),
+                    );
+                    let overlap = ea.min(eb) - sa.max(sb);
+                    let shorter = (ea - sa).min(eb - sb);
+                    shorter > 0.0 && overlap >= 0.9 * shorter
+                })
+            });
+        if is_multitrack_dump {
+            continue;
+        }
+
         // A sweep against the last *surviving* clip, not a walk over neighbouring pairs.
         // The distinction is load-bearing: one long clip can swallow several later ones,
         // and comparing only neighbours stops looking the moment the clip in the middle is
@@ -754,6 +808,60 @@ mod tests {
     }
 
     #[test]
+    fn a_credible_clock_lowers_the_bar_and_an_incredible_one_never_does() {
+        // D-049, pinned with the second corpus round's own numbers. A true 23-minute
+        // clip scored min-segment-PSR 13.9 with a −31 ppm clock and was refused at the
+        // flat bar of 15; the observed FALSE matches (15.2–19.0) all carried impossible
+        // clocks. Evidence-graded admission: credible drift + psr ≥ min_psr × 2/3.
+        let clip = 1_380 * crate::request::ANALYSIS_RATE as usize; // ~23 min
+        let slope = -31e-6;
+        let on_a_line: Vec<(usize, f64)> = (0..5)
+            .map(|i| {
+                let start = i * clip / 5;
+                (start, slope * start as f64)
+            })
+            .collect();
+
+        // The Tobias case: PSR 13.9, physiological −31 ppm → now admitted.
+        let true_match = clip_match(13.9, &on_a_line);
+        assert!(
+            admissible(&true_match, clip, 15.0),
+            "a credible clock at psr 13.9 must clear the 2/3 bar (10)"
+        );
+
+        // Below the credible-evidence floor: refused even with a perfect clock — the
+        // periodic-lock guard. (The full tier's unrelated.wav at 9.2 sits here.)
+        let too_weak = clip_match(15.0 * CREDIBLE_EVIDENCE_PSR_FACTOR - 0.01, &on_a_line);
+        assert!(
+            !admissible(&too_weak, clip, 15.0),
+            "the floor holds even when the line is perfect"
+        );
+
+        // The corpus's false shape: strong-enough PSR, impossible clock → refused. The
+        // lowered bar must never readmit what credibility killed.
+        let scattered: Vec<(usize, f64)> =
+            [(0usize, -68.0), (1, 33.0), (2, -95.0), (3, 8.0), (4, -12.0)]
+                .iter()
+                .map(|(i, off_s)| {
+                    (
+                        i * clip / 5,
+                        off_s * f64::from(crate::request::ANALYSIS_RATE),
+                    )
+                })
+                .collect();
+        let false_match = clip_match(19.0, &scattered);
+        assert!(
+            !admissible(&false_match, clip, 15.0),
+            "an impossible clock refuses regardless of PSR"
+        );
+
+        // And the flat old bar no longer gates a credible match between 10 and 15,
+        // but DOES still bind through the user's knob: raise min_psr and the 2/3
+        // floor rises with it (§9 semantics preserved).
+        assert!(!admissible(&true_match, clip, 21.0), "13.9 < 21×2/3 = 14");
+    }
+
+    #[test]
     fn the_d045_gates_admit_exactly_at_their_limits() {
         // D-045's two bounds are inclusive by construction (`<=`), and the no-evidence
         // floor is a `>=`. A clip sitting exactly on a limit is admitted, not refused —
@@ -879,6 +987,56 @@ mod tests {
         );
         assert_eq!(placements.len(), 1);
         assert_eq!(placements[0].file, PathBuf::from("/long.mp4"));
+    }
+
+    #[test]
+    fn a_multitrack_dump_keeps_every_channel() {
+        // D-050: ≥3 clips in one folder-device that each cover ≥90 % of one another
+        // cannot come from one camera — they are a recorder's per-channel exports
+        // (the 2013 corpus lost 9 of 16 board channels to the old rule). Keep them all.
+        let candidates: Vec<Candidate> = (1..=4)
+            .map(|i| candidate(&format!("/Ch{i:02}.wav"), "lyd", 3600.0, false))
+            .collect();
+        let mut placements: Vec<Placement> = (1..=4)
+            .map(|i| placement(&format!("/Ch{i:02}.wav"), "lyd", (i as f64) * 0.3, 0.8))
+            .collect();
+        let evicted = evict_device_overlaps(&mut placements, &candidates);
+        assert!(evicted.is_empty(), "channels must all survive: {evicted:?}");
+        assert_eq!(placements.len(), 4);
+    }
+
+    #[test]
+    fn a_dual_lens_pair_is_still_evicted_and_partial_overlaps_still_enforce() {
+        // Two full-overlap clips ARE producible by one device family (Insta360 _00/_10),
+        // so the 2-clique keeps the old rule…
+        let candidates = vec![
+            candidate("/VID_00.insv", "360", 1740.0, true),
+            candidate("/VID_10.insv", "360", 1740.0, true),
+        ];
+        let mut placements = vec![
+            placement("/VID_00.insv", "360", 100.0, 0.9),
+            placement("/VID_10.insv", "360", 100.0, 0.4),
+        ];
+        let evicted = evict_device_overlaps(&mut placements, &candidates);
+        assert_eq!(evicted.len(), 1, "the dual-lens twin still evicts");
+
+        // …and three clips that overlap only PARTIALLY (not ≥90 % mutually) are a real
+        // same-camera impossibility, not a multitrack dump — the sweep still runs.
+        let candidates = vec![
+            candidate("/a.mp4", "cam", 100.0, true),
+            candidate("/b.mp4", "cam", 100.0, true),
+            candidate("/c.mp4", "cam", 100.0, true),
+        ];
+        let mut placements = vec![
+            placement("/a.mp4", "cam", 0.0, 0.9),
+            placement("/b.mp4", "cam", 60.0, 0.5),
+            placement("/c.mp4", "cam", 120.0, 0.5),
+        ];
+        let evicted = evict_device_overlaps(&mut placements, &candidates);
+        assert!(
+            !evicted.is_empty(),
+            "chained partial overlaps must still enforce §4.4"
+        );
     }
 
     #[test]

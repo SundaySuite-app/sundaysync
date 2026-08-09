@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.0-beta.4 — 2026-08-09
+
+The corpus-calibration beta: three more real multicam projects (2013–2023) taught the
+engine how real material actually behaves.
+
+- **Far better recall, same zero-false record (D-049).** Matches with enough segments to
+  measure a clock are now judged by physics first: a credible drift regression admits a
+  clip down to a lower PSR bar, because on real material one quiet stretch between songs
+  used to drag a true 23-minute clip below the old flat threshold. Every previously
+  refused *false* match stays refused (they all carried impossible clocks). Measured:
+  a 5-camera living-room session went from 2 placeable snippets to the real takes;
+  a 2013 audition corpus went from 2 to 9 placements.
+- **Multitrack recordings survive (D-050).** A folder of per-channel board exports
+  (Ch01…Ch16) no longer collapses to one channel — three or more clips that cover each
+  other almost entirely are physically impossible from one camera and are kept, each on
+  its own lane.
+- **Cleaner scans (D-050).** GoPro/DSLR thumbnails and the AVCHD index family
+  (`.thm`/`.cpi`/`.bdm`/`.mpl`/`.tdt`/`.tid`) no longer show up as "broken media".
+- **Drift measurements validated against PluralEyes** on a real project: agreement to
+  ±2 ppm with its drift-corrected output — and drift correction (timeMap) engaged on
+  real footage for the first time.
+
 ## v0.2.0-beta.3 — 2026-08-09
 
 The night-review beta: a four-reviewer full-code audit found and fixed **20 confirmed

@@ -568,9 +568,17 @@ fn is_hidden(path: &Path) -> bool {
 /// a bare `.lrv` (original lost) can still pass the FILE explicitly — only the recursive
 /// folder walk skips it, exactly as it treats hidden files.
 fn is_proxy_sidecar(path: &Path) -> bool {
+    /// The closed set of camera-sidecar extensions the walk skips (D-045, extended by
+    /// D-050 after three corpora confirmed each member): files that *describe* a sibling
+    /// recording rather than being one. `.lrv` (GoPro/Insta360 low-res proxy — duplicate
+    /// audio), `.thm` (GoPro/DSLR thumbnail JPEGs), and the AVCHD index family
+    /// (`.cpi`/`.bdm`/`.mpl`/`.tdt`/`.tid`) that litters every `PRIVATE/` card dump and
+    /// showed up as nine spurious `decode_error`s on the first 2013 corpus. Still a
+    /// deliberate, narrow exception to §4.1 — an explicitly passed file is honoured.
+    const SIDECAR_EXTENSIONS: [&str; 7] = ["lrv", "thm", "cpi", "bdm", "mpl", "tdt", "tid"];
     path.extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("lrv"))
+        .is_some_and(|e| SIDECAR_EXTENSIONS.iter().any(|s| e.eq_ignore_ascii_case(s)))
 }
 
 #[cfg(test)]
@@ -660,6 +668,17 @@ mod tests {
         fs::write(dir.join("VID_20260405_110428_00_007.insv"), b"original").unwrap();
         fs::write(dir.join("LRV_20260405_110428_11_007.lrv"), b"proxy").unwrap();
         fs::write(dir.join("UPPER.LRV"), b"proxy too").unwrap();
+        // D-050: the AVCHD index family and GoPro thumbnails, straight from the corpora.
+        for junk in [
+            "GX010123.THM",
+            "00000.CPI",
+            "INDEX.BDM",
+            "00000.MPL",
+            "THUMB.TDT",
+            "THUMB.TID",
+        ] {
+            fs::write(dir.join(junk), b"sidecar").unwrap();
+        }
         let (found, _) = collect(
             std::slice::from_ref(&dir),
             None,
