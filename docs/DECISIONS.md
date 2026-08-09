@@ -1293,3 +1293,50 @@ precondition (segment count, input length); treat a failed read of an available
 instrument as a refusal; and where a value crosses a public API or serialised contract,
 re-check it on the far side (`Drift::credible()` now guards the exporter too) even when
 the near side guarantees it.
+
+## D-049 — Evidence-graded admission: a credible clock lowers the PSR bar (owner-delegated)
+
+The second corpus round (three real projects, 2013–2023) settled D-015's open question
+with numbers: **true and false matches overlap in PSR** (true min-segment-PSR observed at
+13.3–73.1; false at 15.2–19.0), so no PSR threshold alone can ever separate them. What
+does separate them, in every observed case, is the drift regression: every false match
+carried a physically impossible clock; every true one a physiological clock — agreeing
+with PluralEyes' independent measurement of the same project to ±2 ppm. Meanwhile §4.3's
+min-over-segments scoring meant one quiet stretch (banter between songs) dragged a true
+23-minute clip to 13.9 and refused it: PSR 15 was costing recall without buying
+precision.
+
+Admission is therefore graded by the evidence that exists:
+- **< 3 segments** (nothing to cross-check): PSR is the only judge — the D-045 floor
+  stands, `min_psr × 5/3` (25 at default).
+- **≥ 3 segments**: the credible-drift gate is mandatory (as since D-045), and PSR drops
+  to corroboration at `min_psr × 2/3` (10 at default). Both factors scale with the §9
+  knob, preserving its meaning.
+
+Guards against over-loosening: the full tier's `unrelated.wav` (PSR 9.2) still refuses;
+the residual-MAD limit still refuses scattered segments regardless of PSR; and the one
+theoretical false mode left — strongly periodic material locking sidelobes onto a
+zero-slope line — is why the floor is not lower. The E12 corpus loop watches that mode.
+Measured effect on the 5-camera living-room corpus: a true 23-minute clip (13.9, −31 ppm)
+and a true 5-minute clip (13.3, −91 ppm) go from refused to placed; nothing previously
+refused for incredible drift is readmitted.
+
+## D-050 — Sidecar family skip, and the multitrack-dump exemption (owner-delegated)
+
+Two §4.4/§4.1 refinements confirmed by all three corpus projects:
+
+**Sidecar family.** The walk's skip set (D-045's `.lrv`) grows to the closed set
+`.lrv .thm .cpi .bdm .mpl .tdt .tid` — GoPro/DSLR thumbnails and the AVCHD index family
+that litters every `PRIVATE/` card dump. They are descriptions of sibling media, not
+media; on the 2013 corpus they produced nine spurious `decode_error`s that read as broken
+footage. An explicitly passed file is still honoured, and `.bmp`/other generic formats
+stay un-filtered (they are real formats and land honestly in `no_audio`/`decode_error`).
+
+**Multitrack dump.** §4.4's same-device eviction rests on "one camera cannot record two
+overlapping clips". A folder of per-channel recorder exports (Ch01…Ch16) breaks the
+folder=device assumption the other way — and cost 9 of 16 board channels on the 2013
+corpus. Detection is physical, not name-based: **three or more** same-device clips that
+each cover ≥ 90 % of one another cannot come from one camera and are kept intact (each
+channel on its own lane — what a music edit wants). A two-clip full overlap keeps the old
+rule: that shape IS producible by one device family (the Insta360 dual-lens pair), where
+eviction is correct.
