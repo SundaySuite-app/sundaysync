@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.0-beta.3 — 2026-08-09
+
+The night-review beta: a four-reviewer full-code audit found and fixed **20 confirmed
+defects** (6 high). If you only read three:
+
+- **Windows exports work now** — every `file://` URL in a Windows-built FCPXML was
+  unrelinkable in Resolve.
+- **Better placements** — the transitive pass kept the *last* acceptable anchor instead
+  of the strongest, and one long clip could hide overlapping shorter ones from the
+  same-camera eviction.
+- **Telemetry that actually arrives** — the path scrubber was narrower than the
+  server's screen, so some payloads were silently rejected wholesale; the entire wire
+  contract is now pinned as tests. Consent revocation now halts an in-flight send, and
+  two app instances can no longer corrupt each other's state.
+
+Also: a camera chosen as the sync reference now exports **with** picture; cache
+maintenance and a running sync are mutually exclusive (no more mid-sync cache
+evictions); `--min-psr` rejects values that would have disabled the acceptance gate;
+scanning shows real progress; macOS builds are **code-signed** (from beta.2); telemetry
+build metadata is stamped correctly; `npm audit` is clean including dev dependencies.
+(D-046–D-048.)
+
 ## v0.2.0-beta.1 — 2026-08-08
 
 The "Solid in Use" release: everything the v0.2 program (docs/V02-PROGRAM.md, stages
