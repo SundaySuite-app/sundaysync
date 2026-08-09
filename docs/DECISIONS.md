@@ -1541,14 +1541,17 @@ vertical centre — peak as a low-alpha (0.32) outline, RMS as a solid (0.85) bo
 both reaching equally up and down — because that is the convention every timeline in a
 real NLE uses, and it reads a silence-to-loud transition as a shape rather than a height.
 
-### The D-052 review: RMS stays linear
+### The D-052 review: RMS stays linear, pending an owner listen
 
 D-052 flagged switching *RMS only* to a perceptual (e.g. log) curve as a one-function
-change in `peaks.rs` if the drawn result read as too quiet. Drawn against real service
-recordings, it does not: the two-layer peak/RMS composite already gives the eye enough
-separation between "silence" and "someone is talking" without a curve, and a curve would
-cost the frontend the "linear number, apply any display curve you like" property D-052
-built the quantization on. Left as `u8`-linear; revisit only if a future corpus disagrees.
+change in `peaks.rs` if the drawn result read as too quiet. S4 did not have a real service
+recording to judge that against (the e2e corpus is synthetic, deterministic bytes) — so
+this stays a reasoned default rather than a verified one: the two-layer peak/RMS composite
+should already give the eye separation between "silence" and "someone is talking" without a
+curve, and a curve costs the frontend the "linear number, apply any display curve you
+like" property D-052 built the quantization on into the bargain. Left as `u8`-linear;
+👤 an owner listen against a real recording is the actual close on this review, not this
+paragraph.
 
 ### Colour without a `warn` prop
 
