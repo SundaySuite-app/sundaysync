@@ -14,7 +14,7 @@
 
 /**
  * A clip's placement on the timeline, in timeline-ms. `file` is the same
- * identity `ResultView` already keys its clip buttons on. Callers derive
+ * identity the timeline already keys its clip buttons on. Callers derive
  * `startMs`/`endMs` from `Placement.offset_seconds` and the file's duration
  * (`SyncOutcome.durations`) — this module has no opinion on where those
  * numbers come from.

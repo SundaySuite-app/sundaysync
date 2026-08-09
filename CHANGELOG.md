@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **The result view is now a real timeline (D-051).** The old per-device lanes drew every
+  clip as a percentage of the widest span, so a four-second offset inside a ninety-minute
+  service was a sliver too small to judge. The new view has a zoom: fit the whole day on
+  screen, then wind in until the millisecond the engine is claiming is visible as a
+  millisecond. Scroll to pan, ⌘/Ctrl-scroll or `+`/`-` to zoom around the cursor, `0` to
+  fit, drag the background to pan, drag the ruler to move the playhead. Clips from one
+  device that cover the same instant (a multitrack board dump) now stack into separate
+  rows instead of hiding behind each other, and a device that synced nothing still gets
+  its own track, still saying so. The clip detail dialog, the red "not synced" shelf with
+  its move-to-device fix, the green/orange colour language and the dimming of a stale
+  result are all unchanged — this is the same information, finally at a readable scale.
+  Still a viewer, not an editor: clips do not drag.
 - **Internal: waveform peaks pipeline for the v0.3 interactive timeline (D-052).** Added
   `crates/core/src/peaks.rs` — a streamed multi-resolution peak+RMS pyramid built from
   the analysis audio the sync engine has *already* cached, so drawing waveforms costs

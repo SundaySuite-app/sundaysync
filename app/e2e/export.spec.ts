@@ -25,8 +25,8 @@ async function reachResult(page: import("@playwright/test").Page, extra: Record<
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
   await page.getByRole("button", { name: en.syncButton }).click();
-  // Scoped to the result lanes, not a bare accessible-name match: SourcesView keeps
-  // rendering alongside ResultView in the "result" phase, and its own "Use as
+  // Scoped to the timeline's clip boxes, not a bare accessible-name match: SourcesView
+  // keeps rendering alongside the timeline in the "result" phase, and its own "Use as
   // reference: C0001.MP4" button also contains that filename substring.
   await expect(page.locator(".clip", { hasText: "C0001.MP4" })).toBeVisible();
 }

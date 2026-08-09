@@ -342,33 +342,130 @@ select:hover, input:hover { border-color: var(--accent-border); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── Result view ────────────────────────────────────────────────── */
+/* ── Result view — interactive timeline (v0.3, D-051) ───────────── */
 
 .result { display: flex; flex-direction: column; gap: 1rem; }
 .result--stale { opacity: 0.55; }
 
-.result__meta { display: flex; gap: 1rem; color: var(--text3); font-size: 0.8125rem; }
+.result__meta { display: flex; align-items: center; gap: 1rem; color: var(--text3); font-size: 0.8125rem; }
 
-.lanes {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+/* Every timeline row is the same two-column grid, so the gutter, the ruler and
+   the playhead overlay all line up on one shared edge without measuring anything. */
+.timeline {
+  --tl-gutter: 12.5rem;
+  --tl-ruler-h: 22px;
+}
+.timeline:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 4px;
+  border-radius: var(--r);
+}
+
+.timeline__zoom { margin-left: auto; display: flex; gap: 0.15rem; }
+.timeline__zoom button { padding: 0.15rem 0.55rem; font-size: 0.8125rem; line-height: 1.4; }
+
+.timeline__frame {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r);
-  padding: 1rem;
+  padding: 0.5rem 0;
+  /* Time never spills sideways: everything is drawn inside the lane column, and
+     the lane column clips it. The page itself never gains a horizontal scrollbar. */
+  overflow: hidden;
 }
-.lane { display: grid; grid-template-columns: minmax(8rem, 11rem) 1fr; align-items: center; gap: 0.75rem; }
-.lane__label { display: flex; align-items: center; gap: 0.4rem; overflow: hidden; font-size: 0.8125rem; }
-.lane__label svg { flex-shrink: 0; color: var(--text3); }
-.lane__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lane__track {
+.timeline__body {
   position: relative;
-  height: 34px;
-  background: var(--surface2);
-  border-radius: var(--rxs);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
+.timeline__body:active { cursor: grabbing; }
+
+.track { display: grid; grid-template-columns: var(--tl-gutter) 1fr; align-items: stretch; }
+/* One hairline per device boundary, gutter included, so the eye can follow a row
+   all the way from its name to its clips. */
+.track + .track:not(.track--scrollbar) { border-top: 1px solid var(--border); }
+.track--ruler { height: var(--tl-ruler-h); }
+.track--scrollbar { height: 20px; padding-top: 8px; }
+
+.track__gutter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow: hidden;
+  padding: 0 0.75rem 0 1rem;
+  font-size: 0.8125rem;
+}
+.track__gutter svg { flex-shrink: 0; color: var(--text3); }
+.track__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.track__lanes { position: relative; overflow: hidden; min-width: 0; }
+
+.track__lane {
+  position: relative;
+  overflow: hidden;
+  border-top: 1px solid var(--bg);
+  background: var(--surface2);
+}
+.track__lane--empty { background: none; }
 .lane__empty { color: var(--text4); font-size: 0.75rem; padding-left: 0.5rem; line-height: 34px; }
+
+.timeline__ruler {
+  position: relative;
+  height: 100%;
+  cursor: col-resize;
+}
+.timeline__tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+  border-left: 1px solid var(--border2);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The playhead spans every track at once, so it lives above them all — offset by
+   the gutter so it shares the lane column's origin. */
+.timeline__overlay {
+  position: absolute;
+  inset: 0 0 0 var(--tl-gutter);
+  overflow: hidden;
+  pointer-events: none;
+}
+.timeline__playhead { position: absolute; inset: 0; }
+.timeline__playhead-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(235, 184, 75, 0.5);
+  will-change: transform;
+}
+
+.timeline__scrollbar {
+  position: relative;
+  height: 8px;
+  margin: 0 0 0 0;
+  border-radius: 999px;
+  background: var(--surface2);
+  cursor: pointer;
+}
+.timeline__thumb {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 16px;
+  border-radius: 999px;
+  background: var(--border2);
+}
+.timeline__scrollbar:hover .timeline__thumb { background: var(--text3); }
 
 .clip {
   position: absolute;
@@ -380,13 +477,16 @@ select:hover, input:hover { border-color: var(--accent-border); }
   overflow: hidden;
   text-align: left;
   font-size: 0.72rem;
-  min-width: 14px;
   color: #04120a;
   background: var(--green);
 }
 .clip--warn { background: var(--orange); color: #1d1503; }
-.clip__name { white-space: nowrap; }
+.clip__name { position: relative; display: inline-block; white-space: nowrap; }
+/* Reserved for the S4 waveform canvas — sized here so the clip box does not
+   reflow when the peaks arrive. */
+.clip__waveform { position: absolute; inset: 0; display: block; }
 .clip:hover { filter: brightness(1.1); }
+.clip:focus-visible { outline: 2px solid var(--accent2); outline-offset: -2px; }
 
 /* ── Unsynced shelf ─────────────────────────────────────────────── */
 
