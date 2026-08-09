@@ -1082,6 +1082,59 @@ mod tests {
         }
     }
 
+    /// §7.5: a non-finite sample must never become a placement.
+    ///
+    /// This is load-bearing and easy to break by accident. A NaN or infinity anywhere in
+    /// the input poisons the whole transform — one bad sample makes every bin of that FFT
+    /// non-finite — and what saves us is that `m > PHAT_FLOOR` is *false* for NaN, so the
+    /// bin is zeroed rather than normalised. Rewrite that test as `!(m <= PHAT_FLOOR)`, or
+    /// add a `.is_finite()` short-circuit on the wrong side, and NaN sails through instead:
+    /// `Peak::offer` would accept it (`value <= self.value` is false for NaN, so NaN always
+    /// wins the peak), `Stats::psr` would return `Some(NaN)`, and the result would be a
+    /// clip placed at a NaN offset with a NaN score. Only `place::admissible`'s comparison
+    /// direction stands between that and the timeline.
+    #[test]
+    fn a_non_finite_sample_never_produces_a_match() {
+        let reference = noise(40_000, 31);
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut clip = reference[1_000..21_000].to_vec();
+            clip[5] = bad;
+            let m = Correlator::new().find(&clip, &reference);
+            assert!(m.is_none(), "a {bad} in the clip produced {m:?}");
+
+            let m = Correlator::new().match_clip(&clip, &reference, SEGMENT_COUNT);
+            assert!(
+                m.is_none(),
+                "a {bad} in the clip matched a whole clip: {m:?}"
+            );
+
+            let mut poisoned = reference.clone();
+            poisoned[100] = bad;
+            let m = Correlator::new().find(&reference[1_000..21_000], &poisoned);
+            assert!(m.is_none(), "a {bad} in the reference produced {m:?}");
+        }
+    }
+
+    /// Whatever a match *is*, both of its numbers are real numbers. The gate downstream
+    /// compares them against thresholds, and every one of those comparisons is only safe
+    /// because this holds.
+    #[test]
+    fn a_match_that_exists_always_carries_finite_numbers() {
+        let reference = noise(60_000, 32);
+        for (start, len) in [(0usize, 20_000usize), (12_345, 20_000), (40_000, 20_000)] {
+            let m = Correlator::new()
+                .find(&reference[start..start + len], &reference)
+                .unwrap();
+            assert!(m.offset_samples.is_finite(), "offset {}", m.offset_samples);
+            assert!(m.psr.is_finite(), "psr {}", m.psr);
+        }
+        // Unrelated audio still scores *something* finite rather than a NaN.
+        let m = Correlator::new()
+            .find(&noise(20_000, 777), &reference)
+            .unwrap();
+        assert!(m.offset_samples.is_finite() && m.psr.is_finite(), "{m:?}");
+    }
+
     #[test]
     fn correlation_is_deterministic() {
         // §13.4 — the FFT path must give bit-identical answers run to run.
