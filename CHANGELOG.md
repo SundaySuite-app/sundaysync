@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed export hint: media-pool-first Resolve import order.** Owner-verified A/B testing
+  traced the "clip was not found" failure on large exports to Resolve's Load XML media
+  *matcher*, not media ingest or our FCPXML. The in-app hint now instructs importing the
+  media files into Resolve's Media Pool first, then File → Import Timeline (Load XML) —
+  the matcher then binds against the already-imported clips, which is required for large
+  files. `docs/KNOWN_LIMITATIONS.md` corrected to describe the matcher mechanism and the
+  workaround instead of the earlier "scripted import refuses multi-GB media" framing.
+
 ## v0.2.0-beta.4 — 2026-08-09
 
 The corpus-calibration beta: three more real multicam projects (2013–2023) taught the

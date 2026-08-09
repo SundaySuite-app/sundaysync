@@ -91,7 +91,8 @@ export const nb = {
 
   // Export (§9.5)
   exportButton: "Eksporter til DaVinci Resolve",
-  exportHint: "Importer fila i Resolve med Fil → Importer → Tidslinje.",
+  exportHint:
+    "Dra mediefilene inn i Resolves mediemappe (Media Pool) FØRST. Bruk deretter Fil → Importer → Tidslinje for å hente fila — da matcher Resolve mot de allerede importerte klippene, noe som er nødvendig for store filer.",
   exported: (n: number) => (n === 1 ? "Eksporterte 1 klipp" : `Eksporterte ${n} klipp`),
   projectName: "Prosjektnavn",
   revealInFinder: "Vis i Finder",
@@ -305,7 +306,8 @@ export const en: Strings = {
   reasonDeviceOverlap: "Overlaps another clip from the same device",
 
   exportButton: "Export to DaVinci Resolve",
-  exportHint: "Import the file in Resolve with File → Import → Timeline.",
+  exportHint:
+    "Drag the media files into Resolve's Media Pool FIRST. Then use File → Import → Timeline to bring in the file — Resolve then matches against the already-imported clips, which is required for large files.",
   exported: (n: number) => (n === 1 ? "Exported 1 clip" : `Exported ${n} clips`),
   projectName: "Project name",
   revealInFinder: "Reveal in Finder",
