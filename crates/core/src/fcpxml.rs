@@ -160,6 +160,17 @@ pub fn export_with_options(
             // is credible by construction. Zero is a statement, not a guess.
             residual_mad_ms: 0.0,
         };
+        // ...and then check it anyway. D-045's gate refuses an incredible drift upstream, so
+        // nothing arriving here should be past the bound — but "credible by construction" is
+        // an assumption, `export_with_options` is public API, and §5 carries `drift_ppm` as a
+        // bare number with nothing attached saying it was ever examined. E6-era code took the
+        // E10 corpus's −587,484 ppm at face value and stretched that clip by −59 %. A drift no
+        // clock could produce is not a drift; the clip exports exactly as v1 did. With the
+        // residual zeroed above this reduces to the |ppm| bound, and it tracks D-045 by
+        // construction rather than by a second copy of the number.
+        if !d.credible() {
+            return None;
+        }
         // Only clips past half a frame are corrected; the reference carries no drift and so
         // is never touched. A clip already inside half a frame is left exactly as v1.
         d.exceeds_half_frame(fps_f64).then_some(d)
@@ -1163,6 +1174,37 @@ mod tests {
             "uncorrected error only {} s",
             (uncorrected_end - ideal_end).abs()
         );
+    }
+
+    #[test]
+    fn the_exporter_refuses_to_retime_a_drift_no_clock_could_have() {
+        // The E10 number, verbatim: a 70-minute camera against a produced mix measured
+        // −587,484 ppm, and E6-era code retimed it by −59 % on the strength of that. D-045
+        // now refuses the placement upstream, so this can only arrive through the public
+        // export API or a §5 record from an older engine — but the exporter is the last
+        // thing between a number and the timeline, and it should not need to trust its
+        // caller. The clip exports exactly as v1 did: 1:1, no `<timeMap>`.
+        let (r, d) = drifting_sample(-587_484.0, 4_200.0);
+        let e = export(&r, &d, "Service").unwrap();
+        assert!(!e.xml.contains("<timeMap>"));
+        assert!(e.clips.iter().all(|c| c.time_map.is_none()));
+        let cam = e
+            .clips
+            .iter()
+            .find(|c| c.file.ends_with("cam.mp4"))
+            .unwrap();
+        assert_eq!(
+            cam.duration_ticks,
+            4_200 * 25,
+            "the clip must keep its own length, not 41 % of it"
+        );
+
+        // The bound itself stays usable: exactly at MAX_CREDIBLE_DRIFT_PPM is still a clock.
+        let (r2, d2) = drifting_sample(crate::drift::MAX_CREDIBLE_DRIFT_PPM, 400.0);
+        assert!(export(&r2, &d2, "Service")
+            .unwrap()
+            .xml
+            .contains("<timeMap>"));
     }
 
     #[test]
