@@ -74,8 +74,11 @@ export const nb = {
   emptyLane: "Ingen klipp plassert",
 
   // Warnings (§5 Warning enum)
+  // D-042 (E6): drift correction shipped — a per-clip <timeMap> retimes the export
+  // automatically, on by default (toggle: Innstillinger → «Korriger klokkedrift").
+  // The number here is what the export corrects, so the copy says so, not "later".
   drift: (ms: number) =>
-    `Dette klippet driver ${Math.abs(ms).toFixed(0)} ms over lengden. Automatisk driftkorreksjon kommer i en senere versjon.`,
+    `Dette klippet driver ${Math.abs(ms).toFixed(0)} ms over lengden. Korrigeres automatisk ved eksport (kan slås av i Innstillinger).`,
   metadataMismatch: "Tidsstempelet i fila stemmer ikke med lyden. Lyden er lagt til grunn.",
   mixedFps: "Klippene har ulik bildefrekvens.",
   frameSnap: "Plasseringen er rundet til nærmeste bilde.",
@@ -289,8 +292,9 @@ export const en: Strings = {
   clipDetails: "Clip details",
   emptyLane: "No clips placed",
 
+  // D-042 (E6): drift correction shipped — see the nb comment above.
   drift: (ms: number) =>
-    `This clip drifts ${Math.abs(ms).toFixed(0)} ms over its length. Automatic drift correction is coming in a later version.`,
+    `This clip drifts ${Math.abs(ms).toFixed(0)} ms over its length. It is corrected automatically on export (toggle in Settings).`,
   metadataMismatch: "The file's timestamp disagrees with the audio. The audio was trusted.",
   mixedFps: "The clips have different frame rates.",
   frameSnap: "The placement was rounded to the nearest frame.",

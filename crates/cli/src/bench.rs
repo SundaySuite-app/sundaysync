@@ -234,7 +234,17 @@ fn measure(
             owned_cache_dir
         }
     };
-    let _ = Cache::new(cache_dir.clone()).clear();
+    // The "cold" figure below is only cold if this actually emptied the cache. `clear`
+    // refuses a directory it never stamped (S-7), and swallowing that turned a warm run
+    // into a number labelled cold — the exact confusion P-7 exists to remove. Not fatal:
+    // the accuracy comparison is unaffected, and a labelled-suspect timing beats no run.
+    if let Err(e) = Cache::new(cache_dir.clone()).clear() {
+        eprintln!(
+            "warning: could not clear {} before the cold pass ({e}) — \
+             the \"cold\" timing below is NOT cold",
+            cache_dir.display()
+        );
+    }
 
     let request = SyncRequest {
         cache_dir: Some(cache_dir),
@@ -264,11 +274,14 @@ fn run_timed(
     let started = Instant::now();
     let result = sundaysync_core::sync(request, &timer, cancel).map_err(|e| e.to_string())?;
     let elapsed = started.elapsed();
-    // Stop the sampler before reading stage timings — no ordering requirement between
-    // the two, but finishing the background thread first keeps the measurement window
-    // tight around the call above rather than around whatever runs next.
-    let peak_rss_bytes = sampler.finish();
+    // Close the stage timer FIRST. `StageTimer::finish` attributes everything since the
+    // last stage transition to the stage still open, so anything done between `sync()`
+    // returning and this call lands inside the final stage's bucket. Stopping the sampler
+    // first put its thread shutdown there, which made the per-stage totals overstate the
+    // last stage and exceed the `elapsed` printed beside them — a bench that lies about
+    // its own measurement is worse than one that does not measure.
     let stages = timer.finish();
+    let peak_rss_bytes = sampler.finish();
     Ok((
         result,
         PassStats {
@@ -519,6 +532,17 @@ struct RssSampler {
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
+/// Gap between RSS samples. Fine enough to catch a spike, coarse enough that the `ps`
+/// spawn on macOS costs nothing next to a decode.
+const RSS_SAMPLE_INTERVAL: Duration = Duration::from_millis(100);
+
+/// How responsively the sampler notices [`RssSampler::finish`]. The wait between samples
+/// is served in slices this size rather than one long sleep: a single
+/// `sleep(RSS_SAMPLE_INTERVAL)` made every `finish()` block for up to a full interval,
+/// which is dead time inside the very measurement window `bench` is reporting — twice per
+/// shoot, on every shoot in the corpus.
+const RSS_STOP_SLICE: Duration = Duration::from_millis(5);
+
 impl RssSampler {
     fn start() -> Self {
         let peak_kb = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
@@ -531,7 +555,12 @@ impl RssSampler {
                 if let Some(kb) = current_rss_kb() {
                     p.fetch_max(kb, std::sync::atomic::Ordering::Relaxed);
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                let mut waited = Duration::ZERO;
+                while waited < RSS_SAMPLE_INTERVAL && !s.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    std::thread::sleep(RSS_STOP_SLICE);
+                    waited += RSS_STOP_SLICE;
+                }
             }
         });
         Self {
@@ -671,6 +700,25 @@ mod tests {
             Some(bytes) => assert!(bytes > 0),
             None => eprintln!("SKIP: RSS not measurable on this platform"),
         }
+    }
+
+    #[test]
+    fn stopping_the_rss_sampler_does_not_stall_the_measurement() {
+        // P-7 honesty: `finish()` used to wait out a whole 100 ms sample interval, and
+        // `run_timed` called it while the stage timer was still open — so that stall was
+        // billed to whichever stage happened to be last. Both halves are fixed; this pins
+        // the one that is observable. The bound is well under the 100 ms sleep the old
+        // form always paid and well over the ~5 ms slice plus one `ps` spawn the new one
+        // can cost.
+        let sampler = RssSampler::start();
+        std::thread::sleep(Duration::from_millis(20));
+        let started = Instant::now();
+        let _ = sampler.finish();
+        assert!(
+            started.elapsed() < Duration::from_millis(75),
+            "sampler shutdown took {:?}, which lands inside the reported measurement",
+            started.elapsed()
+        );
     }
 
     #[test]

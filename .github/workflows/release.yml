@@ -80,6 +80,14 @@ jobs:
         working-directory: app
         run: node scripts/fetch-ffmpeg.mjs
 
+      # E7 (night finding 10): the telemetry client bakes `builtAt` at COMPILE time via
+      # option_env!. Without this the runtime fallback runs in release builds and
+      # `builtAt` becomes "when the payload was built" — in-range but untrue, and the
+      # Worker's build-age view reads every install as brand new. Epoch millis.
+      - name: Stamp telemetry build time
+        shell: bash
+        run: echo "SUNDAYSYNC_TELEMETRY_BUILT_AT=$(node -e 'console.log(Date.now())')" >> "$GITHUB_ENV"
+
       # tauri-action builds the bundle, signs the updater artifacts when the signing
       # secret exists, and attaches everything (installers + latest.json) to the release.
       - name: Build and publish

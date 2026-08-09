@@ -300,12 +300,18 @@ impl Extractor {
         let key = CacheKey::for_file(path, ANALYSIS_RATE).map_err(|e| fail(e.to_string()))?;
         let entry = self.cache.entry_path(&key);
 
-        if self.cache.contains(&key) {
-            let samples = std::fs::metadata(&entry).map_or(0, |m| m.len() as usize) / 4;
+        // One stat, not two. `contains()` followed by a second `metadata()` could
+        // disagree: an eviction sweep or another process's `clear()` landing between them
+        // made the second call fail, and `map_or(0, …)` then handed placement a
+        // `CachedAudio` claiming ZERO samples for a file that decodes perfectly — the
+        // silent wrongness §7.5 forbids, and worse than the honest alternative, which is
+        // simply to decode it again. A vanished or unusable entry now falls through to the
+        // decode below instead.
+        if let Some(len) = self.cache.entry_len(&key) {
             return Ok(CachedAudio {
                 source: path.to_path_buf(),
                 cache_path: entry,
-                samples,
+                samples: len as usize / 4,
             });
         }
 
@@ -407,24 +413,79 @@ impl Extractor {
 /// surface a spurious `decode_error` for a file that in fact cached perfectly.
 ///
 /// The two racers share a cache key — same path, size, mtime and analysis rate — so they
-/// produce byte-identical analysis audio. An existing destination is therefore a cache
+/// produce byte-identical analysis audio. A *committed* destination is therefore a cache
 /// hit, not a failure: drop our now-redundant scratch file and use the entry already
-/// there. Handled portably via `AlreadyExists` (plus a positive existence check, since
-/// the exact `ErrorKind` for this on Windows is not guaranteed), leaving the unix atomic
-/// path untouched.
+/// there. Handled portably via the destination's own metadata (plus the `AlreadyExists`
+/// kind, since the exact `ErrorKind` for this on Windows is not guaranteed), leaving the
+/// unix atomic path untouched.
+///
+/// # An empty destination is not a winner (fixed in this review)
+///
+/// The earlier form treated `AlreadyExists` as proof a winner was present *without
+/// looking at the destination*. A zero-length leftover — exactly what
+/// [`Cache::entry_len`] documents an out-of-space or force-killed older build can strand
+/// there — then made the commit "succeed": our good scratch file was deleted, and the
+/// caller returned a [`CachedAudio`] whose `samples` came from that scratch file while
+/// the cache path held nothing. The handle described audio that was not on disk. An empty
+/// destination is now cleared and the rename retried, so the only thing that can end a
+/// conflict happily is a real, non-empty entry.
 fn commit_entry(temp: &Path, entry: &Path) -> std::io::Result<()> {
-    match std::fs::rename(temp, entry) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let winner_present = e.kind() == std::io::ErrorKind::AlreadyExists
-                || std::fs::metadata(entry).is_ok_and(|m| m.len() > 0);
-            if winner_present {
-                let _ = std::fs::remove_file(temp);
-                Ok(())
-            } else {
-                Err(e)
+    let Err(e) = std::fs::rename(temp, entry) else {
+        return Ok(());
+    };
+    match classify_conflict(e.kind(), committed_len(entry)) {
+        Conflict::UseExisting => {
+            let _ = std::fs::remove_file(temp);
+            Ok(())
+        }
+        Conflict::ReplaceExisting => {
+            let _ = std::fs::remove_file(entry);
+            match std::fs::rename(temp, entry) {
+                Ok(()) => Ok(()),
+                // Someone committed a real entry in the meantime — that is still a hit.
+                Err(retry) if committed_len(entry).is_some() => {
+                    let _ = std::fs::remove_file(temp);
+                    let _ = retry;
+                    Ok(())
+                }
+                Err(retry) => Err(retry),
             }
         }
+        Conflict::Fail => Err(e),
+    }
+}
+
+/// The byte length of a committed entry at `path`, or `None` if there is nothing usable
+/// there. Mirrors [`Cache::entry_len`]'s rules, applied to a bare path.
+fn committed_len(path: &Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .ok()
+        .filter(|m| m.is_file() && m.len() > 0)
+        .map(|m| m.len())
+}
+
+/// What to do when `rename` refused to commit the scratch file.
+///
+/// Split out as a pure function so all three outcomes are unit-testable on every host:
+/// unix `rename` silently overwrites, so the conflict branch is otherwise only reachable
+/// on Windows and would ship untested.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Conflict {
+    /// A real entry is already there and is byte-identical to ours — use it.
+    UseExisting,
+    /// The destination exists but holds nothing usable: clear it and try again.
+    ReplaceExisting,
+    /// A genuine failure (no directory, no permission, a full disk) — report it.
+    Fail,
+}
+
+fn classify_conflict(kind: std::io::ErrorKind, committed_len: Option<u64>) -> Conflict {
+    if committed_len.is_some() {
+        Conflict::UseExisting
+    } else if kind == std::io::ErrorKind::AlreadyExists {
+        Conflict::ReplaceExisting
+    } else {
+        Conflict::Fail
     }
 }
 
@@ -563,6 +624,51 @@ mod tests {
         commit_entry(&temp, &entry).expect("a pre-existing entry must not error");
         assert!(!temp.exists(), "our scratch file must be dropped");
         assert!(entry.exists(), "the committed entry must remain");
+    }
+
+    #[test]
+    fn an_empty_destination_is_never_mistaken_for_the_race_winner() {
+        // F9, corrected. `rename` overwrites silently on unix, so the conflict branch is
+        // Windows-only in practice and has to be pinned on its decision function or it
+        // ships untested. The bug: `AlreadyExists` alone was taken as proof a winner was
+        // present. Against the zero-length leftover `Cache::entry_len` documents, that
+        // deleted our good scratch file and returned a handle describing audio that was
+        // not on disk.
+        use std::io::ErrorKind;
+
+        assert_eq!(
+            classify_conflict(ErrorKind::AlreadyExists, Some(4096)),
+            Conflict::UseExisting,
+            "a real committed entry is byte-identical to ours — use it"
+        );
+        assert_eq!(
+            classify_conflict(ErrorKind::AlreadyExists, None),
+            Conflict::ReplaceExisting,
+            "an empty or absent destination must be cleared and retried, never accepted"
+        );
+        assert_eq!(
+            classify_conflict(ErrorKind::PermissionDenied, None),
+            Conflict::Fail,
+            "a genuine failure must stay a failure"
+        );
+        // A winner that materialised after some *other* rename error is still a hit: the
+        // destination's own metadata decides, not the error kind.
+        assert_eq!(
+            classify_conflict(ErrorKind::PermissionDenied, Some(8)),
+            Conflict::UseExisting
+        );
+    }
+
+    #[test]
+    fn committed_len_rejects_empty_files_and_directories() {
+        let dir = scratch("extract-committed-len");
+        assert_eq!(committed_len(&dir.join("absent.f32")), None);
+        fs::write(dir.join("empty.f32"), b"").unwrap();
+        assert_eq!(committed_len(&dir.join("empty.f32")), None);
+        fs::create_dir_all(dir.join("adir.f32")).unwrap();
+        assert_eq!(committed_len(&dir.join("adir.f32")), None);
+        fs::write(dir.join("real.f32"), [0u8; 12]).unwrap();
+        assert_eq!(committed_len(&dir.join("real.f32")), Some(12));
     }
 
     #[test]

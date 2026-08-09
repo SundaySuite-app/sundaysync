@@ -210,6 +210,54 @@ struct AppState {
     /// (D-031). `None` means resolution failed — a user who installs ffmpeg while the
     /// app is open gets a fresh attempt from `check_sidecar` without restarting.
     sidecar: Arc<Mutex<Option<Sidecar>>>,
+    /// D-046 (night review B-9): cache maintenance and a running sync must not overlap.
+    /// The eviction sweeps spare in-flight `.tmp` scratch files but can evict a
+    /// COMMITTED entry the running sync has already checked `contains()` on — `place`
+    /// then dies with an `Io` error naming a cache path, for media that is fine. One
+    /// activity slot makes the two mutually exclusive; the loser gets an honest
+    /// "busy" error instead of the engine getting a vanishing cache.
+    activity: Arc<Mutex<Activity>>,
+}
+
+/// What the app is busy doing, for the D-046 mutual exclusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Activity {
+    #[default]
+    Idle,
+    Syncing,
+    Maintaining,
+}
+
+/// RAII guard: holds the activity slot at `Syncing`/`Maintaining`, restores `Idle` on
+/// drop — every early `?` return included.
+struct ActivityGuard {
+    slot: Arc<Mutex<Activity>>,
+}
+
+impl ActivityGuard {
+    /// Claims the slot for `want`, or returns a stable, prefix-matchable error naming
+    /// what the app is busy with (D-030 style: the frontend maps the prefix).
+    fn begin(slot: &Arc<Mutex<Activity>>, want: Activity) -> Result<Self, String> {
+        let mut guard = lock_state(slot, OnPoison::Recover)?;
+        match *guard {
+            Activity::Idle => {
+                *guard = want;
+                Ok(Self {
+                    slot: Arc::clone(slot),
+                })
+            }
+            Activity::Syncing => Err("busy: sync in progress".to_string()),
+            Activity::Maintaining => Err("busy: cache maintenance in progress".to_string()),
+        }
+    }
+}
+
+impl Drop for ActivityGuard {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = lock_state(&self.slot, OnPoison::Recover) {
+            *guard = Activity::Idle;
+        }
+    }
 }
 
 impl AppState {
@@ -350,6 +398,10 @@ fn run_sync(
     state: State<'_, AppState>,
     args: RunSyncArgs,
 ) -> Result<SyncOutcome, String> {
+    // D-046: claim the activity slot first — a maintenance conflict should surface
+    // before any state is touched. The guard restores Idle on every return path.
+    let _activity = ActivityGuard::begin(&state.activity, Activity::Syncing)?;
+
     // Resolved before the token is installed: a missing ffmpeg should not leave a cancel
     // handle pointing at a run that never started.
     let sidecar = state.sidecar()?;
@@ -362,7 +414,14 @@ fn run_sync(
         inputs: args.inputs,
         cache_dir: args.cache_dir,
         reference_override: args.reference,
-        min_psr: args.min_psr.unwrap_or(DEFAULT_MIN_PSR),
+        // Night review (A, out-of-area): an unvalidated min_psr is the acceptance
+        // gate's off switch — a negative value admits EVERY clip at zero confidence,
+        // and NaN refuses everything silently. Only a positive finite value is a
+        // threshold; anything else falls back to the calibrated default (D-015).
+        min_psr: args
+            .min_psr
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(DEFAULT_MIN_PSR),
         device_overrides: args.device_overrides.unwrap_or_default(),
         segment_count: args.segment_count.unwrap_or(defaults.segment_count),
         correct_drift: args.correct_drift.unwrap_or(defaults.correct_drift),
@@ -476,7 +535,9 @@ fn cache_status(dir: Option<PathBuf>) -> Result<CacheStatus, String> {
 /// Clears the analysis cache, returning bytes freed. Foreign files are spared — the
 /// engine never deletes what it did not write.
 #[tauri::command]
-fn clear_cache(dir: Option<PathBuf>) -> Result<u64, String> {
+fn clear_cache(state: State<'_, AppState>, dir: Option<PathBuf>) -> Result<u64, String> {
+    // D-046: clearing evicts committed entries a running sync may be about to load.
+    let _activity = ActivityGuard::begin(&state.activity, Activity::Maintaining)?;
     let dir = match dir {
         Some(d) => d,
         None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
@@ -511,7 +572,12 @@ const DEFAULT_SWEEP_AGE: std::time::Duration = std::time::Duration::from_secs(90
 /// settings screen so the user can trigger it and see the freed number; the same sweep
 /// also runs automatically at startup.
 #[tauri::command]
-fn sweep_cache(dir: Option<PathBuf>, max_age_days: Option<u64>) -> Result<EvictionResult, String> {
+fn sweep_cache(
+    state: State<'_, AppState>,
+    dir: Option<PathBuf>,
+    max_age_days: Option<u64>,
+) -> Result<EvictionResult, String> {
+    let _activity = ActivityGuard::begin(&state.activity, Activity::Maintaining)?;
     let dir = match dir {
         Some(d) => d,
         None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
@@ -528,7 +594,12 @@ fn sweep_cache(dir: Option<PathBuf>, max_age_days: Option<u64>) -> Result<Evicti
 /// Evicts least-recently-modified entries until the cache is under `max_bytes` (D-040).
 /// Only called when the user has enabled the size cap in Settings — it is off by default.
 #[tauri::command]
-fn enforce_cache_cap(dir: Option<PathBuf>, max_bytes: u64) -> Result<EvictionResult, String> {
+fn enforce_cache_cap(
+    state: State<'_, AppState>,
+    dir: Option<PathBuf>,
+    max_bytes: u64,
+) -> Result<EvictionResult, String> {
+    let _activity = ActivityGuard::begin(&state.activity, Activity::Maintaining)?;
     let dir = match dir {
         Some(d) => d,
         None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
@@ -1008,12 +1079,20 @@ pub fn run() {
                 }
                 Err(e) => eprintln!("ffmpeg could not be resolved at startup: {e}"),
             }
+            let activity = Arc::clone(&state.activity);
             app.manage(state);
 
             // D-040: age-based sweep on app start (90 days, on by default). Off the main
             // thread so a large cache never delays the window, and non-fatal — a swept
-            // entry simply cold-decodes if that shoot ever returns.
-            std::thread::spawn(|| {
+            // entry simply cold-decodes if that shoot ever returns. D-046: the sweep
+            // claims the activity slot like every other maintenance pass, so a sync the
+            // user starts during it is refused honestly (and vice versa) instead of the
+            // engine seeing its cache vanish mid-run.
+            std::thread::spawn(move || {
+                let Ok(_guard) = ActivityGuard::begin(&activity, Activity::Maintaining) else {
+                    eprintln!("startup cache sweep skipped: app is busy");
+                    return;
+                };
                 let Ok(dir) = sundaysync_core::Cache::default_dir() else {
                     return;
                 };

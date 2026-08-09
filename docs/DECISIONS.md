@@ -1247,3 +1247,49 @@ because a proxy is a duplicate by construction, not doubtful media. An explicitl
 **Guidance encoded in KNOWN_LIMITATIONS:** a produced/edited mix is not a valid sync
 reference — the engine now *refuses* instead of mis-placing, and the UI's reference
 override should point at a raw recorder file or the longest camera instead.
+
+## D-046 — Cache maintenance and a running sync must not overlap (night review)
+
+The eviction sweeps (D-040) spare in-flight `.tmp` scratch files, so they cannot disturb
+an extraction mid-write — but they could evict a **committed** entry a running sync had
+already checked, and `place`'s `load()?` then killed the whole run with an `Io` error
+naming a `{hash}.f32` path, for media that is perfectly fine. Half of this was worse and
+is fixed in the engine: the extraction stage used to read existence and length in two
+separate stats and could mint a **zero-sample** handle when they disagreed
+(`Cache::entry_len` now answers both in one stat, and an unusable entry falls through to
+an honest re-decode). The rest is scheduling, enforced in the shell: an `AppState`
+activity slot (RAII-guarded) makes `run_sync` and every maintenance pass (`clear_cache`,
+`sweep_cache`, `enforce_cache_cap`, the startup sweep) mutually exclusive — the loser
+gets an honest `busy:` error. Making `load()` failures per-file `decode_error`s was
+rejected: it would report the user's media as broken when the fault is entirely ours.
+
+## D-047 — The Worker is the wire's authority, and its 400 is silent data loss (night review)
+
+The telemetry client treats a 4xx as permanent, so a client/server shape mismatch does
+not fail loudly — it discards every report from every affected install, indefinitely.
+Three such drifts shipped in E7 and were caught the same night: a scrubber whose
+path-boundary set was narrower than the Worker's screen (`[C:\…` survived scrubbing and
+tripped the Worker), an uncapped `appVersion`, and a non-finite float that serialises as
+JSON `null`. **Rule:** the client's scrub must be a *superset* of the endpoint's screen,
+and every cap, enum and key the Worker enforces is pinned in the shell's
+`mod wire_contract` — transcribed from `schema-sync.ts` — so drift fails a test instead
+of deleting a month of reports. Corollaries: `NIL_INSTALL_ID` is a preview id and never
+enters a send path (a deletion retires the identity; continued consent mints a fresh
+one); consent is re-checked immediately before each POST, not once per pump; outbox
+entries are leased under the same lock that reads them; and atomic writes stage through a
+per-writer temp name, because `open -n` relaunch makes two live instances a real state.
+
+## D-048 — A gate must branch on what evidence exists, not on whether reading it succeeded (night review)
+
+Two defects shared one shape. `place::admissible` selected D-045's ordinary bar or its
+stricter no-evidence floor by matching on `drift::measure`'s `Option` — so a many-segment
+match whose regression *declined* (degenerate fit, non-finite slope) was routed to the
+branch meaning "too short to check" and admitted on PSR alone, inverting D-045. And
+`fcpxml::correction_of` retimed on a `drift_ppm` it never examined, with a comment
+explaining the upstream gate made checking unnecessary — the exact path that stretched
+the E10 corpus's −587,484 ppm clip by −59 %. Both are the D-014 lesson at one remove:
+a *reading whose absence was mistaken for a benign default*. **Rule:** branch on the
+precondition (segment count, input length); treat a failed read of an available
+instrument as a refusal; and where a value crosses a public API or serialised contract,
+re-check it on the far side (`Drift::credible()` now guards the exporter too) even when
+the near side guarantees it.

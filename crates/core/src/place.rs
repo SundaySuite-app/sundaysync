@@ -94,12 +94,27 @@ pub const NO_DRIFT_EVIDENCE_PSR_FACTOR: f64 = 5.0 / 3.0;
 ///   to catch a lucky sidelobe — a 14 s clip placed an hour from where its metadata put
 ///   it, at PSR 19.0.
 ///
+/// Which of the two applies is decided by the segment *count*, not by whether the
+/// regression happened to succeed: with ≥ 3 segments a `None` from [`drift::measure`] is a
+/// failed credibility check, not an absent one, and is refused outright.
+///
 /// Refusal here lands the clip in `unsynced` as `low_confidence` — which is precisely
 /// what it is.
 fn admissible(m: &crate::correlate::ClipMatch, clip_samples: usize, min_psr: f64) -> bool {
+    // Which bar applies is decided by how much evidence *exists*, not by whether reading
+    // it happened to succeed. Those are the same question only until they are not: a
+    // regression over enough segments can still come back empty (a degenerate fit, a
+    // non-finite slope), and routing that to the no-evidence floor would let the strongest
+    // possible sign of a bad match — "the segments do not describe a clock at all" — be
+    // answered with "then judge it on PSR alone". D-045's whole point is the opposite.
+    if m.segments.len() < drift::MIN_SEGMENTS_FOR_DRIFT {
+        return m.psr >= min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR;
+    }
     match drift::measure(&m.segments, clip_samples) {
         Some(d) => m.psr >= min_psr && d.credible(),
-        None => m.psr >= min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR,
+        // Enough segments to check, and the check did not come back: a failed credibility
+        // test, not an absent one. §7.5 says refuse.
+        None => false,
     }
 }
 
@@ -288,6 +303,15 @@ pub fn place(
                     continue;
                 }
 
+                // §4.4 tries the largest anchors first precisely so the best evidence is
+                // seen first; keeping whichever anchor happened to be tried *last* would
+                // throw that ordering away and let the faintest witness in the room decide
+                // the placement. Strictly-greater, so an exact tie keeps the earlier —
+                // i.e. the larger — anchor, which is also what keeps this deterministic.
+                if best.as_ref().is_some_and(|b| m.psr <= b.psr) {
+                    continue;
+                }
+
                 let mut chain = anchor_chain.clone();
                 chain.push(anchor_path.to_string_lossy().into_owned());
                 // §4.4: "A transitive placement's confidence is the minimum along its
@@ -295,6 +319,9 @@ pub fn place(
                 let confidence = confidence_from_psr(m.psr, min_psr).min(*anchor_confidence);
                 let offset = anchor_offset + m.offset_samples / f64::from(ANALYSIS_RATE);
 
+                // A strong match cannot be beaten by anything still to come: every anchor
+                // already tried scored below the strong bar, and the list only gets smaller
+                // from here.
                 let strong = m.psr >= min_psr * 4.0;
                 best = Some(Transitive {
                     offset_seconds: offset,
@@ -427,25 +454,37 @@ fn evict_device_overlaps(
                 .then_with(|| placements[*a].file.cmp(&placements[*b].file))
         });
 
-        for w in sorted.windows(2) {
-            let (first, second) = (w[0], w[1]);
-            if evict.contains(&first) || evict.contains(&second) {
+        // A sweep against the last *surviving* clip, not a walk over neighbouring pairs.
+        // The distinction is load-bearing: one long clip can swallow several later ones,
+        // and comparing only neighbours stops looking the moment the clip in the middle is
+        // evicted — leaving the camera recording two clips at once, which is the exact
+        // impossibility this check exists to catch.
+        let mut held: Option<usize> = None;
+        for &next in &sorted {
+            let Some(current) = held else {
+                held = Some(next);
+                continue;
+            };
+            let end = placements[current].offset_seconds + duration_of(&placements[current].file);
+            if end <= placements[next].offset_seconds {
+                held = Some(next);
                 continue;
             }
-            let end = placements[first].offset_seconds + duration_of(&placements[first].file);
-            if end > placements[second].offset_seconds {
-                // Drop the one we believe less. Ties break on path so the outcome does
-                // not depend on iteration order.
-                let loser = if placements[first].confidence < placements[second].confidence {
-                    first
-                } else if placements[second].confidence < placements[first].confidence {
-                    second
-                } else if placements[first].file > placements[second].file {
-                    first
-                } else {
-                    second
-                };
-                evict.push(loser);
+            // Drop the one we believe less. Ties break on path so the outcome does
+            // not depend on iteration order.
+            let loser = if placements[current].confidence < placements[next].confidence {
+                current
+            } else if placements[next].confidence < placements[current].confidence {
+                next
+            } else if placements[current].file > placements[next].file {
+                current
+            } else {
+                next
+            };
+            evict.push(loser);
+            // Whichever survives defines the occupied span the rest are measured against.
+            if loser == current {
+                held = Some(next);
             }
         }
     }
@@ -657,6 +696,99 @@ mod tests {
         assert_eq!(confidence_from_psr(-1.0, 15.0), 0.0);
     }
 
+    fn clip_match(psr: f64, segments: &[(usize, f64)]) -> crate::correlate::ClipMatch {
+        crate::correlate::ClipMatch {
+            offset_samples: 100.0,
+            psr,
+            segments: segments
+                .iter()
+                .map(|(start, off)| crate::correlate::SegmentMatch {
+                    start_in_clip: *start,
+                    offset_samples: *off,
+                    psr,
+                })
+                .collect(),
+            mad_ms: 0.0,
+            consistent: true,
+        }
+    }
+
+    #[test]
+    fn a_nan_score_is_refused_rather_than_slipping_through_the_gate() {
+        // Every comparison in `admissible` is written so that NaN *fails* it. That is not
+        // an accident of style: flip `psr >= min` to `!(psr < min)` and a NaN score becomes
+        // an admitted one — a clip placed on no evidence whatsoever, which is precisely the
+        // silent wrongness §7.5 exists to refuse. Pinned on both arms of the D-045 gate.
+        let long = clip_match(f64::NAN, &[(0, 0.0), (1_000, 0.0), (2_000, 0.0)]);
+        assert!(!admissible(&long, 3_000, 15.0), "≥3 segments, NaN psr");
+        let short = clip_match(f64::NAN, &[(0, 0.0)]);
+        assert!(!admissible(&short, 3_000, 15.0), "single segment, NaN psr");
+    }
+
+    #[test]
+    fn a_regression_that_cannot_be_read_is_a_refusal_not_a_free_pass() {
+        // Three segments is enough evidence to *check*, so a check that comes back empty
+        // is a failed credibility test — the strongest possible sign that these peaks do
+        // not describe one rigid recording against another. Routing it to the no-evidence
+        // floor would answer "these segments are not a clock at all" with "then judge it on
+        // PSR alone", which is the opposite of what D-045 is for.
+        //
+        // Both ways `drift::measure` can decline on a long-enough match:
+        let non_finite = clip_match(1_000.0, &[(0, 0.0), (1_000, f64::NAN), (2_000, 0.0)]);
+        assert!(drift::measure(&non_finite.segments, 3_000).is_none());
+        assert!(
+            !admissible(&non_finite, 3_000, 15.0),
+            "a non-finite regression must refuse, however high the PSR"
+        );
+
+        let no_lever_arm = clip_match(1_000.0, &[(500, 0.0), (500, 5.0), (500, -5.0)]);
+        assert!(drift::measure(&no_lever_arm.segments, 3_000).is_none());
+        assert!(
+            !admissible(&no_lever_arm, 3_000, 15.0),
+            "a degenerate fit must refuse too"
+        );
+
+        // The genuinely short clip is untouched: it keeps the no-evidence floor.
+        let short = clip_match(15.0 * NO_DRIFT_EVIDENCE_PSR_FACTOR, &[(0, 0.0)]);
+        assert!(admissible(&short, 3_000, 15.0));
+    }
+
+    #[test]
+    fn the_d045_gates_admit_exactly_at_their_limits() {
+        // D-045's two bounds are inclusive by construction (`<=`), and the no-evidence
+        // floor is a `>=`. A clip sitting exactly on a limit is admitted, not refused —
+        // worth pinning because "at the limit" is where a later re-tuning is most likely
+        // to change behaviour without anyone noticing.
+        let min_psr = 15.0;
+        let floor = min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR;
+
+        // Single segment, PSR exactly on the no-evidence floor.
+        assert!(admissible(&clip_match(floor, &[(0, 0.0)]), 3_000, min_psr));
+        // A hair under is refused; f64 makes that boundary exact.
+        let under = f64::from_bits(floor.to_bits() - 1);
+        assert!(!admissible(&clip_match(under, &[(0, 0.0)]), 3_000, min_psr));
+
+        // Three segments on a line of exactly MAX_CREDIBLE_DRIFT_PPM, zero residual.
+        let slope = drift::MAX_CREDIBLE_DRIFT_PPM * 1e-6;
+        let on_the_ppm_limit: Vec<(usize, f64)> = (0..3)
+            .map(|i| (i * 100_000, slope * (i * 100_000) as f64))
+            .collect();
+        let m = clip_match(min_psr, &on_the_ppm_limit);
+        let d = drift::measure(&m.segments, 300_000).unwrap();
+        assert!(
+            (d.ppm - drift::MAX_CREDIBLE_DRIFT_PPM).abs() < 1e-6,
+            "fixture should sit on the limit, measured {} ppm",
+            d.ppm
+        );
+        assert!(admissible(&m, 300_000, min_psr), "exactly at the ppm limit");
+
+        // ...and with ≥3 segments the *ordinary* min_psr applies, not the stricter floor.
+        assert!(
+            min_psr < floor,
+            "the two bars must differ for this to prove anything"
+        );
+    }
+
     fn placement(file: &str, device: &str, offset: f64, confidence: f64) -> Placement {
         Placement {
             file: PathBuf::from(file),
@@ -715,6 +847,60 @@ mod tests {
             placement("/b.mp4", "cam", 30.0, 0.9), // starts exactly as /a ends
         ];
         assert!(evict_device_overlaps(&mut placements, &candidates).is_empty());
+    }
+
+    #[test]
+    fn one_long_clip_evicts_every_later_clip_it_swallows() {
+        // §4.4's same-device rule is about *physical* impossibility, so it has to hold
+        // between every pair, not just between neighbours in offset order. A 120 s clip
+        // that swallows two shorter ones is the shape that exposes the difference: once
+        // the middle clip is evicted, a neighbour-only scan never compares the long clip
+        // against the third, and the camera ends up recording two clips at once.
+        let candidates = vec![
+            candidate("/long.mp4", "cam", 120.0, true),
+            candidate("/mid.mp4", "cam", 5.0, true),
+            candidate("/late.mp4", "cam", 5.0, true),
+        ];
+        let mut placements = vec![
+            placement("/long.mp4", "cam", 0.0, 0.9),
+            placement("/mid.mp4", "cam", 10.0, 0.4),
+            placement("/late.mp4", "cam", 30.0, 0.4),
+        ];
+        let evicted = evict_device_overlaps(&mut placements, &candidates);
+        let mut gone: Vec<&str> = evicted
+            .iter()
+            .filter_map(|u| u.file.to_str())
+            .collect::<Vec<_>>();
+        gone.sort_unstable();
+        assert_eq!(
+            gone,
+            vec!["/late.mp4", "/mid.mp4"],
+            "both clips inside /long.mp4's span must go"
+        );
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].file, PathBuf::from("/long.mp4"));
+    }
+
+    #[test]
+    fn eviction_keeps_scanning_from_the_surviving_clip() {
+        // The mirror case: when the *earlier* clip is the one evicted, the later clip
+        // becomes the span everything after it is compared against. Here /weak is long
+        // but unconvincing, /strong sits inside it and wins, and /third overlaps
+        // /strong — so /third must go too, and /weak must not resurrect as the yardstick.
+        let candidates = vec![
+            candidate("/weak.mp4", "cam", 200.0, true),
+            candidate("/strong.mp4", "cam", 60.0, true),
+            candidate("/third.mp4", "cam", 60.0, true),
+        ];
+        let mut placements = vec![
+            placement("/weak.mp4", "cam", 0.0, 0.2),
+            placement("/strong.mp4", "cam", 10.0, 0.95),
+            placement("/third.mp4", "cam", 40.0, 0.5),
+        ];
+        let evicted = evict_device_overlaps(&mut placements, &candidates);
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].file, PathBuf::from("/strong.mp4"));
+        assert_eq!(evicted.len(), 2);
     }
 
     #[test]
@@ -793,6 +979,143 @@ mod tests {
         ];
         annotate_metadata_mismatches(&mut placements, &candidates, Path::new("/ref.wav"));
         assert!(placements[1].warnings.is_empty());
+    }
+
+    /// Deterministic broadband noise, the same generator `correlate`'s tests use.
+    fn noise(n: usize, seed: u64) -> Vec<f32> {
+        let mut s = seed | 1;
+        (0..n)
+            .map(|_| {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                (s >> 11) as f32 / (1u64 << 53) as f32 * 2.0 - 1.0
+            })
+            .collect()
+    }
+
+    /// A candidate whose analysis audio really is on disk, so `place()` runs unmodified.
+    ///
+    /// The cache format is raw `f32le` (see `extract::CachedAudio::load`), which is all
+    /// `place` ever reads — no ffmpeg and no media file is involved.
+    fn cached_candidate(
+        dir: &Path,
+        name: &str,
+        device: &str,
+        samples: &[f32],
+        video: bool,
+    ) -> Candidate {
+        let cache_path = dir.join(format!("{name}.f32"));
+        let mut bytes = Vec::with_capacity(samples.len() * 4);
+        for s in samples {
+            bytes.extend_from_slice(&s.to_le_bytes());
+        }
+        std::fs::write(&cache_path, &bytes).unwrap();
+        let source = PathBuf::from(format!("/media/{name}"));
+        let mut c = candidate(
+            &source.to_string_lossy(),
+            device,
+            samples.len() as f64 / f64::from(ANALYSIS_RATE),
+            video,
+        );
+        c.audio = CachedAudio {
+            source,
+            cache_path,
+            samples: samples.len(),
+        };
+        c
+    }
+
+    #[test]
+    fn pass_two_keeps_the_strongest_anchor_not_the_last_one_tried() {
+        // §4.4 orders pass 2 "largest placed clips first, early exit on strong PSR" — an
+        // ordering that only means anything if a later, weaker anchor cannot displace an
+        // earlier, stronger one.
+        //
+        // The shoot: a recorder R; two cameras A1 and A2 that each hear R plus a second
+        // room Q; and a clip X recorded in room Q alone. X shares nothing with R (so pass 1
+        // refuses it) but is present in both cameras — cleanly in A1, faintly in A2. A1 is
+        // also the longer camera, so pass 2 reaches it first. Both anchor matches clear the
+        // gate and neither is "strong", so pass 2 genuinely has to choose between them.
+        let dir = std::env::temp_dir()
+            .join("sundaysync-place")
+            .join("pass2-strongest-anchor");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let rate = ANALYSIS_RATE as usize;
+        let r = noise(30 * rate, 1);
+        let q = noise(30 * rate, 2);
+        let mix = |a: &[f32], b: &[f32], g: f32| -> Vec<f32> {
+            a.iter()
+                .zip(b.iter())
+                .map(|(x, y)| x * g + y * (1.0 - g))
+                .collect()
+        };
+        // A1: 20 s, 70 % recorder / 30 % room Q, starting 2 s into the service.
+        let a1 = mix(&r[2 * rate..22 * rate], &q[0..20 * rate], 0.70);
+        // A2: 15 s, only 20 % room Q, starting 5 s in — a fainter witness to X.
+        let a2 = mix(&r[5 * rate..20 * rate], &q[3 * rate..18 * rate], 0.80);
+        // X: 8 s of room Q alone. Truth: 6 s into A1 (⇒ 8 s), 3 s into A2 (⇒ 8 s).
+        let x = q[6 * rate..14 * rate].to_vec();
+
+        let candidates = vec![
+            cached_candidate(&dir, "rec.wav", "rec", &r, false),
+            cached_candidate(&dir, "a1.mp4", "cam-a", &a1, true),
+            cached_candidate(&dir, "a2.mp4", "cam-b", &a2, true),
+            cached_candidate(&dir, "x.mp4", "cam-c", &x, true),
+        ];
+
+        // Chosen so both anchor matches are admissible (≥ min_psr × 5/3) and neither is
+        // "strong" (≥ min_psr × 4) — the only window in which the choice is exercised.
+        let min_psr = 38.0;
+        let mut c = Correlator::new();
+        let via_a1 = c
+            .match_clip(&x, &a1, crate::correlate::SEGMENT_COUNT)
+            .unwrap();
+        let via_a2 = c
+            .match_clip(&x, &a2, crate::correlate::SEGMENT_COUNT)
+            .unwrap();
+        for (label, m) in [("A1", &via_a1), ("A2", &via_a2)] {
+            assert!(
+                m.psr >= min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR && m.psr < min_psr * 4.0,
+                "{label} psr {} must sit between the gate and the strong-match exit",
+                m.psr
+            );
+        }
+        assert!(
+            via_a1.psr > via_a2.psr,
+            "the larger anchor must also be the stronger one for this test to mean anything"
+        );
+
+        let placed = place(
+            &candidates,
+            None,
+            min_psr,
+            crate::correlate::SEGMENT_COUNT,
+            25.0,
+            &crate::progress::NoProgress,
+            &crate::progress::CancelToken::new(),
+        )
+        .unwrap();
+
+        let x_placed = placed
+            .placements
+            .iter()
+            .find(|p| p.file == Path::new("/media/x.mp4"))
+            .expect("X should be placed transitively");
+        assert_eq!(
+            x_placed.chain,
+            vec!["/media/a1.mp4".to_string()],
+            "pass 2 must keep the strongest anchor, not the last one it tried"
+        );
+        assert!(
+            (x_placed.psr - via_a1.psr).abs() < 1e-9,
+            "recorded psr {} should be the strongest anchor's {}",
+            x_placed.psr,
+            via_a1.psr
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

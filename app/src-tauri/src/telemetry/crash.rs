@@ -14,9 +14,18 @@
 //! It runs on an ARBITRARY thread, possibly while unwinding. So: no `AppHandle`
 //! (the directory is resolved lock-free via [`super::telemetry_dir`], which caches
 //! a `dirs`-derived path in a `OnceLock`); no lock this process holds elsewhere
-//! (the ring's ordering comes from the filename, not shared state); and it must
-//! not panic (the whole body runs inside `catch_unwind` — a panic in a panic hook
-//! aborts the process).
+//! (the ring's ordering comes from the filename, not shared state); and — the one
+//! that is not negotiable — **it must not panic**.
+//!
+//! ⚠️ The `catch_unwind` in [`install_hook`] does NOT make that negotiable, and an
+//! earlier version of this comment implied it did. The hook is called with the
+//! runtime's panic count already at one, so a panic raised *inside* it takes the
+//! count to two and std aborts the process on the spot ("panicked while processing
+//! panic") — before any unwinding starts, which is what `catch_unwind` would need
+//! to catch. It is kept as a cheap outer guard, but the actual guarantee is that
+//! nothing in the body can panic: no `unwrap`, no `expect`, no indexing, no
+//! arithmetic that can overflow. Every fallible step here is `let _ =` or
+//! `unwrap_or_else` on purpose, and a new one must be too.
 //!
 //! ## Privacy
 //!
@@ -36,6 +45,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     home_dir, now_ms, scrub_free_text, Os, LOCATION_MAX_CHARS, MAX_CRASHES, MESSAGE_MAX_CHARS,
+    VERSION_MAX_CHARS,
 };
 
 /// The schema of a [`CrashReport`]. Bumped when a field changes meaning.
@@ -84,7 +94,9 @@ fn crash_dir() -> Option<PathBuf> {
 pub fn install_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        // A panic inside a panic hook ABORTS; everything here is best-effort.
+        // Best-effort, and see the module docs: this guard cannot catch a panic
+        // raised inside `persist_panic` — std aborts first. The body is written
+        // not to panic.
         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| persist_panic(info)));
         previous(info);
     }));
@@ -112,7 +124,11 @@ fn persist_panic(info: &PanicHookInfo<'_>) {
         schema: RECORD_SCHEMA,
         kind: "panic".to_string(),
         at: now_ms(),
-        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        app_version: scrub_free_text(
+            env!("CARGO_PKG_VERSION"),
+            home.as_deref(),
+            VERSION_MAX_CHARS,
+        ),
         os: Os::current(),
         message: scrub_free_text(&raw_msg, home.as_deref(), MESSAGE_MAX_CHARS),
         location: raw_loc.map(|l| scrub_free_text(&l, home.as_deref(), LOCATION_MAX_CHARS)),
@@ -132,7 +148,11 @@ pub fn record(telemetry_dir: &Path, kind: &str, message: &str, location: Option<
         schema: RECORD_SCHEMA,
         kind: kind.to_string(),
         at: now_ms(),
-        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        app_version: scrub_free_text(
+            env!("CARGO_PKG_VERSION"),
+            home.as_deref(),
+            VERSION_MAX_CHARS,
+        ),
         os: Os::current(),
         message: scrub_free_text(message, home.as_deref(), MESSAGE_MAX_CHARS),
         location: location.map(|l| scrub_free_text(l, home.as_deref(), LOCATION_MAX_CHARS)),
@@ -142,14 +162,17 @@ pub fn record(telemetry_dir: &Path, kind: &str, message: &str, location: Option<
 }
 
 /// Write one record atomically and prune the ring back to [`MAX_CRASHES`].
+///
+/// Through the shared [`super::write_atomic`] rather than a second copy of
+/// tmp-write-rename: [`SEQ`] restarts at zero in every process, so a private copy
+/// staging through `{name}.tmp` let two app instances collide on one staging path
+/// the same way `state.json.tmp` did. One writer is enough to own the file name;
+/// the shared helper is what makes the staging name a writer's own.
 fn write_record(dir: &Path, record: &CrashReport) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
     let name = record_filename(unix_millis(), SEQ.fetch_add(1, Ordering::Relaxed));
     let body = serde_json::to_vec_pretty(record)
         .unwrap_or_else(|_| b"{\"schema\":1,\"kind\":\"panic\"}".to_vec());
-    let tmp = dir.join(format!("{name}.tmp"));
-    std::fs::write(&tmp, body)?;
-    std::fs::rename(&tmp, dir.join(&name))?;
+    super::write_atomic(dir, &name, &body)?;
     prune_ring(dir);
     Ok(())
 }
