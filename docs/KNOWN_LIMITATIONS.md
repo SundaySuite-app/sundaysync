@@ -93,12 +93,25 @@ observed *false* placement scored between 15 and 19 (D-045, D-015). A genuinely 
 short clip in the same room scores far above this; a distant, noisy one may now be
 refused where v0.1 would have gambled.
 
-## Scripted Resolve verification cannot cover long-form media
+## Resolve's Load XML matcher fails on large media unless it is pre-imported
 
 `scripts/resolve-verify.py`'s deep gate drives Resolve's scripting API, whose
 `ImportTimelineFromFile` refuses timelines referencing multi-gigabyte media files
 (measured 2026-08-09 by systematic A/B: codec, container, path encoding, and volume all
 exonerated; a 22 MB clip imports from everywhere, a 12 GB clip refuses even locally).
-The exported FCPXML is valid — Resolve's normal **GUI** import is the supported path for
-real shoots, and that is what the release QA checklist uses. The scripted gate remains
-authoritative for the synthetic accuracy suites, whose media is small.
+
+Follow-up owner verification (2026-08-09) traced this to the same mechanism in the
+**GUI**: File → Import Timeline ("Load XML") shows "The clip was not found" for FCPXML
+referencing large files (7–12 GB tested) even though the paths are correct — and the
+identical file imports fine when dragged straight into the Media Pool. The fault is
+Resolve's Load XML media *matcher*, not media ingest and not our FCPXML (verified clean,
+only `%20` path encoding). `ImportTimelineFromFile` exercises that same matcher, which is
+why the scripted gate fails identically.
+
+**Workaround, proven in concept:** import the media files into the Media Pool *first*
+(drag them in), then File → Import Timeline — the matcher then binds against the
+already-imported pool clips instead of trying to resolve paths itself. Alternatively,
+when the "clip was not found" dialog appears, choose Yes and point it at the folder
+containing the media to relink manually. The in-app export hint now instructs the
+media-pool-first order. The scripted gate remains authoritative for the synthetic
+accuracy suites, whose media is small.
