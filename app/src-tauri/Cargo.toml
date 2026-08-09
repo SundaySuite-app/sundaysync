@@ -51,6 +51,13 @@ dirs = "6"
 
 [dev-dependencies]
 tempfile = "3"
+# The `test` feature unlocks `tauri::test::{mock_builder, get_ipc_response}` — a headless
+# MockRuntime that drives a command through the REAL invoke pipeline and hands back the
+# `InvokeResponseBody` the webview would have received. That is what proves V03-S2's
+# binary-IPC claim (D-052) at runtime rather than by reading the IPC bootstrap script, and
+# it needs no display, no webview and no ffmpeg — so it runs in every CI job, including
+# the deliberately ffmpeg-less macOS/Windows ones (D-005/D-025).
+tauri = { version = "2", features = ["test"] }
 
 [lints.rust]
 unsafe_code = "forbid"

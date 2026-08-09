@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Internal: waveform peaks pipeline for the v0.3 interactive timeline (D-052).** Added
+  `crates/core/src/peaks.rs` — a streamed multi-resolution peak+RMS pyramid built from
+  the analysis audio the sync engine has *already* cached, so drawing waveforms costs
+  **zero ffmpeg spawns** and no second decode of the source media. Nine levels span 10 ms
+  to 2.56 s per bin; level data reaches the UI as raw bytes (an `ArrayBuffer`), not JSON.
+  Three new shell commands (`waveform_meta`, `waveform_level`, `regenerate_analysis`) with
+  a 64-entry in-memory cache. Reading a waveform is read-only and deliberately does not
+  block, or get blocked by, a running sync (D-046); a clip whose cache entry has been
+  swept is reported as a regenerable state rather than an error. No UI changes yet — S2 of
+  the v0.3 program.
+- **Internal: `THIRD-PARTY-NOTICES` added (D-053)**, carrying Clypra's MIT licence for the
+  bucket peak/RMS math adapted in `peaks.rs`. Their `HTMLAudioElement` playback transport
+  (0.5–2.0 s drift tolerance), per-zoom ffmpeg waveform extraction and unvirtualized
+  timeline were reviewed and deliberately not adopted.
 - **Internal: timeline math foundation for the v0.3 interactive result view (D-051).**
   Added `app/src/timeline/` — pure, unit-tested modules for time↔pixel mapping,
   zoom-around-anchor, ruler ticks, clip virtualization, multi-row overlap layout, and a

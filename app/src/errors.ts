@@ -19,7 +19,24 @@ import type { Strings } from "./i18n";
 
 export type MappedError =
   | { kind: "notice"; text: string }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string }
+  /**
+   * V03-S2 (D-052): the clip has no analysis-cache entry, so its waveform cannot be
+   * drawn *yet*. Not a failure — the cache is regenerable by definition, and
+   * `regenerate_analysis` is one invoke away. Carries the clip path so the view can
+   * name it and pass it straight back.
+   *
+   * `text` is present on every variant so existing consumers (`App.tsx` reads
+   * `.text` unconditionally) keep compiling; the copy here is the raw-string fallback
+   * until S4 lands the real "not built yet — regenerate?" affordance and its strings.
+   */
+  | { kind: "cacheMissing"; path: string; text: string };
+
+/**
+ * Prefix the shell puts on a missing-cache-entry refusal (`lib.rs`
+ * `CACHE_MISSING_PREFIX`), followed by the source clip path.
+ */
+export const CACHE_MISSING = "cache_missing:";
 
 export function mapEngineError(raw: string, t: Strings): MappedError {
   if (raw.startsWith("cancelled")) {
@@ -35,6 +52,13 @@ export function mapEngineError(raw: string, t: Strings): MappedError {
   // starts with this stable prefix (lib.rs STALE_EXPORT_MSG).
   if (raw.startsWith("the sources changed since this timeline was synced")) {
     return { kind: "error", text: t.errStaleExport };
+  }
+  // V03-S2/D-052: "the waveform is not built yet" — a state with a button, not a red
+  // banner. Matched before the generic prefixes so it can never fall through to
+  // `errUnknown` and read as a crash.
+  if (raw.includes(CACHE_MISSING)) {
+    const path = raw.slice(raw.indexOf(CACHE_MISSING) + CACHE_MISSING.length).trim();
+    return { kind: "cacheMissing", path, text: t.errUnknown(raw) };
   }
   if (raw.startsWith("no input files")) {
     return { kind: "error", text: t.errNoInput };
