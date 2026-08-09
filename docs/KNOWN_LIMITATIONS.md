@@ -92,3 +92,13 @@ cross-check and PSR is the only evidence. Such matches must clear `min_psr × 5/
 observed *false* placement scored between 15 and 19 (D-045, D-015). A genuinely matching
 short clip in the same room scores far above this; a distant, noisy one may now be
 refused where v0.1 would have gambled.
+
+## Scripted Resolve verification cannot cover long-form media
+
+`scripts/resolve-verify.py`'s deep gate drives Resolve's scripting API, whose
+`ImportTimelineFromFile` refuses timelines referencing multi-gigabyte media files
+(measured 2026-08-09 by systematic A/B: codec, container, path encoding, and volume all
+exonerated; a 22 MB clip imports from everywhere, a 12 GB clip refuses even locally).
+The exported FCPXML is valid — Resolve's normal **GUI** import is the supported path for
+real shoots, and that is what the release QA checklist uses. The scripted gate remains
+authoritative for the synthetic accuracy suites, whose media is small.

@@ -39,6 +39,17 @@ that directory through the real CLI, and the resulting FCPXML is checked two way
 
 The scratch directory and its exported FCPXML are deleted afterward unless `--keep` is
 passed (prints the path so it can be inspected).
+
+--- KNOWN LIMITATION of the scripted deep gate (measured 2026-08-09) -----------------
+Resolve's scripted `ImportTimelineFromFile` REFUSES timelines that reference
+multi-gigabyte media files, regardless of codec, container, path encoding, or
+volume. Systematic A/B on a real corpus: a 22 MB iPhone HEVC/AAC clip imports
+from both local disk and an SMB share with a non-ASCII (Å) path; a 12 GB
+HEVC/pcm_s24le camera file refuses from BOTH SMB and a local copy; a 10-second
+local pcm_s24le synthetic imports fine. Same minimal document shape throughout —
+the FCPXML itself is valid. The GUI import path is expected to behave normally
+(progressive media linking); verify real long-form shoots interactively instead
+of through this script, and keep the scripted gate for the synthetic suites.
 """
 import argparse
 import json
