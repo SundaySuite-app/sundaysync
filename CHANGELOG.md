@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Internal: timeline math foundation for the v0.3 interactive result view (D-051).**
+  Added `app/src/timeline/` — pure, unit-tested modules for time↔pixel mapping,
+  zoom-around-anchor, ruler ticks, clip virtualization, multi-row overlap layout, and a
+  shared playhead store. Adapted from SundayEdit's NLE timeline math (same owner) rather
+  than a shared package for now. No UI changes yet — S1 of the v0.3 program; the
+  interactive timeline itself lands in later stages.
 - **Fixed export hint: media-pool-first Resolve import order.** Owner-verified A/B testing
   traced the "clip was not found" failure on large exports to Resolve's Load XML media
   *matcher*, not media ingest or our FCPXML. The in-app hint now instructs importing the

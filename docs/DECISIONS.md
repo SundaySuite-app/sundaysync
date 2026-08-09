@@ -1340,3 +1340,37 @@ each cover ≥ 90 % of one another cannot come from one camera and are kept inta
 channel on its own lane — what a music edit wants). A two-clip full overlap keeps the old
 rule: that shape IS producible by one device family (the Insta360 dual-lens pair), where
 eviction is correct.
+
+## D-051 — The v0.3 interactive timeline is lifted math, and stays a viewer (S1)
+
+**v0.3 program, S1.** The v0.3 program (stages S1–S7) replaces `ResultView`'s static
+per-device lanes with an interactive timeline: zoomable, pannable, seekable, with
+mute/solo per device. §9's founding principle is **retained, not revisited**: the result
+view is informational, not an editor. Zoom/pan/seek/mute/solo are all read-mostly
+operations over a result that already exists — none of them write back into `SyncResult`.
+Clip dragging and manual offset correction remain out of scope, as they were in v1;
+`ResultView`'s existing information design (the `ClipDetail` dialog, the red unsynced
+shelf with its device-reassignment `<select>`, and the `stale` dimming while a re-sync is
+in flight) all carry forward unchanged in shape, just rendered against the new geometry.
+
+The spatial math (time↔pixel mapping, zoom-around-anchor, ruler ticks, virtualization) and
+the multi-row overlap layout are not new problems — SundayEdit solved the same problems
+for its NLE timeline, unit-tested, in `src/features/timeline/`. S1 lifts `geometry.ts` and
+`laneLayout.ts`'s packing algorithm (adapted to `ClipSpan { file, startMs, endMs }`,
+matching this app's `Placement`/`durations` shape rather than SundayEdit's `TimelineItem`)
+and `playhead.ts` near-verbatim into `app/src/timeline/`, tests included, with a header
+attributing the source file on each. `formatTimecode` is the one behavioural adaptation:
+HH:MM:SS.mmm (milliseconds), not SundayEdit's frame-based HH:MM:SS:FF — GCC-PHAT offsets
+are sub-frame (§4.3), and this viewer has no single reliable fps to count frames against
+on a mixed-fps shoot (a warning case §9 already surfaces). `snap`/`snapToFrame` and the
+J/K/L `shuttleRate` state machine are dropped: frame-snapping assumes an editor with
+draggable edges, and transport shuttle is deferred along with playback controls generally.
+
+This is copy-with-attribution, not a shared package. Both repos are the same owner, so the
+duplication is honest about it rather than silent. A real `@sunday/timeline-core` package
+was considered and rejected for now: the npm org (`@sunday`) is still locked behind the
+unresolved owner task tracked in the fundament/growth project, and even once unlocked, a
+shared package would couple SundayEdit's and SundaySync's release trains together for code
+that, post-adaptation, is already diverging (`ClipSpan` vs `TimelineItem`, ms-timecode vs
+frame-timecode). Revisit the extraction once a third consumer needs this math, or once the
+two copies drift enough that keeping them in sync by hand becomes the actual cost.
