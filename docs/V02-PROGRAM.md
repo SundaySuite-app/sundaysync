@@ -508,4 +508,12 @@ cache/telemetry retention verification, UNVERIFIED-list burn-down.
       then walk the checklist; stable promotion (`v0.2.0`) when it is clean. The
       updater's ring endpoints answer 404 until the E8 Worker deploys — expected, and
       called out in the checklist.
+- [x] **Night review 2026-08-08→09 (owner-ordered "se over alt").** Four reviewers +
+      conductor: **20 confirmed defects fixed, 6 HIGH** (strongest-anchor inversion,
+      overlap-eviction gaps, camera-reference-without-picture, unrelinkable Windows file
+      URLs, telemetry scrub narrower than the Worker screen, nil-id sends, consent-race
+      sends, zero-sample cache handles, dead scan-progress feature, min_psr as gate-off
+      switch, …). D-046/047/048 recorded; wire contract pinned as tests; npm audit 0
+      vulnerabilities incl. dev tree (vitest 4). PR #18 → `2ec5be8`. Left-open items
+      documented in the PR + morning report.
 - [ ] E12 Continuous operations
