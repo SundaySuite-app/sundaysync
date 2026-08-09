@@ -73,6 +73,17 @@ export const nb = {
   clipDetails: "Klippdetaljer",
   emptyLane: "Ingen klipp plassert",
 
+  // Interactive timeline (v0.3, D-051) — the result view's own controls.
+  timelineAria: "Tidslinje",
+  trackAria: (name: string) => `Spor: ${name}`,
+  subTrackAria: (n: number) => `Underspor ${n}`,
+  rulerAria: "Tidslinjal — klikk eller dra for å flytte markøren",
+  zoomIn: "Zoom inn",
+  zoomOut: "Zoom ut",
+  zoomFit: "Tilpass",
+  zoomFitAria: "Tilpass tidslinjen til vinduet",
+  scrollbarAria: "Bla i tidslinjen",
+
   // Warnings (§5 Warning enum)
   // D-042 (E6): drift correction shipped — a per-clip <timeMap> retimes the export
   // automatically, on by default (toggle: Innstillinger → «Korriger klokkedrift").
@@ -292,6 +303,16 @@ export const en: Strings = {
     `Projected error at clip end: ${Math.abs(ms).toFixed(0)} ms`,
   clipDetails: "Clip details",
   emptyLane: "No clips placed",
+
+  timelineAria: "Timeline",
+  trackAria: (name: string) => `Track: ${name}`,
+  subTrackAria: (n: number) => `Sub-track ${n}`,
+  rulerAria: "Time ruler — click or drag to move the playhead",
+  zoomIn: "Zoom in",
+  zoomOut: "Zoom out",
+  zoomFit: "Fit",
+  zoomFitAria: "Fit the timeline to the window",
+  scrollbarAria: "Scroll the timeline",
 
   // D-042 (E6): drift correction shipped — see the nb comment above.
   drift: (ms: number) =>

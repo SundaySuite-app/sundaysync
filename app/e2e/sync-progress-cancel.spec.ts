@@ -59,7 +59,7 @@ test.describe("sync progress", () => {
     await resolveControlled(page, "run_sync", syncOutcome());
 
     // Scoped to `.clip`, not a bare accessible-name match: SourcesView keeps rendering
-    // alongside ResultView in the "result" phase, and its own "Use as reference:
+    // alongside the timeline in the "result" phase, and its own "Use as reference:
     // C0001.MP4" button also contains that filename substring.
     await expect(page.locator(".clip", { hasText: "C0001.MP4" })).toBeVisible();
     await expect(page.getByRole("button", { name: en.cancel })).toBeHidden();

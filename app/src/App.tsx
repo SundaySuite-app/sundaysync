@@ -19,7 +19,7 @@ import { DropZone } from "./components/DropZone";
 import { EmptyState } from "./components/EmptyState";
 import { Onboarding } from "./components/Onboarding";
 import { ProgressBar } from "./components/ProgressBar";
-import { ResultView } from "./components/ResultView";
+import { TimelineView } from "./components/timeline/TimelineView";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SourcesView } from "./components/SourcesView";
 import { GearIcon } from "./components/icons";
@@ -359,7 +359,7 @@ export function App() {
               <span>{t.staleResult}</span>
             </p>
           )}
-          <ResultView
+          <TimelineView
             t={t}
             outcome={phase.outcome}
             stale={phase.stale}

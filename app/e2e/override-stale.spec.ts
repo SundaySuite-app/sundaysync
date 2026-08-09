@@ -19,8 +19,8 @@ async function reachResult(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: en.dropFolder }).click();
   await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
   await page.getByRole("button", { name: en.syncButton }).click();
-  // Scoped to the result lanes, not a bare accessible-name match: SourcesView keeps
-  // rendering alongside ResultView in the "result" phase, and its own "Use as
+  // Scoped to the timeline's clip boxes, not a bare accessible-name match: SourcesView
+  // keeps rendering alongside the timeline in the "result" phase, and its own "Use as
   // reference: C0001.MP4" button also contains that filename substring.
   await expect(page.locator(".clip", { hasText: "C0001.MP4" })).toBeVisible();
 }
@@ -40,7 +40,7 @@ test.describe("override after sync marks the result stale", () => {
     await expect(dialog).toBeVisible();
     await dialog.getByLabel(en.moveToDevice).selectOption("rec");
 
-    // The dialog closes itself right after the reassignment (ResultView's onChange
+    // The dialog closes itself right after the reassignment (ClipDetail's onChange
     // calls `onOverride` then `onClose`).
     await expect(dialog).toBeHidden();
 

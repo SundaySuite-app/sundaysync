@@ -297,6 +297,14 @@ settings persist per machine, never change simple-mode defaults.
 Visual design follows the Sunday suite look; i18n (nb + en) with the SundayRec pattern. Result view is
 informational, not an editor — no dragging clips in v1.
 
+**Amendment (v0.3, D-051):** point 4's "horizontal track lanes" are superseded by an interactive
+timeline. Same information, same colour language, same clip-detail dialog and same red unsynced shelf —
+but laid out against a real time axis the operator can zoom, pan and scrub, with one track per device and
+stacked sub-track rows where a device's own clips overlap. The percentage-of-widest-span layout the
+original wording implied could not show a four-second offset inside a ninety-minute service at all. The
+founding principle is retained, not revisited: zoom, pan and seek are read-mostly operations over a
+result that already exists; nothing here writes back into `SyncResult`, and clips still do not drag.
+
 ## 10. Performance targets
 
 - Cold sync of an 8 h / 100-file day: < 6 min on a modern 8-core laptop (decode-bound); warm-cache
