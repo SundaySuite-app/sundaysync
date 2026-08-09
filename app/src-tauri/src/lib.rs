@@ -414,7 +414,14 @@ fn run_sync(
         inputs: args.inputs,
         cache_dir: args.cache_dir,
         reference_override: args.reference,
-        min_psr: args.min_psr.unwrap_or(DEFAULT_MIN_PSR),
+        // Night review (A, out-of-area): an unvalidated min_psr is the acceptance
+        // gate's off switch — a negative value admits EVERY clip at zero confidence,
+        // and NaN refuses everything silently. Only a positive finite value is a
+        // threshold; anything else falls back to the calibrated default (D-015).
+        min_psr: args
+            .min_psr
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(DEFAULT_MIN_PSR),
         device_overrides: args.device_overrides.unwrap_or_default(),
         segment_count: args.segment_count.unwrap_or(defaults.segment_count),
         correct_drift: args.correct_drift.unwrap_or(defaults.correct_drift),

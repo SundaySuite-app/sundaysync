@@ -47,7 +47,8 @@ enum Command {
         /// Minimum peak-to-sidelobe ratio for a match to be accepted. Lowering this
         /// trades stability for coverage — clips below the threshold are reported as
         /// unsynced rather than placed speculatively.
-        #[arg(long, default_value_t = DEFAULT_MIN_PSR, value_name = "RATIO")]
+        #[arg(long, default_value_t = DEFAULT_MIN_PSR, value_name = "RATIO",
+              value_parser = parse_min_psr)]
         min_psr: f64,
 
         /// Write an FCPXML timeline for DaVinci Resolve to this path, in addition to
@@ -106,6 +107,18 @@ struct StderrProgress;
 impl ProgressSink for StderrProgress {
     fn report(&self, p: Progress) {
         eprintln!("[{:?}] {}/{}", p.stage, p.completed, p.total);
+    }
+}
+
+/// Night review (A): a non-positive or non-finite `--min-psr` is not a threshold —
+/// negative admits everything at zero confidence, NaN refuses everything silently.
+/// Reject loudly at the argument boundary instead.
+fn parse_min_psr(raw: &str) -> Result<f64, String> {
+    let v: f64 = raw.parse().map_err(|e| format!("not a number: {e}"))?;
+    if v.is_finite() && v > 0.0 {
+        Ok(v)
+    } else {
+        Err("must be a positive, finite ratio".to_string())
     }
 }
 
