@@ -128,21 +128,24 @@ jobs:
           projectPath: app
           tagName: ${{ github.ref_name }}
           releaseName: "SundaySync ${{ github.ref_name }}"
+          # NOTE: this text also becomes the updater dialog's release notes (tauri-action
+          # copies it into latest.json at build time), so keep it what a USER should read.
           releaseBody: |
-            **Usignert installer.** Se README for hva appen gjør.
+            **Alt innebygd — ingenting å installere ved siden av.** ffmpeg følger med i
+            appen; introduksjonen bekrefter det med en selvtest. Se CHANGELOG.md for hva
+            som er nytt i denne versjonen.
 
-            **macOS:** Gatekeeper blokkerer usignerte apper. Høyreklikk → Åpne første gang,
-            eller kjør `xattr -cr /Applications/SundaySync.app`.
+            **macOS:** appen er kodesignert, men ennå ikke notarisert — høyreklikk → Åpne
+            første gang (eller Systeminnstillinger → Personvern og sikkerhet →
+            «Åpne likevel»).
             **Windows:** SmartScreen advarer — «Mer info» → «Kjør likevel».
 
-            **Alt innebygd — ingenting å installere ved siden av.** ffmpeg følger med i
-            appen; introduksjonen bekrefter det med en selvtest.
-
             ---
-            **Unsigned installer.** macOS: right-click → Open the first time, or
-            `xattr -cr /Applications/SundaySync.app`. Windows: SmartScreen → "More info"
-            → "Run anyway". Everything bundled — nothing else to install; the app's
-            onboarding self-test confirms it.
+            **Everything bundled — nothing else to install**; the onboarding self-test
+            confirms it. See CHANGELOG.md for what's new. macOS builds are code-signed but
+            not yet notarized: right-click → Open the first time (or System Settings →
+            Privacy & Security → "Open Anyway"). Windows: SmartScreen → "More info" →
+            "Run anyway".
           # A `-beta.N` tag ships as a GitHub pre-release; a plain `vX.Y.Z` tag ships as a
           # normal release. The updater feed (the Worker) serves only tags an owner has
           # explicitly promoted, so this flag is only about how github.com labels the
