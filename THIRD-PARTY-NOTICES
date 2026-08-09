@@ -23,6 +23,17 @@ Adapted in the following SundaySync files:
       fully-resident sample buffer; the statistic per bucket is the shared part.
       See docs/DECISIONS.md D-052 and D-053.
 
+  app/src/timeline/waveformDraw.ts
+      The draw loop's structure — one pass over pre-computed buckets, drawing a
+      peak outline behind an RMS body — is adapted from Clypra's
+      `drawProfessionalWaveform` in `src/lib/utils/canvasUtils.ts`. SundaySync's
+      version draws both bars symmetric around the clip's vertical centre (peak
+      AND RMS, rather than RMS substituting for peak) and gets its bucket
+      positions from the on-disk pyramid (`peaks.rs`, above) intersected against
+      the visible viewport, rather than a buffer resampled to a fixed count; the
+      one-pass-over-buckets shape is the shared part. See docs/DECISIONS.md
+      D-053 ("planned (S4)").
+
 MIT License
 
 Copyright (c) 2026 Clypra Contributors

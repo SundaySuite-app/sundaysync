@@ -4,6 +4,7 @@ import { msToX, type TimelineView } from "../../timeline/geometry";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import { basename } from "../../types";
 import type { Placement } from "../../types";
+import { WaveformCanvas } from "./WaveformCanvas";
 
 /** Narrower than this and the box is a tick mark, not a clip — but still there. */
 const MIN_CLIP_PX = 3;
@@ -43,6 +44,13 @@ export const Clip = memo(function Clip({
   // viewport edge instead, but never past the clip's own right end.
   const labelShift = Math.max(0, Math.min(-left, width - LABEL_KEEP_PX));
 
+  // Stays a real `<button>` — S5's `TimelineView.onPointerDown` tells a clip click from a
+  // background-pan gesture by `target.closest("button, select, label, .timeline__ruler")`,
+  // so anything else here would silently turn every clip click into a pan-start instead.
+  // That is also why the S4 regenerate affordance inside the waveform slot below is a
+  // `role="button"` SPAN, not a nested `<button>`: the HTML parser un-nests a `<button>`
+  // inside a `<button>` (the "in body" insertion mode has a dedicated rule for it), which
+  // would silently break this component's own DOM, not just fail a validator.
   return (
     <button
       type="button"
@@ -52,12 +60,11 @@ export const Clip = memo(function Clip({
       aria-label={`${name}, ${t.offsetLabel} ${placement.offset_seconds.toFixed(1)} s`}
       title={name}
     >
-      {/*
-        Reserved for the waveform (v0.3 S4): the peaks canvas draws HERE, behind
-        the label, filling the clip box. Empty and `aria-hidden` until then — a
-        named slot beats S4 having to re-guess this component's internal layout.
-      */}
-      <span className="clip__waveform" data-waveform-slot="" aria-hidden="true" />
+      {/* v0.3 S4: the peaks canvas (or its regenerate/status affordance) fills this slot,
+          behind the label. */}
+      <span className="clip__waveform" data-waveform-slot="">
+        <WaveformCanvas t={t} file={span.file} span={span} view={view} />
+      </span>
       <span className="clip__name" style={{ transform: `translateX(${labelShift}px)` }}>
         {name}
       </span>

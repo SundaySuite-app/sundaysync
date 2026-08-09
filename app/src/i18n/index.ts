@@ -84,6 +84,11 @@ export const nb = {
   zoomFitAria: "Tilpass tidslinjen til vinduet",
   scrollbarAria: "Bla i tidslinjen",
 
+  // Per-clip waveforms (v0.3 S4, D-052)
+  waveformUnavailable: "Bølgeform utilgjengelig",
+  waveformRegenerate: "Bygg bølgeform på nytt",
+  waveformRegenerating: "Bygger på nytt …",
+
   // Warnings (§5 Warning enum)
   // D-042 (E6): drift correction shipped — a per-clip <timeMap> retimes the export
   // automatically, on by default (toggle: Innstillinger → «Korriger klokkedrift").
@@ -116,6 +121,9 @@ export const nb = {
   errInvariant: (detail: string) =>
     `Intern feil — dette er en programfeil, ikke et problem med filene dine. (${detail})`,
   errUnknown: (raw: string) => `Noe gikk galt: ${raw}`,
+  // V03-S4 (D-052): the analysis cache has no entry for this clip yet — not a failure,
+  // the "Bygg bølgeform på nytt"-button one tap away is the actual answer.
+  errCacheMissing: "Ingen bufret analyse for dette klippet ennå.",
   errStaleExport:
     "Kildene er endret siden denne synkroniseringen. Synkroniser på nytt før du eksporterer.",
   noticeCancelled: "Avbrutt. Ingenting er endret.",
@@ -314,6 +322,11 @@ export const en: Strings = {
   zoomFitAria: "Fit the timeline to the window",
   scrollbarAria: "Scroll the timeline",
 
+  // Per-clip waveforms (v0.3 S4, D-052)
+  waveformUnavailable: "Waveform unavailable",
+  waveformRegenerate: "Rebuild waveform",
+  waveformRegenerating: "Rebuilding …",
+
   // D-042 (E6): drift correction shipped — see the nb comment above.
   drift: (ms: number) =>
     `This clip drifts ${Math.abs(ms).toFixed(0)} ms over its length. It is corrected automatically on export (toggle in Settings).`,
@@ -340,6 +353,9 @@ export const en: Strings = {
   errInvariant: (detail: string) =>
     `Internal error — this is a bug in the app, not a problem with your files. (${detail})`,
   errUnknown: (raw: string) => `Something went wrong: ${raw}`,
+  // V03-S4 (D-052): the analysis cache has no entry for this clip yet — see the nb
+  // comment above.
+  errCacheMissing: "No cached analysis for this clip yet.",
   errStaleExport:
     "The sources have changed since this sync. Sync again before exporting.",
   noticeCancelled: "Cancelled. Nothing was changed.",

@@ -27,8 +27,8 @@ export type MappedError =
    * name it and pass it straight back.
    *
    * `text` is present on every variant so existing consumers (`App.tsx` reads
-   * `.text` unconditionally) keep compiling; the copy here is the raw-string fallback
-   * until S4 lands the real "not built yet — regenerate?" affordance and its strings.
+   * `.text` unconditionally) keep compiling; `WaveformCanvas` (V03-S4) is the actual
+   * consumer, via `waveformStore.ts`'s `classifyWaveformError`.
    */
   | { kind: "cacheMissing"; path: string; text: string };
 
@@ -58,7 +58,7 @@ export function mapEngineError(raw: string, t: Strings): MappedError {
   // `errUnknown` and read as a crash.
   if (raw.includes(CACHE_MISSING)) {
     const path = raw.slice(raw.indexOf(CACHE_MISSING) + CACHE_MISSING.length).trim();
-    return { kind: "cacheMissing", path, text: t.errUnknown(raw) };
+    return { kind: "cacheMissing", path, text: t.errCacheMissing };
   }
   if (raw.startsWith("no input files")) {
     return { kind: "error", text: t.errNoInput };
