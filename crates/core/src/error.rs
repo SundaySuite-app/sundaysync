@@ -54,3 +54,50 @@ pub enum Error {
     #[error("refusing to clear {path}: not a SundaySync cache directory")]
     NotACacheDir { path: PathBuf },
 }
+
+impl Error {
+    /// Whether this is an [`Error::Io`] caused by the file simply not being there.
+    ///
+    /// Added for the waveform pyramid (docs/DECISIONS.md D-052), which reads analysis-cache
+    /// entries the cache is free to evict behind its back — the 90-day sweep, the size cap
+    /// and a user's Clear button all delete committed entries. "There is no cache entry for
+    /// this clip yet" is a *state*, with a regenerate affordance, not a failure; "reading
+    /// the entry blew up" is a failure. Without this the shell can only tell them apart by
+    /// grepping a Display string, which is precisely the seam a reworded error slips
+    /// through (see [[reference-seam-bugs]]).
+    ///
+    /// A helper rather than a new variant on purpose: the §5 result contract and every
+    /// existing `Error::Io` construction site stay byte-identical, and callers that do not
+    /// care about the distinction are unaffected.
+    #[must_use]
+    pub fn is_not_found(&self) -> bool {
+        matches!(
+            self,
+            Error::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn not_found_is_distinguishable_from_every_other_io_failure() {
+        let missing = Error::Io {
+            path: PathBuf::from("/nope"),
+            source: std::io::Error::from(std::io::ErrorKind::NotFound),
+        };
+        assert!(missing.is_not_found());
+
+        // The failures that must NOT read as "not built yet" — offering to regenerate a
+        // cache entry that exists but cannot be read would loop forever.
+        let denied = Error::Io {
+            path: PathBuf::from("/nope"),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        };
+        assert!(!denied.is_not_found());
+        assert!(!Error::Cancelled.is_not_found());
+        assert!(!Error::NoInput.is_not_found());
+    }
+}

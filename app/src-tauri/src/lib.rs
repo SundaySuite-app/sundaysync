@@ -64,11 +64,17 @@ struct ProgressEvent {
 
 /// Bridges the engine's progress callback onto Tauri's event bus.
 ///
+/// Generic over the runtime (V03-S2) so a command that reports progress can also be
+/// driven by `tauri::test`'s headless MockRuntime. The concrete `AppHandle` is
+/// `AppHandle<Wry>`, and a command taking it is unregisterable in a mock handler — which
+/// is exactly why `run_sync` has never had an end-to-end IPC test. Inference fills the
+/// parameter in at both existing call sites; nothing about the shipped behaviour changes.
+///
 /// §10 asks for events throttled to 10 Hz, and doing it here rather than in the engine is
 /// deliberate: the engine reports everything and does not second-guess its consumer, so
 /// the CLI can still log every event (see `progress.rs`).
-struct EventSink {
-    app: AppHandle,
+struct EventSink<R: tauri::Runtime> {
+    app: AppHandle<R>,
     /// Which event channel this sink publishes on — `sync:progress` for the pipeline,
     /// `scan:progress` for the pre-sync preview, so the frontend can tell them apart.
     channel: &'static str,
@@ -76,8 +82,8 @@ struct EventSink {
     last_stage: Mutex<Option<Stage>>,
 }
 
-impl EventSink {
-    fn new(app: AppHandle, channel: &'static str) -> Self {
+impl<R: tauri::Runtime> EventSink<R> {
+    fn new(app: AppHandle<R>, channel: &'static str) -> Self {
         Self {
             app,
             channel,
@@ -87,7 +93,7 @@ impl EventSink {
     }
 }
 
-impl ProgressSink for EventSink {
+impl<R: tauri::Runtime> ProgressSink for EventSink<R> {
     fn report(&self, p: Progress) {
         // Always let a stage change through, even inside the throttle window: the stage
         // name is what the user is reading, and dropping the transition would leave the
@@ -217,6 +223,64 @@ struct AppState {
     /// activity slot makes the two mutually exclusive; the loser gets an honest
     /// "busy" error instead of the engine getting a vanishing cache.
     activity: Arc<Mutex<Activity>>,
+    /// V03-S2 (D-052): waveform pyramids, keyed by cache-key hex — i.e. by *content
+    /// identity*, so re-recording to the same filename invalidates the entry for free
+    /// (the key already folds in size and mtime, §4.2).
+    ///
+    /// Memory-only and bounded. Nothing here is persisted: rebuilding is one streaming
+    /// read of a file that is already local, and sidecar `.peaks` files on disk would
+    /// need their own eviction story, their own staleness rules and their own place in
+    /// the cache-size number the settings screen shows. D-052 records why that trade
+    /// went this way.
+    pyramids: Mutex<PyramidLru>,
+}
+
+/// Bounded, least-recently-used store of built pyramids.
+///
+/// A hand-rolled `Vec` rather than a crate: at [`PyramidLru::CAP`] entries the linear
+/// scan is a few dozen pointer comparisons against a *disk read plus a full streaming
+/// fold*, so the asymptotics that justify a real LRU crate are noise here — and a new
+/// dependency has to clear `cargo deny`, the licence allow-list and the supply-chain
+/// surface for the privilege.
+///
+/// Ordering is back-is-newest: `get` moves a hit to the back, `put` pushes to the back
+/// and drops from the front.
+#[derive(Debug, Default)]
+struct PyramidLru {
+    /// `(cache-key hex, pyramid)`, oldest first.
+    entries: Vec<(String, Arc<sundaysync_core::Pyramid>)>,
+}
+
+impl PyramidLru {
+    /// Clips kept resident. A pyramid is ~1 MB per audio-hour (2 bytes per 10 ms bin plus
+    /// the halving ladder), so 64 typical clips is single-digit megabytes — irrelevant
+    /// against §7.7's 4 GB ceiling, and comfortably more than the largest multicam shoot
+    /// anyone scrolls through at once.
+    const CAP: usize = 64;
+
+    fn get(&mut self, key: &str) -> Option<Arc<sundaysync_core::Pyramid>> {
+        let at = self.entries.iter().position(|(k, _)| k == key)?;
+        let hit = self.entries.remove(at);
+        let value = Arc::clone(&hit.1);
+        self.entries.push(hit);
+        Some(value)
+    }
+
+    fn put(&mut self, key: String, value: Arc<sundaysync_core::Pyramid>) {
+        self.entries.retain(|(k, _)| k != &key);
+        self.entries.push((key, value));
+        // `while`, not `if`: CAP could be lowered by a later edit and a single-shot
+        // trim would then leak the difference forever.
+        while self.entries.len() > Self::CAP {
+            self.entries.remove(0);
+        }
+    }
+
+    /// Drops one entry — used when `regenerate_analysis` replaces the cache file it was
+    /// built from, so the next read rebuilds instead of serving the old picture.
+    fn evict(&mut self, key: &str) {
+        self.entries.retain(|(k, _)| k != key);
+    }
 }
 
 /// What the app is busy doing, for the D-046 mutual exclusion.
@@ -509,6 +573,20 @@ fn scan_inputs(
         .map_err(|e| e.to_string())
 }
 
+/// The cache directory a command should work in: the caller's chosen one (D-013 lets the
+/// user point the setting anywhere), or the engine's default.
+///
+/// One helper rather than the five hand-rolled `match dir { … }` blocks this replaced.
+/// They were identical, which is exactly why one of them drifting would never be noticed:
+/// a waveform read and the sweep that evicts it resolving *different* directories is an
+/// invisible bug that looks like "the waveform sometimes disappears".
+fn resolve_cache_dir(dir: Option<PathBuf>) -> Result<PathBuf, String> {
+    match dir {
+        Some(d) => Ok(d),
+        None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string()),
+    }
+}
+
 /// Cache statistics for the settings screen (D-013: the cache grows ~169 MB per
 /// audio-hour and nothing evicts it — the user deserves to see the number).
 #[derive(Debug, Clone, Serialize)]
@@ -520,10 +598,7 @@ struct CacheStatus {
 
 #[tauri::command]
 fn cache_status(dir: Option<PathBuf>) -> Result<CacheStatus, String> {
-    let dir = match dir {
-        Some(d) => d,
-        None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
-    };
+    let dir = resolve_cache_dir(dir)?;
     let cache = sundaysync_core::Cache::new(dir.clone());
     Ok(CacheStatus {
         dir,
@@ -538,10 +613,7 @@ fn cache_status(dir: Option<PathBuf>) -> Result<CacheStatus, String> {
 fn clear_cache(state: State<'_, AppState>, dir: Option<PathBuf>) -> Result<u64, String> {
     // D-046: clearing evicts committed entries a running sync may be about to load.
     let _activity = ActivityGuard::begin(&state.activity, Activity::Maintaining)?;
-    let dir = match dir {
-        Some(d) => d,
-        None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
-    };
+    let dir = resolve_cache_dir(dir)?;
     sundaysync_core::Cache::new(dir)
         .clear()
         .map_err(|e| e.to_string())
@@ -578,10 +650,7 @@ fn sweep_cache(
     max_age_days: Option<u64>,
 ) -> Result<EvictionResult, String> {
     let _activity = ActivityGuard::begin(&state.activity, Activity::Maintaining)?;
-    let dir = match dir {
-        Some(d) => d,
-        None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
-    };
+    let dir = resolve_cache_dir(dir)?;
     let age = max_age_days.map_or(DEFAULT_SWEEP_AGE, |d| {
         std::time::Duration::from_secs(d * 24 * 60 * 60)
     });
@@ -600,14 +669,211 @@ fn enforce_cache_cap(
     max_bytes: u64,
 ) -> Result<EvictionResult, String> {
     let _activity = ActivityGuard::begin(&state.activity, Activity::Maintaining)?;
-    let dir = match dir {
-        Some(d) => d,
-        None => sundaysync_core::Cache::default_dir().map_err(|e| e.to_string())?,
-    };
+    let dir = resolve_cache_dir(dir)?;
     sundaysync_core::Cache::new(dir)
         .enforce_size_cap(max_bytes)
         .map(EvictionResult::from)
         .map_err(|e| e.to_string())
+}
+
+// ---- Waveforms (V03-S2, docs/DECISIONS.md D-052) ----------------------------------
+//
+// Three commands, and a hard rule between them: the two *read* commands
+// (`waveform_meta`, `waveform_level`) never claim the D-046 activity slot, and
+// `regenerate_analysis` always does.
+//
+// That asymmetry is the whole design. Drawing a timeline is a read of a file the sync
+// already wrote — it spawns nothing, decodes nothing, and must stay possible while a
+// sync is running, or every waveform on screen would blank the moment the user starts
+// another job. Regenerating a cache entry, by contrast, spawns ffmpeg and writes into the
+// cache, which is exactly the class of work D-046 exists to serialise against a run.
+//
+// The cost of the read commands not holding the slot is that a maintenance pass can
+// delete a cache entry out from under one. That is handled where it happens rather than
+// prevented: a vanished entry surfaces as [`CACHE_MISSING_PREFIX`], which is a *state*
+// the UI can offer to fix, not a crash and not a generic IO error.
+
+/// Stable prefix for "there is no analysis-cache entry for this clip (yet)".
+///
+/// Followed by the source media path. Matched by `errors.ts` the way every other stable
+/// engine string is (D-030), because the UI's response is a button, not a red banner: the
+/// cache is regenerable by definition, and the extractor that regenerates it is one
+/// command away.
+const CACHE_MISSING_PREFIX: &str = "cache_missing:";
+
+/// One level of the ladder, as the frontend sees it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WaveformLevelMeta {
+    bin_samples: u32,
+    bins: usize,
+}
+
+/// The shape of a clip's waveform, without any of the bytes.
+///
+/// Deliberately split from the data: the renderer needs to know how many bins exist at
+/// which zoom *before* it decides which level to fetch, and shipping nine levels of
+/// samples to answer "how long is this clip" would be the whole point of the pyramid
+/// thrown away. Sample rate is not repeated here — it is already in the §5 contract as
+/// `parameters.analysis_rate`, and two sources for one number is how they disagree.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WaveformMeta {
+    total_samples: u64,
+    levels: Vec<WaveformLevelMeta>,
+}
+
+/// Builds, or returns from the LRU, the pyramid for one source file.
+///
+/// Keyed on [`sundaysync_core::CacheKey`] — content identity, not path — so the memo can
+/// never serve the waveform of a previous take that happened to have the same filename.
+///
+/// Two failures are deliberately kept apart:
+/// * the *source media* is unreadable → the engine's own `failed to read …`, which
+///   `errors.ts` already localises;
+/// * the *cache entry* is absent → [`CACHE_MISSING_PREFIX`], which means "not built yet".
+fn pyramid_for(
+    state: &AppState,
+    file: &Path,
+    cache_dir: Option<PathBuf>,
+) -> Result<Arc<sundaysync_core::Pyramid>, String> {
+    let dir = resolve_cache_dir(cache_dir)?;
+    // Reads the media file's metadata — a missing *source* is not a missing cache entry,
+    // and must not offer to regenerate something that cannot be regenerated.
+    let key = sundaysync_core::CacheKey::for_file(file, sundaysync_core::ANALYSIS_RATE)
+        .map_err(|e| e.to_string())?;
+
+    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover) {
+        if let Some(hit) = lru.get(key.as_str()) {
+            return Ok(hit);
+        }
+    }
+
+    let entry = sundaysync_core::Cache::new(dir).entry_path(&key);
+    let pyramid = sundaysync_core::pyramid_from_cache_file(&entry).map_err(|e| {
+        if e.is_not_found() {
+            // The sweep, the size cap or Clear got here first — or this clip was never
+            // synced. Same state, same affordance.
+            format!("{CACHE_MISSING_PREFIX}{}", file.display())
+        } else {
+            e.to_string()
+        }
+    })?;
+
+    let pyramid = Arc::new(pyramid);
+    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover) {
+        lru.put(key.as_str().to_string(), Arc::clone(&pyramid));
+    }
+    Ok(pyramid)
+}
+
+/// Shape of a clip's waveform. Read-only: does NOT claim the D-046 activity slot.
+#[tauri::command(async)]
+fn waveform_meta(
+    state: State<'_, AppState>,
+    file: PathBuf,
+    cache_dir: Option<PathBuf>,
+) -> Result<WaveformMeta, String> {
+    let pyramid = pyramid_for(&state, &file, cache_dir)?;
+    Ok(WaveformMeta {
+        total_samples: pyramid.total_samples,
+        levels: pyramid
+            .levels
+            .iter()
+            .map(|l| WaveformLevelMeta {
+                bin_samples: l.bin_samples,
+                bins: l.bins(),
+            })
+            .collect(),
+    })
+}
+
+/// One level's bins as raw bytes: interleaved `[peak, rms]` `u8` pairs.
+///
+/// Returns [`tauri::ipc::Response`], which Tauri answers over the custom-protocol IPC with
+/// `Content-Type: application/octet-stream`; the bootstrap script's response switch then
+/// takes `response.arrayBuffer()`, so `invoke()` resolves to an **`ArrayBuffer`** in the
+/// webview. Verified against this repo's pinned versions — see D-052 for the evidence and
+/// for what the base64 fallback would have cost.
+///
+/// Raw bytes rather than a JSON array matters at this size: an hour of level-0 bins is
+/// 720 000 numbers, which as JSON is megabytes of text to serialise, parse and garbage-
+/// collect on every zoom. As bytes it is one 720 KB buffer the canvas reads directly.
+///
+/// Read-only: does NOT claim the D-046 activity slot.
+#[tauri::command(async)]
+fn waveform_level(
+    state: State<'_, AppState>,
+    file: PathBuf,
+    level: u32,
+    cache_dir: Option<PathBuf>,
+) -> Result<tauri::ipc::Response, String> {
+    let pyramid = pyramid_for(&state, &file, cache_dir)?;
+    let index = level as usize;
+    let bins = pyramid.levels.get(index).ok_or_else(|| {
+        format!(
+            "no waveform level {level}; this clip has {}",
+            pyramid.levels.len()
+        )
+    })?;
+    Ok(tauri::ipc::Response::new(bins.interleaved()))
+}
+
+/// Re-extracts one file's analysis audio, repopulating the cache entry a waveform needs.
+///
+/// This is the affordance behind [`CACHE_MISSING_PREFIX`]. Unlike the two read commands it
+/// **does** claim the D-046 slot as `Maintaining`: it spawns the ffmpeg sidecar and writes
+/// into the cache directory, which is precisely the work that must not overlap a run. A
+/// caller who asks during a sync gets the existing `busy: …` refusal.
+///
+/// The existing entry is removed first, so this genuinely regenerates rather than
+/// no-opping on a cache hit — a "regenerate" button that silently does nothing when the
+/// entry is present-but-corrupt would be worse than no button. Safe to do under the guard:
+/// no sync can be reading the cache while we hold it.
+#[tauri::command(async)]
+fn regenerate_analysis<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    file: PathBuf,
+    cache_dir: Option<PathBuf>,
+) -> Result<(), String> {
+    let _activity = ActivityGuard::begin(&state.activity, Activity::Maintaining)?;
+
+    let sidecar = state.sidecar()?;
+    let dir = resolve_cache_dir(cache_dir)?;
+    let key = sundaysync_core::CacheKey::for_file(&file, sundaysync_core::ANALYSIS_RATE)
+        .map_err(|e| e.to_string())?;
+
+    // Drop the memo before the file, so a concurrent read can never repopulate the LRU
+    // from the entry we are about to delete.
+    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover) {
+        lru.evict(key.as_str());
+    }
+
+    let cache = sundaysync_core::Cache::new(dir);
+    let entry = cache.entry_path(&key);
+    if let Err(e) = std::fs::remove_file(&entry) {
+        // Already gone is the *expected* case — this command exists for it.
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return Err(format!("could not clear the stale cache entry: {e}"));
+        }
+    }
+
+    // Progress on its own channel so a multi-minute re-extract of a three-hour service is
+    // not a frozen button. Distinct from `sync:progress`, which the results view is bound
+    // to and which must not flicker because a waveform is rebuilding.
+    let sink = EventSink::new(app, "analysis:progress");
+    let outcomes = sundaysync_core::Extractor::new(sidecar, cache)
+        .extract_all(std::slice::from_ref(&file), &sink, &CancelToken::new())
+        .map_err(|e| e.to_string())?;
+
+    // §7.2: a file that will not decode is a normal outcome, not an engine error — but for
+    // *this* command it is the whole answer, so it is reported rather than swallowed.
+    match outcomes.into_iter().next() {
+        Some(Ok(_)) => Ok(()),
+        Some(Err(e)) => Err(format!("could not decode {}: {}", file.display(), e.reason)),
+        None => Err(format!("nothing was extracted for {}", file.display())),
+    }
 }
 
 /// §7.4: cancel must take effect within 2 s. The engine kills in-flight ffmpeg children,
@@ -1122,6 +1388,9 @@ pub fn run() {
             clear_cache,
             sweep_cache,
             enforce_cache_cap,
+            waveform_meta,
+            waveform_level,
+            regenerate_analysis,
             export_timeline,
             export_diagnostics,
             check_sidecar,
@@ -1402,5 +1671,390 @@ mod tests {
         let state = AppState::default();
         let err = state.export_snapshot(0).unwrap_err();
         assert!(err.contains("nothing has been synced"), "unexpected: {err}");
+    }
+}
+
+// ---- Waveform pipeline (V03-S2, D-052) --------------------------------------------
+
+#[cfg(test)]
+mod waveform_tests {
+    use super::*;
+    use sundaysync_core::{CacheKey, ANALYSIS_RATE};
+    use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponseBody};
+    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+
+    /// A media file (contents irrelevant — the cache key is path+size+mtime+rate) plus a
+    /// fabricated analysis-cache entry for it, under the name the engine would have used.
+    ///
+    /// This is what lets the shell's waveform path be tested with no ffmpeg and no real
+    /// media: the seam between "the extractor wrote this" and "the pyramid reads it" is a
+    /// filename, and a test that writes that filename exercises the same code a real run
+    /// would (D-025 — these tests must pass on the ffmpeg-less runners).
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        media: PathBuf,
+        cache_dir: PathBuf,
+        key: CacheKey,
+    }
+
+    fn fixture(samples: &[f32]) -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let media = dir.path().join("C0001.MP4");
+        std::fs::write(
+            &media,
+            b"not really a movie, but it has a size and an mtime",
+        )
+        .unwrap();
+
+        let cache_dir = dir.path().join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        let key = CacheKey::for_file(&media, ANALYSIS_RATE).unwrap();
+        let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        std::fs::write(cache_dir.join(format!("{}.f32", key.as_str())), &bytes).unwrap();
+
+        Fixture {
+            _dir: dir,
+            media,
+            cache_dir,
+            key,
+        }
+    }
+
+    /// A headless app with `state` managed and the three waveform commands registered.
+    fn app_with(state: AppState) -> tauri::App<tauri::test::MockRuntime> {
+        mock_builder()
+            .manage(state)
+            .invoke_handler(tauri::generate_handler![
+                waveform_meta,
+                waveform_level,
+                regenerate_analysis
+            ])
+            .build(mock_context(noop_assets()))
+            .expect("the mock app must build")
+    }
+
+    fn request(cmd: &str, payload: serde_json::Value) -> InvokeRequest {
+        InvokeRequest {
+            cmd: cmd.into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            url: if cfg!(windows) {
+                "http://tauri.localhost"
+            } else {
+                "tauri://localhost"
+            }
+            .parse()
+            .unwrap(),
+            body: InvokeBody::Json(payload),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        }
+    }
+
+    // ---- The risk gate: does raw-bytes IPC actually arrive as bytes? ---------------
+
+    #[test]
+    fn waveform_level_answers_with_raw_bytes_not_json() {
+        // D-052's load-bearing assumption. `tauri::ipc::Response` must produce an
+        // `InvokeResponseBody::Raw`, because that is what makes the webview's IPC
+        // bootstrap take the `application/octet-stream` branch and resolve `invoke()` to
+        // an ArrayBuffer. If this ever comes back `Json`, the frontend silently receives
+        // an object where it expects a buffer — and the fallback (base64 in a JSON field,
+        // +33 % on every zoom) would be needed instead.
+        //
+        // This is the whole pipeline, not a unit: the real `generate_handler!` dispatch,
+        // the real argument deserialisation, the real `IpcResponse` conversion.
+        let f = fixture(&vec![0.5f32; 480]);
+        let app = app_with(AppState::default());
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let response = get_ipc_response(
+            &webview,
+            request(
+                "waveform_level",
+                serde_json::json!({
+                    "file": f.media,
+                    "level": 0,
+                    "cacheDir": f.cache_dir,
+                }),
+            ),
+        )
+        .expect("the command must succeed");
+
+        let InvokeResponseBody::Raw(bytes) = response else {
+            panic!("waveform_level answered with JSON — D-052's binary IPC assumption is broken");
+        };
+
+        // 480 samples / 120 = 4 bins, interleaved [peak, rms] → 8 bytes, all ≈0.5.
+        assert_eq!(
+            bytes.len(),
+            8,
+            "expected 4 interleaved pairs, got {bytes:?}"
+        );
+        let expected = (0.5f32 * 255.0).round() as u8;
+        for b in &bytes {
+            assert!(
+                b.abs_diff(expected) <= 1,
+                "unexpected byte {b} in {bytes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn waveform_meta_answers_with_json_in_the_camel_case_the_frontend_reads() {
+        // The other half of the pair: meta is deliberately JSON (it is nine small
+        // numbers), and its spelling is a contract with `types.ts`.
+        let f = fixture(&vec![0.25f32; 12_000]);
+        let app = app_with(AppState::default());
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let response = get_ipc_response(
+            &webview,
+            request(
+                "waveform_meta",
+                serde_json::json!({ "file": f.media, "cacheDir": f.cache_dir }),
+            ),
+        )
+        .expect("the command must succeed");
+
+        let value: serde_json::Value = response.deserialize().unwrap();
+        assert_eq!(value["totalSamples"], 12_000);
+        let levels = value["levels"].as_array().unwrap();
+        assert_eq!(levels.len(), 9);
+        assert_eq!(levels[0]["binSamples"], 120);
+        assert_eq!(levels[0]["bins"], 100);
+        assert_eq!(levels[1]["binSamples"], 240);
+        assert_eq!(levels[1]["bins"], 50);
+        // snake_case must not leak — the frontend reads camelCase.
+        assert!(value.get("total_samples").is_none(), "{value}");
+    }
+
+    // ---- Cache-miss classification -------------------------------------------------
+
+    #[test]
+    fn a_missing_cache_entry_is_reported_with_the_regenerable_prefix() {
+        // D-052: "not built yet" is a state with a button, not a failure. The prefix is
+        // what lets `errors.ts` tell them apart, and it names the SOURCE file — the thing
+        // the user recognises and the argument `regenerate_analysis` takes.
+        let f = fixture(&[0.1, 0.2, 0.3]);
+        std::fs::remove_file(f.cache_dir.join(format!("{}.f32", f.key.as_str()))).unwrap();
+
+        let state = AppState::default();
+        let err = pyramid_for(&state, &f.media, Some(f.cache_dir.clone())).unwrap_err();
+
+        assert!(err.starts_with(CACHE_MISSING_PREFIX), "unexpected: {err}");
+        assert!(
+            err.contains("C0001.MP4"),
+            "the prefix must name the clip: {err}"
+        );
+    }
+
+    #[test]
+    fn a_missing_source_file_is_not_reported_as_a_missing_cache_entry() {
+        // The seam that matters: a clip the user deleted cannot be regenerated, so it must
+        // NOT get the regenerate affordance. Offering one would loop the user forever.
+        let f = fixture(&[0.1, 0.2]);
+        let gone = f.cache_dir.join("never-existed.mov");
+
+        let state = AppState::default();
+        let err = pyramid_for(&state, &gone, Some(f.cache_dir.clone())).unwrap_err();
+
+        assert!(!err.starts_with(CACHE_MISSING_PREFIX), "unexpected: {err}");
+        // Falls through to the engine's own string, which `errors.ts` already localises.
+        assert!(err.starts_with("failed to read "), "unexpected: {err}");
+    }
+
+    #[test]
+    fn a_cache_entry_evicted_after_it_was_read_still_serves_from_memory() {
+        // D-046's price for keeping the read commands off the activity slot: a sweep can
+        // delete an entry mid-session. A pyramid already in the LRU must keep drawing —
+        // blanking a waveform because a background sweep ran would look like a bug.
+        let f = fixture(&vec![0.9f32; 2400]);
+        let state = AppState::default();
+
+        let first = pyramid_for(&state, &f.media, Some(f.cache_dir.clone())).unwrap();
+        std::fs::remove_file(f.cache_dir.join(format!("{}.f32", f.key.as_str()))).unwrap();
+
+        let second = pyramid_for(&state, &f.media, Some(f.cache_dir.clone()))
+            .expect("a resident pyramid must survive its cache entry being evicted");
+        assert_eq!(first, second);
+    }
+
+    // ---- The LRU -------------------------------------------------------------------
+
+    fn stub_pyramid(total: u64) -> Arc<sundaysync_core::Pyramid> {
+        Arc::new(sundaysync_core::Pyramid {
+            total_samples: total,
+            levels: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn the_lru_evicts_the_least_recently_used_entry_first() {
+        let mut lru = PyramidLru::default();
+        for i in 0..PyramidLru::CAP as u64 {
+            lru.put(format!("key{i}"), stub_pyramid(i));
+        }
+        assert_eq!(lru.entries.len(), PyramidLru::CAP);
+
+        // Touch the oldest — that must make it the newest, and spare it from the next
+        // eviction. A cache that evicts what the user is actively looking at is worse
+        // than no cache: it rebuilds the one clip that is on screen, every time.
+        assert!(lru.get("key0").is_some());
+
+        lru.put("fresh".into(), stub_pyramid(999));
+        assert_eq!(lru.entries.len(), PyramidLru::CAP);
+        assert!(lru.get("key0").is_some(), "the touched entry was evicted");
+        assert!(lru.get("key1").is_none(), "the true LRU entry survived");
+        assert!(lru.get("fresh").is_some());
+    }
+
+    #[test]
+    fn re_putting_a_key_replaces_rather_than_duplicates_it() {
+        let mut lru = PyramidLru::default();
+        lru.put("k".into(), stub_pyramid(1));
+        lru.put("k".into(), stub_pyramid(2));
+        assert_eq!(lru.entries.len(), 1);
+        assert_eq!(lru.get("k").unwrap().total_samples, 2);
+    }
+
+    #[test]
+    fn evict_drops_only_the_named_key() {
+        let mut lru = PyramidLru::default();
+        lru.put("a".into(), stub_pyramid(1));
+        lru.put("b".into(), stub_pyramid(2));
+        lru.evict("a");
+        assert!(lru.get("a").is_none());
+        assert!(lru.get("b").is_some());
+    }
+
+    #[test]
+    fn the_lru_is_keyed_on_content_identity_so_a_re_recorded_take_invalidates() {
+        // The key folds in size and mtime (§4.2), so overwriting a clip with a different
+        // take must not serve the old waveform — even though the path is identical.
+        let f = fixture(&vec![0.5f32; 1200]);
+        let state = AppState::default();
+        let before = pyramid_for(&state, &f.media, Some(f.cache_dir.clone())).unwrap();
+
+        // A new take at the same path: different size, and a fabricated cache entry with
+        // twice the audio under the NEW key.
+        std::fs::write(
+            &f.media,
+            b"a different take entirely, of a different length",
+        )
+        .unwrap();
+        let new_key = CacheKey::for_file(&f.media, ANALYSIS_RATE).unwrap();
+        assert_ne!(new_key.as_str(), f.key.as_str(), "the key must have moved");
+        let bytes: Vec<u8> = vec![0.5f32; 2400]
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
+        std::fs::write(
+            f.cache_dir.join(format!("{}.f32", new_key.as_str())),
+            &bytes,
+        )
+        .unwrap();
+
+        let after = pyramid_for(&state, &f.media, Some(f.cache_dir.clone())).unwrap();
+        assert_eq!(before.total_samples, 1200);
+        assert_eq!(after.total_samples, 2400, "a stale waveform was served");
+    }
+
+    // ---- D-046: who claims the activity slot, and who must not ---------------------
+
+    #[test]
+    fn regenerate_analysis_is_refused_while_a_sync_is_running() {
+        // D-046: regeneration spawns ffmpeg and writes the cache, so it is `Maintaining`
+        // and must lose to a run in flight. The guard is claimed before the sidecar is
+        // resolved, so this needs no ffmpeg — which is the point on the D-005 runners.
+        let state = AppState::default();
+        let activity = Arc::clone(&state.activity);
+        let app = app_with(state);
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let _running = ActivityGuard::begin(&activity, Activity::Syncing).unwrap();
+
+        let err = get_ipc_response(
+            &webview,
+            request(
+                "regenerate_analysis",
+                serde_json::json!({ "file": "/nonexistent/clip.mov" }),
+            ),
+        )
+        .expect_err("regeneration must be refused during a sync");
+
+        assert_eq!(err, serde_json::json!("busy: sync in progress"), "{err}");
+    }
+
+    #[test]
+    fn reading_a_waveform_is_allowed_while_a_sync_is_running() {
+        // The other side of the same rule, and the reason the read commands are exempt: a
+        // timeline must keep drawing during a sync. If `waveform_meta` ever grew an
+        // `ActivityGuard`, every waveform on screen would go blank the moment the user
+        // pressed Sync — and this test is what would catch it.
+        let f = fixture(&vec![0.3f32; 3600]);
+        let state = AppState::default();
+        let activity = Arc::clone(&state.activity);
+        let app = app_with(state);
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let _running = ActivityGuard::begin(&activity, Activity::Syncing).unwrap();
+
+        let response = get_ipc_response(
+            &webview,
+            request(
+                "waveform_meta",
+                serde_json::json!({ "file": f.media, "cacheDir": f.cache_dir }),
+            ),
+        )
+        .expect("a read-only waveform must not be blocked by a running sync");
+        let value: serde_json::Value = response.deserialize().unwrap();
+        assert_eq!(value["totalSamples"], 3600);
+    }
+
+    #[test]
+    fn an_out_of_range_level_is_refused_by_name() {
+        let f = fixture(&vec![0.5f32; 480]);
+        let app = app_with(AppState::default());
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let err = get_ipc_response(
+            &webview,
+            request(
+                "waveform_level",
+                serde_json::json!({ "file": f.media, "level": 99, "cacheDir": f.cache_dir }),
+            ),
+        )
+        .expect_err("level 99 does not exist");
+        assert!(
+            err.as_str()
+                .unwrap_or_default()
+                .contains("no waveform level"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn the_cache_dir_helper_prefers_the_callers_choice_over_the_default() {
+        // D-013 lets the user point the cache anywhere; every command must honour the
+        // same choice, or a waveform read and the sweep that evicts it would disagree.
+        let chosen = PathBuf::from("/tmp/somewhere-the-user-picked");
+        assert_eq!(
+            resolve_cache_dir(Some(chosen.clone())).unwrap(),
+            chosen,
+            "the caller's cache directory was ignored"
+        );
     }
 }

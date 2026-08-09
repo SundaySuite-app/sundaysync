@@ -120,6 +120,35 @@ export interface SidecarStatus {
   path: string;
 }
 
+/**
+ * One rung of a clip's waveform ladder — mirrors the shell's `WaveformLevelMeta`
+ * (`app/src-tauri/src/lib.rs`). `bins` is how many `[peak, rms]` pairs
+ * `invoke("waveform_level")` will return for this level.
+ */
+export interface WaveformLevelMeta {
+  binSamples: number;
+  bins: number;
+}
+
+/**
+ * Shape of a clip's waveform, from `invoke("waveform_meta", { file, cacheDir })` —
+ * mirrors the shell's `WaveformMeta`. Nine levels, finest first, each bin twice the
+ * previous; `levels[0].binSamples` is 120 (10 ms at the analysis rate).
+ *
+ * There is no sample rate here on purpose: it is already in the §5 contract as
+ * `SyncResult.parameters.analysis_rate`, and two sources for one number is how they
+ * come to disagree.
+ *
+ * The *data* does not come through JSON. `invoke("waveform_level", { file, level,
+ * cacheDir })` resolves to an **`ArrayBuffer`** of interleaved `[peak, rms]` `u8`
+ * pairs — `2 * bins` bytes — because the shell answers it with `tauri::ipc::Response`
+ * (verified on the pinned Tauri versions; docs/DECISIONS.md D-052).
+ */
+export interface WaveformMeta {
+  totalSamples: number;
+  levels: WaveformLevelMeta[];
+}
+
 export function basename(path: string): string {
   const parts = path.split(/[/\\]/);
   return parts[parts.length - 1] ?? path;

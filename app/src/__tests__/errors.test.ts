@@ -40,4 +40,24 @@ describe("mapEngineError (D-030)", () => {
     expect(m.kind).toBe("error");
     expect(m.text).toContain("mystery explosion");
   });
+
+  it("classifies a missing analysis-cache entry as its own state, not an error (D-052)", () => {
+    // V03-S2: the waveform is not built yet. The UI's answer is a regenerate button, so
+    // this must never collapse into the generic `errUnknown` red banner — and it must
+    // carry the clip path back out, because that is the argument `regenerate_analysis`
+    // takes.
+    const m = mapEngineError("cache_missing:/Users/kari/Opptak/Cam A/C0001.MP4", nb);
+    expect(m.kind).toBe("cacheMissing");
+    expect(m).toHaveProperty("path", "/Users/kari/Opptak/Cam A/C0001.MP4");
+    // Every variant carries `text`, so existing consumers keep rendering something.
+    expect(m.text.length).toBeGreaterThan(0);
+  });
+
+  it("survives the prefix arriving wrapped in an Error (D-052)", () => {
+    // `String(e)` on a rejected invoke yields "Error: cache_missing:…" — the same shape
+    // the invoke-timeout case already has to tolerate.
+    const m = mapEngineError("Error: cache_missing:/media/C0002.MP4", nb);
+    expect(m.kind).toBe("cacheMissing");
+    expect(m).toHaveProperty("path", "/media/C0002.MP4");
+  });
 });

@@ -1374,3 +1374,140 @@ shared package would couple SundayEdit's and SundaySync's release trains togethe
 that, post-adaptation, is already diverging (`ClipSpan` vs `TimelineItem`, ms-timecode vs
 frame-timecode). Revisit the extraction once a third consumer needs this math, or once the
 two copies drift enough that keeping them in sync by hand becomes the actual cost.
+
+## D-052 — The waveform pyramid: 10 ms base bins, u8 linear, memory-only, and cache-miss as a state
+
+**V03-S2.** The interactive timeline needs a waveform per clip at every zoom. Three
+questions had to be answered before a line of it was worth writing.
+
+### Where the samples come from: the analysis cache, never a fresh decode
+
+`extract` already writes every input to `<cache>/<key>.f32` — mono `f32le` at 12 kHz, the
+exact signal the offsets were computed from (§4.2). The pyramid streams *that*, in 64 KiB
+frame-aligned chunks, copying `CachedAudio::load`'s shape (D-034: never a whole-file read).
+
+**Zero ffmpeg spawns for waveforms.** The alternative — what Clypra does, and what most
+editors do — is `ffmpeg` per clip per zoom level. On a 40 GB card dump that is minutes of
+decode for a picture, repeated every time the user scrolls. Reading a cache we already
+wrote is one sequential pass over a file that is ~1–2 % of the media size.
+
+### The ladder
+
+Level 0 bins **120 samples = 10 ms**, chosen against the display rather than the signal:
+at the tightest useful zoom a clip is about one pixel per 10 ms, so finer bins would be
+bytes nobody can see. It also divides 12 kHz exactly, keeping bin edges on whole
+milliseconds. Each level merges pairs — peak = max of the children, RMS = √(mean of the
+children's mean-squares) — until a bin reaches ~2.5 s. That is **9 levels, 10 ms → 2.56 s**:
+every zoom from a syllable to a whole service on one screen. The ladder length does not
+depend on clip duration, so a level index means the same zoom for every clip.
+
+Two numbers per bin, not one. Peak keeps transients alive through downsampling (the drum
+hit a human aligns by eye); RMS is what loudness looks like. Drawing peak as outline and
+RMS as filled body is what makes a waveform readable rather than a solid block.
+
+### Quantization: `u8`, linear, applied exactly once
+
+Merging is done in **f32 accumulators all the way up**, and quantized only at the end. The
+chain is nine levels deep; quantizing per level and merging the bytes would compound the
+rounding nine times, turning a 1/255 error at the base into a visible step at the top.
+Quantizing once bounds the error at half a quantum at every level.
+
+Linear rather than logarithmic: at 1/255 a dB curve spends most of its range on noise
+nobody looks at, and a frontend can apply any display curve it likes to a linear number
+but cannot recover linearity from a lossy log one. **Open for S4 review:** if the drawn
+result reads as too quiet, switching *RMS only* to a perceptual curve is a one-function
+change in `peaks.rs` — peak must stay linear, since it is the thing being compared across
+clips.
+
+Values above 1.0 (inter-sample overs, clipped sources) pin at 255 rather than wrapping; a
+non-finite sample — impossible from a completed ffmpeg write, possible from a torn one —
+reads as silence at the point it enters the fold rather than poisoning the bin through
+`f32::max`.
+
+### Residency: an in-memory LRU of 64, and nothing on disk
+
+Pyramids live in `AppState.pyramids`, a hand-rolled 64-entry LRU keyed on the **cache-key
+hex** — content identity, so re-recording to the same filename invalidates for free (the
+key already folds in size and mtime). ~1 MB per audio-hour means 64 clips is single-digit
+megabytes, irrelevant against §7.7's 4 GB ceiling.
+
+Deliberately **not** sidecar `.peaks` files on disk. A second on-disk artefact would need
+its own eviction policy, its own staleness rules, and its own place in the cache-size
+number the settings screen shows — three new ways to be subtly wrong, to avoid a
+recompute that is one streaming read of a local file.
+
+### A missing cache entry is a state, not a failure
+
+The cache is evictable by design: the 90-day sweep, the size cap and the user's Clear
+button all delete committed entries (D-040). So "there is no waveform for this clip" is
+**normal**, and it has an answer — `regenerate_analysis` re-runs the extractor for that one
+file. `Error::is_not_found()` (a helper on the existing `Io` variant, not a new variant, so
+the §5 contract is untouched) lets the shell classify it; the shell reports it as
+`cache_missing:<path>`, which `errors.ts` maps to its own `MappedError` kind. The
+alternative — matching on a Display string — is precisely the seam a reword slips through.
+
+### D-046: the read commands do NOT claim the activity slot
+
+`waveform_meta` and `waveform_level` are read-only and stay exempt from the
+sync⟂maintenance mutual exclusion. If they claimed it, every waveform on screen would
+blank the moment the user pressed Sync. `regenerate_analysis` **does** claim it as
+`Maintaining` — it spawns ffmpeg and writes the cache, which is exactly the work D-046
+exists to serialise. The price of the exemption is that a sweep can delete an entry
+mid-read; that surfaces as `cache_missing:` (a button), never a panic or a generic IO
+error, and a pyramid already resident keeps drawing.
+
+### The binary-IPC gate — VERIFIED, no base64 fallback needed
+
+The level data is shipped as **raw bytes**, not JSON. An hour of level-0 bins is 720 000
+numbers; as JSON that is megabytes of text to serialise, parse and collect on every zoom,
+as bytes it is one 720 KB buffer the canvas reads directly.
+
+This rested on an assumption that was checked before anything was built, on this repo's
+pinned versions (`tauri` **2.11.5**, `@tauri-apps/api` **2.11.1**):
+
+1. `tauri::ipc::Response` → `InvokeResponseBody::Raw` — **verified at runtime**, not by
+   reading code: `waveform_level_answers_with_raw_bytes_not_json` drives the real
+   `generate_handler!` dispatch through `tauri::test`'s headless MockRuntime and asserts
+   the `Raw` variant. It is a permanent regression test, and needs no display and no
+   ffmpeg, so it runs on the D-005 runners too.
+2. `Raw` → `Content-Type: application/octet-stream` — `tauri-2.11.5/src/ipc/protocol.rs`.
+3. octet-stream → `response.arrayBuffer()` — `tauri-2.11.5/scripts/ipc-protocol.js`, the
+   `default:` branch of the response-content-type switch.
+4. The custom-protocol path (not the `postMessage` fallback, which *would* degrade a
+   `Vec<u8>` to a JSON number array on macOS) is the one in use: `tauri.conf.json`'s CSP
+   explicitly allows `connect-src … ipc: http://ipc.localhost`.
+
+So `invoke("waveform_level", …)` resolves to an **`ArrayBuffer`** in the webview. The
+fallback — base64 in a JSON field, +33 % bytes plus a decode on every zoom — is **not
+needed** and was not implemented.
+
+## D-053 — Adopting from Clypra: what was taken, and what was deliberately refused
+
+**V03-S2.** Clypra (MIT, https://github.com/AIEraDev/Clypra) is a Tauri video editor
+solving a neighbouring problem. Reading it was worth the hour. Taking all of it would not
+have been.
+
+**Adapted.** The per-bucket statistic in `compute_waveform_buckets` — absolute peak paired
+with RMS, carried *together* rather than either alone — is the right primitive and is
+adapted in `crates/core/src/peaks.rs`, with an attribution comment at the site.
+
+**Lifted (lands S5).** Their `PlaybackClock` — a monotonic clock the UI reads, rather than
+polling the media element for `currentTime`.
+
+**Planned (S4).** Their canvas draw loop's structure: one pass, peak outline with RMS body.
+
+**Refused, and why each refusal matters here:**
+
+- **Their transport: `HTMLAudioElement` with a 0.5–2.0 s drift tolerance.** This is the
+  one that decides the others. SundaySync exists to prove clips are aligned to the
+  *sample*; a preview whose own playback is allowed to wander by up to two seconds would
+  make a correct sync look broken and a broken one look fine. It is precisely the failure
+  mode this feature is built to disprove, adopted as a design tolerance.
+- **ffmpeg-per-zoom waveform extraction.** Re-decoding the source for every zoom step.
+  D-052 reads the analysis cache instead: one pass, no process, and the picture is of the
+  signal the offsets were actually computed from.
+- **An unvirtualized timeline.** Fine for a handful of clips; a multicam service is
+  hundreds. Virtualization is S1's problem and is being solved as one.
+
+`THIRD-PARTY-NOTICES` at the repo root carries Clypra's MIT text in full and names the
+adapted file, as the licence requires.

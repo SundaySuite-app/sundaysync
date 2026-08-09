@@ -28,6 +28,7 @@ pub mod drift;
 pub mod error;
 pub mod extract;
 pub mod fcpxml;
+pub mod peaks;
 pub mod place;
 pub mod probe;
 pub mod progress;
@@ -46,6 +47,7 @@ pub use fcpxml::{
     export as export_fcpxml, export_with_options as export_fcpxml_with_options, Export,
     ExportError, ExportOptions, TimeMap,
 };
+pub use peaks::{pyramid_from_cache_file, Level, Pyramid, BASE_BIN_SAMPLES};
 pub use place::{Candidate, Placed};
 pub use probe::{AudioStream, Probed, VideoStream};
 pub use progress::{CancelToken, NoProgress, Progress, ProgressSink, Stage};
