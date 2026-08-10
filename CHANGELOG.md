@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0-beta.1
 
 **v0.3 — see it, and hear it, before you export.** The result screen stops being a report
 you have to take on trust and becomes something you can actually inspect: a real timeline
