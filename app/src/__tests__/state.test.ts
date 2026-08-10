@@ -476,3 +476,122 @@ describe("a superseded pre-analysis pass (V04-U5)", () => {
     });
   });
 });
+
+// ── V05-W5 sweep: the prewarm/sync/settle machine, run twice ───────────────────────────
+//
+// D-064 fixed the FIRST run. Everything below is the second one, and the shapes in between:
+// a run that was cancelled, a run that broke, a drop that arrived mid-pass. The class of
+// bug being hunted is a verdict from one run surviving into the next — which is exactly
+// what D-064 was: a status invented by a dying pass, still on screen a run later.
+
+describe("a second run inherits nothing from the first (V05-W5)", () => {
+  it("no file is still 'failed' when the second sync starts", () => {
+    let s = toSources();
+    // The first pass ran to its end without reaching anything: every file is `failed`, and
+    // every clip is correctly offering a rebuild.
+    s = reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason: "done" });
+    expect(Object.values(s.prewarm)).toEqual(["failed", "failed"]);
+
+    s = reducer(s, { type: "sync/start" });
+    // The sync IS the analysis (D-064), so nothing may still be claiming "failed".
+    expect(Object.values(s.prewarm)).toEqual(["pending", "pending"]);
+    s = reducer(s, { type: "sync/done", outcome });
+    expect(s.prewarm).toEqual({});
+
+    // And the second press starts from the same clean map, not from the first run's.
+    s = reducer(s, { type: "sync/start" });
+    expect(Object.values(s.prewarm)).toEqual(["pending", "pending"]);
+  });
+
+  it("a CANCELLED run leaves no claim behind for the run after it", () => {
+    let s = toSources();
+    s = reducer(s, { type: "sync/start" });
+    s = reducer(s, { type: "cancel/requested" });
+    expect(s.cancelling).toBe(true);
+    s = reducer(s, {
+      type: "sync/failed",
+      error: { kind: "notice", text: "Avbrutt" },
+    });
+    expect(s.phase.name).toBe("sources");
+    expect(s.cancelling).toBe(false);
+    expect(s.banner).toEqual({ kind: "info", text: "Avbrutt" });
+    // Nothing is claimed about any file: the run wrote analysis for what it reached and
+    // nothing for the rest, and only the cache knows which is which.
+    expect(s.prewarm).toEqual({});
+    expect(s.prewarmProgress).toBeNull();
+
+    s = reducer(s, { type: "sync/start" });
+    expect(Object.values(s.prewarm)).toEqual(["pending", "pending"]);
+    expect(s.banner).toBeNull(); // the cancel notice does not follow the new run
+  });
+
+  it("a run that BROKE leaves no claim behind either, and says so in red", () => {
+    let s = toSources();
+    s = reducer(s, { type: "sync/start" });
+    s = reducer(s, { type: "sync/failed", error: { kind: "error", text: "ffmpeg døde" } });
+    expect(s.banner).toEqual({ kind: "error", text: "ffmpeg døde" });
+    expect(s.prewarm).toEqual({});
+  });
+
+  it("the preempted pass's rejection is inert whenever it finally lands", () => {
+    // Three landing sites, all reachable: mid-sync, after a cancelled sync, and after a
+    // completed one. None of them may put a status back on a clip.
+    for (const after of ["syncing", "cancelled", "done"] as const) {
+      let s = toSources();
+      s = reducer(s, { type: "sync/start" });
+      if (after === "cancelled") {
+        s = reducer(s, { type: "sync/failed", error: { kind: "notice", text: "Avbrutt" } });
+      } else if (after === "done") {
+        s = reducer(s, { type: "sync/done", outcome });
+      }
+      const before = s.prewarm;
+      for (const reason of ["done", "cancelled"] as const) {
+        const settled = reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason });
+        expect(settled.prewarm).toEqual(before);
+      }
+    }
+  });
+
+  it("a busy refusal and a preemption are the same ending as far as the map is concerned", () => {
+    // `prewarmEndReason` (App.tsx) maps both `busy: …` and `cancelled` to `cancelled`; this
+    // pins what the reducer then does with it — deletes, never invents.
+    let s = toSources();
+    s = reducer(s, { type: "prewarm/file", file: "/x/Z.WAV", ok: true });
+    s = reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason: "cancelled" });
+    expect(s.prewarm).toEqual({ "/x/Z.WAV": "ready" });
+    expect("/x/C0001.MP4" in s.prewarm).toBe(false);
+  });
+
+  it("a new drop mid-pass is a different drop, and the old pass cannot speak for it", () => {
+    let s = toSources();
+    const oldSeq = s.scanSeq;
+    // The operator drops a second folder while the first is still decoding.
+    s = reducer(s, { type: "inputs/add", paths: ["/y"] });
+    expect(s.phase.name).toBe("scanning");
+    s = reducer(s, { type: "scan/done", seq: s.scanSeq, manifest });
+    expect(Object.values(s.prewarm)).toEqual(["pending", "pending"]);
+
+    // …and the abandoned pass finally settles, claiming to have finished.
+    const late = reducer(s, { type: "prewarm/settled", seq: oldSeq, reason: "done" });
+    expect(Object.values(late.prewarm)).toEqual(["pending", "pending"]);
+    // Its progress ticks are NOT inert, and this pins the known gap rather than pretending
+    // it is not there. `prewarm:progress` carries no sequence of its own (lib.rs emits a
+    // plain `ProgressEvent`), so the reducer can only gate it on the phase — and once the
+    // new scan has landed, the phase is `sources` again. Between `scan/done` and the
+    // abandoned pass noticing its `cancel_prewarm`, one stale tick can move the line.
+    // Recorded in KNOWN_LIMITATIONS: it is cosmetic, self-correcting within one file, and
+    // the only honest fix is a sequence on the backend event — not a heuristic on `total`
+    // dressed up as a rule.
+    const ticked = reducer(s, { type: "prewarm/progress", completed: 300, total: 386 });
+    expect(ticked.prewarmProgress).toEqual({ completed: 300, total: 386 });
+  });
+
+  it("a file excluded between two syncs is absent from the second run's map too", () => {
+    let s = toSources();
+    s = reducer(s, { type: "sync/start" });
+    s = reducer(s, { type: "sync/done", outcome });
+    s = reducer(s, { type: "files/exclude", file: "/x/C0001.MP4" });
+    s = reducer(s, { type: "sync/start" });
+    expect(Object.keys(s.prewarm)).toEqual(["/x/Z.WAV"]);
+  });
+});

@@ -2,6 +2,15 @@
 
 ## Unreleased — v0.5
 
+**v0.5 — the app stops claiming things it cannot support.** v0.4 put your files on the
+timeline before the sync. v0.5 is about everything the app was *saying* about them while they
+sat there: which files are footage at all, when each one was recorded and how confidently, and
+what is happening to them right now. Every stage of this round started from something on the
+owner's own screen — a 386-file wedding — and every measurement in it was taken on that
+material. It also stops spending work on pixels that cannot show anything, which is why a
+wedding-sized drop now lands instantly instead of asking the engine four hundred questions in
+one breath.
+
 ### New
 
 - **You can see the clip you are marking (D-070).** Click any clip and the panel under the
@@ -28,38 +37,61 @@
   pixels wide, and a panel that appeared when you clicked would have moved the timeline in the
   same instant — sending your next click somewhere you did not aim.
 - **The timeline knows when your files were recorded, even when the camera did not write it
-  down (D-067).** On a real 386-file wedding, 174 files used to land in one pile at the very
-  start of the timeline under a single line: "174 filer mangler opptakstidspunkt". Almost all
-  of them did have a recording time — just not in the one place the app was looking. It now
-  reads four kinds of evidence, in order of how much they can be trusted: the camera's own
+  down (D-067).** On the owner's 386-file wedding, 174 files used to land in one pile at the
+  very start of the timeline under a single line: "174 filer mangler opptakstidspunkt". Almost
+  all of them did have a recording time — just not in the one place the app was looking. It
+  now reads four kinds of evidence, in order of how much they can be trusted: the camera's own
   timestamp; a recorder's date and clock written as two separate tags (the Zoom F6 does this);
   a timestamp spelled into the filename (`uirec-20260725_125533.wav`); and, when a file
   carries no tags at all — every one of the 136 AVCHD `.MTS` files on that drop — the file's
   own modification time, minus its length, because that is when the recording *finished*. On
-  the owner's drop that is 407 files placed where 244 were before.
+  that drop it places **375 files where 212 were placed before**.
 - **Every clip says which of those it is.** A start the app *measured* looks different from a
   start it *worked out*: an estimated one gets a dashed top edge, and its spoken description
   says where the number came from — «anslått fra filens endringstidspunkt». The line above the
-  timeline is now four counts instead of one: «204 plassert fra tidsstempel · 163 anslått · 5
-  bare rekkefølge · 14 utenfor økta.»
+  timeline is now several counts instead of one; on the owner's drop it reads «212 plassert fra
+  tidsstempel · 163 anslått · 11 utenfor økta.», and those numbers add up to every file on
+  screen.
 - **Files nothing can time are laid out in the order the camera numbered them (D-068).** They
   used to stack at position zero — fourteen Zoom takes drawn on top of each other, which said
   nothing about any of them. They now sit end to end on their own device's row, after that
   device's last placed clip. The app does not know when they started; it does know what
   followed what, and that is what it draws. The stack of lanes goes with it.
-- **A folder from another day is named, not silently mixed in (D-071).** A June drone folder
-  that travelled inside a July wedding, or a recorder whose clock was never set and reports
-  2020, is not placed by its clock — and the app says so *with the date*: «14 filer er
-  tidsstemplet 13.06.2023, utenfor denne økta, og er ikke plassert etter klokka.» Nothing is
-  removed on your behalf; you already have per-file removal if you want it.
+- **A folder from another day is named, not silently mixed in (D-071).** A recorder whose
+  clock was never set and reports 2020, or a handful of clips that travelled in from a
+  different shoot, is not placed by its clock — and the app says so *with the date*: «11 filer
+  er tidsstemplet 25.04.2013, 01.01.2020 og 3 andre datoer, utenfor denne økta, og er ikke
+  plassert etter klokka.» Nothing is removed on your behalf; you already have per-file removal
+  if you want it.
+- **Groundwork: the app can now pull a single video frame out of a clip (D-069).** The first
+  half of being able to *see* the clip you are marking; the panel that puts it on screen is the
+  entry at the top. What landed here is the part that had to be right first: one frame, decoded
+  on demand at whatever second you point at, handed to the screen as a picture and never
+  written to disk. It needed no new permission of any kind — the app is exactly as locked down
+  as it was yesterday, which is the reason this shape was chosen over the obvious ones. Getting
+  a frame out of a 45-minute AVCHD file on a NAS in two-thirds of a second rather than nine
+  took a seek arrangement that looks odd and is not: the numbers behind it, and the way the
+  fast-looking version quietly fails on all 136 of the owner's `.MTS` files, are written down
+  in D-069 so nobody tidies it away. Files with no picture in them at all — the WAVs, the
+  stills — come back as "no picture" rather than as an error, because on a normal card that is
+  about one file in twelve and it is not a fault.
 
 ### Fixed
 
-- **The timeline stops growing the page when you drop a lot of devices.** Twelve devices used
-  to push the sources panel and the Sync button off the bottom of a laptop screen. The tracks
-  now scroll inside their own box, with the time ruler stuck to the top of it so you can still
-  read what the clips line up against.
-
+- **The scanner no longer mistakes a drone's preview files for footage, and tells you what
+  it left out (D-066).** DJI writes a small `.LRF` alongside every clip — the same
+  low-resolution proxy as the `.LRV` the app already knew to ignore, just spelled
+  differently — so a drone folder was being read as twice as many recordings as it held,
+  with the previews competing against the real clips for a place on the timeline. Orphaned
+  previews, whose originals are not in the folder at all, had nothing to lose that fight to.
+  Photographs are skipped too, and now *before* the app opens them: a `.HEIC` or a raw next
+  to your video used to be read, found to have no audio, and reported on the red "could not
+  sync" shelf — an error message about a photograph.
+- **Nothing disappears quietly any more.** Whatever the scan walked past is counted in one
+  quiet line under the sources list — «8 følgefiler og 1 stillbilde ble hoppet over» — with
+  the file names one click away. Skipping a preview file was safe to do in silence while its
+  original sat right there in the list; a photograph has no such neighbour, and a file that
+  vanishes with nothing on screen to say why is the app asking to be distrusted.
 - **The clips stop offering to rebuild a waveform the sync is already building (D-064).**
   Press Sync while the app is still pre-analysing your files and every clip on the timeline
   used to sprout a «Bygg bølgeform på nytt» button — on a 386-file wedding, all 386 of them,
@@ -82,42 +114,25 @@
   the filename when there is not. A control that shrinks to an icon keeps its full name for
   screen readers and its detail on hover — only the pixels are rationed. A three-pixel clip
   stays a coloured tick, as it should.
-
-## Unreleased
-
-### New
-
-- **Groundwork: the app can now pull a single video frame out of a clip (D-069).** The first
-  half of being able to *see* the clip you are marking; the panel that puts it on screen is
-  the entry above. What landed here is the part that had to be right
-  first: one frame, decoded on demand at whatever second you point at, handed to the screen as
-  a picture and never written to disk. It needed no new permission of any kind — the app is
-  exactly as locked down as it was yesterday, which is the reason this shape was chosen over
-  the obvious ones. Getting a frame out of a 45-minute AVCHD file on a NAS in two-thirds of a
-  second rather than nine took a seek arrangement that looks odd and is not: the numbers
-  behind it, and the way the fast-looking version quietly fails on all 136 of the owner's
-  `.MTS` files, are written down in D-069 so nobody tidies it away. Files with no picture in
-  them at all — the WAVs, the stills — come back as "no picture" rather than as an error,
-  because on a normal card that is about one file in twelve and it is not a fault.
-
-## Unreleased
-
-### Fixed
-
-- **The scanner no longer mistakes a drone's preview files for footage, and tells you what
-  it left out (D-066).** DJI writes a small `.LRF` alongside every clip — the same
-  low-resolution proxy as the `.LRV` the app already knew to ignore, just spelled
-  differently — so a drone folder was being read as twice as many recordings as it held,
-  with the previews competing against the real clips for a place on the timeline. Orphaned
-  previews, whose originals are not in the folder at all, had nothing to lose that fight to.
-  Photographs are skipped too, and now *before* the app opens them: a `.HEIC` or a raw next
-  to your video used to be read, found to have no audio, and reported on the red "could not
-  sync" shelf — an error message about a photograph.
-- **Nothing disappears quietly any more.** Whatever the scan walked past is counted in one
-  quiet line under the sources list — «11 følgefiler og 1 stillbilde ble hoppet over» — with
-  the file names one click away. Skipping a preview file was safe to do in silence while its
-  original sat right there in the list; a photograph has no such neighbour, and a file that
-  vanishes with nothing on screen to say why is the app asking to be distrusted.
+- **The timeline stops growing the page when you drop a lot of devices.** Twelve devices used
+  to push the sources panel and the Sync button off the bottom of a laptop screen. The tracks
+  now scroll inside their own box, with the time ruler stuck to the top of it so you can still
+  read what the clips line up against.
+- **A wedding-sized drop no longer asks the engine four hundred questions at once (D-072).**
+  Every clip used to ask for its waveform's shape the instant it appeared, so dropping the
+  owner's card fired off 386 requests in a single breath — every one of them answered "there
+  is nothing cached yet", because nothing had been analysed. Those requests are queued now,
+  six at a time, and the app waits for a quiet moment before starting: the clips, the ruler and
+  the panel are on screen first. A request for a clip you have already scrolled past is thrown
+  away rather than sent. And a clip narrower than about a quarter of an inch does not ask at
+  all — a waveform three pixels wide is a smudge, not a shape, so there is nothing there worth
+  fetching, drawing, or waiting for. It comes back the moment you zoom in far enough to read
+  it. On the real 386-file drop that is **no requests instead of 386**.
+- **Clicking away from a clip and straight back shows its picture again.** If you clicked one
+  clip, then another, then back to the first before its frame had finished loading, the first
+  clip would say «Ingen bilde» from then on — for a file with a perfectly good picture in it.
+  Over a network share that window is several seconds wide, which is exactly how long a
+  4K frame takes to arrive.
 
 ## v0.4.0-beta.1
 

@@ -490,3 +490,141 @@ describe("recordingTimes accounts for every file it is given", () => {
     expect(recordingTimes([]).size).toBe(0);
   });
 });
+
+// ── V05-W5 sweep: the ladder × the gate, at the shapes the round did not ask about ─────
+
+describe("a whole device whose clock disagrees with the drop (R1)", () => {
+  // R1: an mtime is not a recording time, it is the time of the last write — and a copy
+  // does not always preserve it. A card dragged in Finder on the wrong day comes back with
+  // 136 files whose mtimes agree with each other perfectly and with nothing else. The gate
+  // must judge them as one block against the tier that can corroborate itself, not admit
+  // them because there are a lot of them.
+  const wedding = [
+    file({ file: "/FUJI/A.MOV", creation_time: "2026-07-25T13:00:00Z" }),
+    file({ file: "/FUJI/B.MOV", creation_time: "2026-07-25T15:00:00Z" }),
+    file({ file: "/FUJI/C.MOV", creation_time: "2026-07-25T17:00:00Z" }),
+  ];
+  const copied = Array.from({ length: 8 }, (_, i) =>
+    file({
+      file: `/JOHNNY/0210${i}.MTS`,
+      device: "johnny",
+      // Copied off the card two days later; every mtime is the copy, seconds apart.
+      modified_time: `2026-07-27T09:0${i}:00Z`,
+      duration_seconds: 30,
+    }),
+  );
+
+  it("refuses the whole out-of-session block, however many files it has", () => {
+    const times = recordingTimes([...wedding, ...copied]);
+    for (const f of copied) {
+      const got = times.get(f.file)!;
+      expect(got.startMs).toBeNull();
+      expect(got.source).toBe("none");
+      // …and keeps the stamp, so the legend can name the day rather than calling 136 files
+      // untimed (D-071).
+      expect(got.outsideWindowMs).toBeDefined();
+    }
+  });
+
+  it("does not let the majority drag the session onto the copy day", () => {
+    const times = recordingTimes([...wedding, ...copied]);
+    for (const f of wedding) expect(times.get(f.file)!.source).toBe("container");
+  });
+
+  it("the same block IS admitted when the copy happened inside the session", () => {
+    // The gate is about a day's spread, not about mtimes being second-class: a card
+    // offloaded the same evening lands inside the window and keeps its positions.
+    const sameDay = copied.map((f) => ({ ...f, modified_time: "2026-07-25T18:00:00Z" }));
+    const times = recordingTimes([...wedding, ...sameDay]);
+    for (const f of sameDay) expect(times.get(f.file)!.source).toBe("modified");
+  });
+});
+
+describe("a drop where only one rung ever produced two stamps", () => {
+  // The reference tier is the highest tier with at least TWO stamps. That rule has a sharp
+  // edge, and this pins which way it cuts: a lone container stamp does NOT outrank a pair
+  // of mtimes, however much better a kind of evidence it is.
+  const files = [
+    file({ file: "/FUJI/only.MOV", creation_time: "2026-07-25T13:00:00Z" }),
+    file({ file: "/J/1.MTS", device: "j", modified_time: "2026-07-27T09:00:00Z" }),
+    file({ file: "/J/2.MTS", device: "j", modified_time: "2026-07-27T09:05:00Z" }),
+    file({ file: "/J/3.MTS", device: "j", modified_time: "2026-07-27T09:10:00Z" }),
+  ];
+
+  it("anchors on the pair and demotes the single better stamp", () => {
+    const times = recordingTimes(files);
+    for (const f of ["/J/1.MTS", "/J/2.MTS", "/J/3.MTS"]) {
+      expect(times.get(f)!.source).toBe("modified");
+    }
+    const lone = times.get("/FUJI/only.MOV")!;
+    expect(lone.startMs).toBeNull();
+    expect(lone.outsideWindowMs).toBeDefined();
+  });
+
+  it("…and the file it demotes is NAMED rather than silently misplaced", () => {
+    // The safe-failure property. Whichever way the rule cuts, the loser keeps its stamp and
+    // the UI says which day it claims — nothing is drawn at a position no evidence supports.
+    const lone = recordingTimes(files).get("/FUJI/only.MOV")!;
+    expect(lone.outsideWindowMs).toBe(Date.parse("2026-07-25T13:00:00Z"));
+  });
+
+  it("a second container stamp flips the anchor back, as the ladder says it should", () => {
+    const withPair = [
+      ...files,
+      file({ file: "/FUJI/second.MOV", creation_time: "2026-07-25T14:00:00Z" }),
+    ];
+    const times = recordingTimes(withPair);
+    expect(times.get("/FUJI/only.MOV")!.source).toBe("container");
+    expect(times.get("/J/1.MTS")!.startMs).toBeNull(); // now the mtimes are the outliers
+  });
+});
+
+describe("an ambiguous six-digit date fails safe rather than guessing (R9)", () => {
+  // `260725` is 2026-07-25 read YYMMDD and 2025-07-26 read DDMMYY. The measured default is
+  // YYMMDD. What matters is not that the default is always right — it cannot be — but that
+  // being wrong costs a POSITION and never produces a confidently wrong one.
+  it("the flipped reading is CHOSEN when the drop can decide — verified, not assumed", () => {
+    // The first thing this probe found: a recorder that spelled the wedding day the other
+    // way round (`260725` where the session is 2025-07-26) is not a failure case at all.
+    // `readSixDigitDate` measures both readings against the day the container stamps agree
+    // on, and DDMMYY wins outright. Pinned here because the safe-failure test below only
+    // means something once this is known to be the FIRST line of defence.
+    const files = [
+      file({ file: "/FUJI/A.MOV", creation_time: "2025-07-26T12:00:00Z" }),
+      file({ file: "/FUJI/B.MOV", creation_time: "2025-07-26T13:00:00Z" }),
+      file({ file: "/MIX/rec-260725_140000.wav", device: "mix" }),
+    ];
+    const got = recordingTimes(files).get("/MIX/rec-260725_140000.wav")!;
+    expect(got.source).toBe("filename");
+    // 14:00 local on 2025-07-26 — the session's own day, not 2026-07-25.
+    expect(got.startMs).toBe(Date.parse("2025-07-26T12:00:00Z"));
+  });
+
+  it("a token no reading can reconcile with the session is demoted, not placed", () => {
+    // The second line of defence, and the one R9 is about. `010203` is 2001-02-03 read
+    // YYMMDD and 2003-02-01 read DDMMYY; both are real days and both are decades from this
+    // wedding, so the disambiguation above has nothing to work with. Being wrong then costs
+    // a POSITION — the file goes to the sequential strip with its claimed date named — and
+    // never produces a confidently wrong one.
+    const files = [
+      file({ file: "/FUJI/A.MOV", creation_time: "2026-07-25T13:00:00Z" }),
+      file({ file: "/FUJI/B.MOV", creation_time: "2026-07-25T14:00:00Z" }),
+      file({ file: "/MIX/rec-010203_140000.wav", device: "mix" }),
+    ];
+    const got = recordingTimes(files).get("/MIX/rec-010203_140000.wav")!;
+    expect(got.startMs).toBeNull();
+    expect(got.source).toBe("none");
+    expect(got.outsideWindowMs).toBeDefined();
+  });
+
+  it("an unreadable token is never a stamp at all — no rung answers, so the file is untimed", () => {
+    const files = [
+      file({ file: "/FUJI/A.MOV", creation_time: "2026-07-25T13:00:00Z" }),
+      file({ file: "/FUJI/B.MOV", creation_time: "2026-07-25T14:00:00Z" }),
+      file({ file: "/MIX/rec-993299_140000.wav", device: "mix" }),
+    ];
+    const got = recordingTimes(files).get("/MIX/rec-993299_140000.wav")!;
+    expect(got).toEqual({ startMs: null, source: "none" });
+    expect(got.outsideWindowMs).toBeUndefined(); // untimed, not out-of-session
+  });
+});

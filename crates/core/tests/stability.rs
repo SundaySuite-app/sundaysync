@@ -39,8 +39,30 @@ fn require_ffmpeg() -> Option<Sidecar> {
     }
 }
 
+/// A clean scratch directory for one test, scoped to this **process**.
+///
+/// The pid component was added in V05-W5, chasing the load-sensitive flake two agents
+/// reported against the stray-cache assertion below. Without it the path is a fixed,
+/// shared location in the system temp dir, and two `cargo test` processes — the D-025
+/// gate runs the whole suite twice, once per PATH variant — land in the same directory.
+/// Two mechanisms follow directly, and both produce exactly the reported symptoms:
+///
+///   * one process's `remove_dir_all` wipes the other's fixtures and cache mid-run;
+///   * `stray_cache_files` below reads a directory another process is extracting into, and
+///     sees that process's live `*.tmp` scratch file — which is not stray at all, but is
+///     indistinguishable from stray when the reader does not own the directory.
+///
+/// **Honest status: not reproduced.** Eighteen forced concurrent runs of
+/// `accuracy::measurements_are_reproducible` and eight concurrent runs of the storm below
+/// all passed, and fixture emission was separately verified byte-deterministic (so a
+/// mid-run wipe usually restores identical bytes, which is why the race is so hard to
+/// catch). The pid is here because the collision is structural and eliminating it costs
+/// one path component — not because a failing run was captured.
 fn scratch(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join("sundaysync-stability").join(name);
+    let d = std::env::temp_dir()
+        .join("sundaysync-stability")
+        .join(format!("pid-{}", std::process::id()))
+        .join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d

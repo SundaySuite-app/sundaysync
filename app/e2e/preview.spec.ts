@@ -9,7 +9,12 @@ import {
   scanManifest,
   SETTLED_SETTINGS,
   syncOutcome,
+  videoFrameCancellable,
   videoFrameNoPicture,
+  frameCalls,
+  resolveFrame,
+  rejectControlled,
+  resolveControlled,
   waitForPending,
   waitForResult,
   type Fixtures,
@@ -255,5 +260,142 @@ test.describe("the preview panel", () => {
 
     await expect(page.locator(`.clip[data-file="${CAM_B}"]`)).toHaveCount(0);
     await expect(preview(page)).toHaveText(en.previewEmpty);
+  });
+  // ── V05-W5 sweep: the shapes adjacent to the StrictMode bug W4b fixed ────────────────
+  //
+  // `cancelFramesExcept` was written for one of them (the double mount). These are its
+  // neighbours, run against a `video_frame` fixture that supersedes the way the shell
+  // actually does — a new grab cancels the previous token, and a cancelled run comes back
+  // as `cancelled`.
+
+  test("clicking away and straight back shows the picture, not «no image»", async ({ page }) => {
+    // The bug this found. The shell had already killed A's grab when B started; the STORE
+    // still handed A's dead promise to the next caller, whose `null` the panel rendered as
+    // «ingen bilde» — permanently, because the effect is keyed on the file and never runs
+    // again. Over SMB that window is seconds wide (D-069: 4.4 s for a 4K frame).
+    await reachSources(page, videoFrameCancellable());
+
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await expect(preview(page).getByText(en.previewLoading)).toBeVisible();
+
+    await page.locator(`.clip[data-file="${CAM_B}"]`).click();
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+
+    // The grab that is outstanding now is A's own second one — settle it and the picture
+    // arrives.
+    await resolveFrame(page);
+    await expect(preview(page).locator(".preview__canvas")).toBeVisible();
+    await expect(preview(page).getByText(en.previewNoImage)).toHaveCount(0);
+    // Three grabs for two files: A (killed), B (killed), A again. Not one, and not a loop.
+    expect(await frameCalls(page)).toEqual([CAM_A, CAM_B, CAM_A]);
+  });
+
+  test("selecting the same clip twice does not restart its grab", async ({ page }) => {
+    await reachSources(page, videoFrameCancellable());
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await resolveFrame(page);
+    await expect(preview(page).locator(".preview__canvas")).toBeVisible();
+    expect(await frameCalls(page)).toEqual([CAM_A]);
+  });
+
+  test("a settled picture survives a trip through two other clips", async ({ page }) => {
+    await reachSources(page, videoFrameCancellable());
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await resolveFrame(page);
+    await expect(preview(page).locator(".preview__canvas")).toBeVisible();
+
+    await page.locator(`.clip[data-file="${CAM_B}"]`).click();
+    await page.locator(`.clip[data-file="${WAV}"]`).click();
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+
+    // Straight back to the canvas with no «henter …» tick: the answer is memoised and is
+    // read synchronously (`hasFrame`/`peekFrame`), so no second spawn and no flicker.
+    await expect(preview(page).locator(".preview__canvas")).toBeVisible();
+    await expect(preview(page).getByText(en.previewLoading)).toHaveCount(0);
+    expect((await frameCalls(page)).filter((f) => f === CAM_A)).toEqual([CAM_A]);
+  });
+
+  test("the selection survives a sync and gains the engine's half", async ({ page }) => {
+    // D-070's lifecycle, across the phase boundary that used to destroy the selection
+    // entirely (the dialog was result-only). The marked file is the same file before and
+    // after; what changes is that there is now something to say about it.
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: scanManifest(),
+        run_sync: syncOutcome(),
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).getByText(en.offsetLabel)).toHaveCount(0);
+
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForResult(page);
+
+    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).getByText(en.offsetLabel)).toBeVisible();
+  });
+
+  test("a selection made DURING a sync can be read but not acted on", async ({ page }) => {
+    // Looking is allowed in every phase (D-061); the reassign `<select>` is a decision, and
+    // mid-run there is nothing it could change about the run in flight.
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: scanManifest(),
+        run_sync: controlled("run_sync"),
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForPending(page, "run_sync");
+
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator("select")).toBeDisabled();
+
+    await resolveControlled(page, "run_sync", syncOutcome());
+    await waitForResult(page);
+    await expect(preview(page).locator("select")).toBeEnabled();
+  });
+
+  test("a cancelled sync pulls the outcome and the panel stops claiming an offset", async ({
+    page,
+  }) => {
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: scanManifest(),
+        run_sync: controlled("run_sync"),
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForPending(page, "run_sync");
+    await resolveControlled(page, "run_sync", syncOutcome());
+    await waitForResult(page);
+
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await expect(preview(page).getByText(en.offsetLabel)).toBeVisible();
+
+    // A second run, cancelled: the stored outcome is gone, and so is every claim built on
+    // it. The file is still on the timeline, so the selection itself survives.
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForPending(page, "run_sync");
+    await rejectControlled(page, "run_sync", "cancelled");
+    await expect(page.getByRole("button", { name: en.exportButton })).toHaveCount(0);
+    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).getByText(en.offsetLabel)).toHaveCount(0);
   });
 });

@@ -14,7 +14,10 @@ import {
   getEpoch,
   invalidate,
   invalidateAll,
+  META_CONCURRENCY,
+  metaQueueStateForTest,
   regenerateAnalysis,
+  releaseWaveformMeta,
   resetWaveformCachesForTest,
   subscribeEpoch,
 } from "../timeline/waveformStore";
@@ -22,6 +25,22 @@ import {
 const FILE_A = "/Users/e2e/shoot/CamA/C0001.MP4";
 const FILE_B = "/Users/e2e/shoot/CamB/C0002.MP4";
 const META = { totalSamples: 12_000, levels: [{ binSamples: 120, bins: 100 }] };
+
+/**
+ * Let the idle-scheduled meta queue run (V05-W5, D-072).
+ *
+ * Since the queue landed, `fetchWaveformMeta` does not `invoke` on the calling turn — it
+ * puts the request in line and asks for an idle callback. jsdom has no
+ * `requestIdleCallback`, so the store falls back to `setTimeout(…, 0)`; one macrotask per
+ * batch, plus a turn for the re-schedule each settled request triggers.
+ *
+ * Every `toHaveBeenCalledTimes` below that used to read straight after the call now reads
+ * after this. What is being asserted is unchanged (one invoke per file, none for a dropped
+ * request); WHEN the invoke happens is what the queue deliberately changed.
+ */
+async function drain(turns = 4): Promise<void> {
+  for (let i = 0; i < turns; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -40,6 +59,7 @@ describe("fetchWaveformMeta", () => {
 
     const a = fetchWaveformMeta(FILE_A);
     const b = fetchWaveformMeta(FILE_A);
+    await drain();
     expect(invokeMock).toHaveBeenCalledTimes(1);
 
     resolveInvoke(META);
@@ -199,7 +219,7 @@ describe("invalidateAll and the epoch", () => {
     expect(seen).toEqual([before + 1, before + 2]);
   });
 
-  it("does not disturb the dedup within one epoch", () => {
+  it("does not disturb the dedup within one epoch", async () => {
     // The epoch is a reason to look AGAIN, not a reason to look twice at once: two clips
     // for the same file after an invalidation still share one in-flight invoke.
     invokeMock.mockReturnValueOnce(new Promise(() => {}));
@@ -207,7 +227,127 @@ describe("invalidateAll and the epoch", () => {
 
     void fetchWaveformMeta(FILE_A);
     void fetchWaveformMeta(FILE_A);
+    await drain();
     expect(invokeMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── V05-W5, D-072: the queue ───────────────────────────────────────────────────────────
+//
+// The storm this exists for: 386 clips mount, each calls `fetchWaveformMeta` for its own
+// file, the per-file dedup matches nothing because there are 386 distinct files, and 386
+// `invoke`s cross the IPC boundary in one commit.
+
+describe("the meta queue", () => {
+  /** A `waveform_meta` mock that never settles, so everything issued stays outstanding and
+   *  the cap is observable as a call count. */
+  function stallingInvoke(): void {
+    invokeMock.mockImplementation(() => new Promise(() => {}));
+  }
+
+  function files(count: number): string[] {
+    return Array.from({ length: count }, (_, i) => `/nas/cam/C${String(i).padStart(4, "0")}.MP4`);
+  }
+
+  it("issues at most META_CONCURRENCY reads at once, however many clips ask", async () => {
+    stallingInvoke();
+    for (const file of files(386)) void fetchWaveformMeta(file);
+    await drain();
+    // The whole point, in one number: 386 asked, six went out.
+    expect(invokeMock).toHaveBeenCalledTimes(META_CONCURRENCY);
+    expect(metaQueueStateForTest()).toEqual({
+      queued: 386 - META_CONCURRENCY,
+      inFlight: META_CONCURRENCY,
+    });
+  });
+
+  it("lets the next request through as each one settles, so the queue really drains", async () => {
+    const settle: ((value: unknown) => void)[] = [];
+    invokeMock.mockImplementation(() => new Promise((resolve) => settle.push(resolve)));
+
+    const all = files(10).map((file) => fetchWaveformMeta(file));
+    await drain();
+    expect(invokeMock).toHaveBeenCalledTimes(META_CONCURRENCY);
+
+    for (const resolve of [...settle]) resolve(META);
+    await drain();
+    expect(invokeMock).toHaveBeenCalledTimes(10);
+
+    for (const resolve of settle.slice(META_CONCURRENCY)) resolve(META);
+    await Promise.all(all);
+    expect(metaQueueStateForTest()).toEqual({ queued: 0, inFlight: 0 });
+  });
+
+  it("a rejection releases its slot too — one unreadable file must not stall the rest", async () => {
+    invokeMock.mockImplementation((_cmd: string, args: { file: string }) =>
+      args.file.endsWith("C0000.MP4") ? Promise.reject("cache_missing:" + args.file) : Promise.resolve(META),
+    );
+    const all = files(20).map((file) => fetchWaveformMeta(file).catch(() => null));
+    await Promise.all(all);
+    expect(invokeMock).toHaveBeenCalledTimes(20);
+    expect(metaQueueStateForTest()).toEqual({ queued: 0, inFlight: 0 });
+  });
+
+  it("a request whose canvas unmounted before it was issued is never sent", async () => {
+    stallingInvoke();
+    const queued = files(50);
+    for (const file of queued) void fetchWaveformMeta(file).catch(() => {});
+    // Everything past the cap is still in line — the virtualization window recycles and
+    // those canvases go away before their turn comes.
+    for (const file of queued.slice(META_CONCURRENCY)) releaseWaveformMeta(file);
+    await drain();
+
+    expect(invokeMock).toHaveBeenCalledTimes(META_CONCURRENCY);
+    expect(metaQueueStateForTest()).toEqual({ queued: 0, inFlight: META_CONCURRENCY });
+    for (const file of queued.slice(META_CONCURRENCY)) {
+      expect(invokeMock).not.toHaveBeenCalledWith("waveform_meta", { file, cacheDir: null });
+    }
+  });
+
+  it("a dropped request is forgotten, so a clip that pans back asks again", async () => {
+    stallingInvoke();
+    const p = fetchWaveformMeta(FILE_A).catch(() => "dropped");
+    releaseWaveformMeta(FILE_A);
+    expect(await p).toBe("dropped");
+
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(META);
+    await expect(fetchWaveformMeta(FILE_A)).resolves.toEqual(META);
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("two consumers of one queued request take two releases to drop it", async () => {
+    stallingInvoke();
+    // Fill the cap so FILE_A genuinely waits in line.
+    for (const file of files(META_CONCURRENCY)) void fetchWaveformMeta(file);
+    await drain();
+    const first = fetchWaveformMeta(FILE_A);
+    const second = fetchWaveformMeta(FILE_A);
+    expect(first).toBe(second);
+
+    releaseWaveformMeta(FILE_A);
+    expect(metaQueueStateForTest().queued).toBe(1); // one consumer left; still wanted
+
+    releaseWaveformMeta(FILE_A);
+    expect(metaQueueStateForTest().queued).toBe(0);
+    await expect(first).rejects.toBeTruthy();
+  });
+
+  it("releasing an already-issued request is a no-op — there is nothing left to stop", async () => {
+    stallingInvoke();
+    void fetchWaveformMeta(FILE_A);
+    await drain();
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+
+    releaseWaveformMeta(FILE_A);
+    releaseWaveformMeta(FILE_A);
+    expect(metaQueueStateForTest()).toEqual({ queued: 0, inFlight: 1 });
+  });
+
+  it("nothing is issued on the calling turn — the first frame is not owed a waveform", () => {
+    stallingInvoke();
+    for (const file of files(20)) void fetchWaveformMeta(file);
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 });
 

@@ -3,6 +3,7 @@ import { boot, BOOT_FIXTURES, fn, SETTLED_SETTINGS, waitForResult } from "./harn
 import { en } from "../src/i18n";
 import { visibleClips } from "../src/timeline/geometry";
 import { stackClips, type ClipSpan } from "../src/timeline/laneLayout";
+import { META_CONCURRENCY } from "../src/timeline/waveformStore";
 
 // V03-S7 QA — the scale/virtualization proof.
 //
@@ -352,7 +353,7 @@ test.describe(`timeline scale (${TOTAL_PLACEMENTS} placements, 6 devices, 3-hour
     await expect(page.locator(".shelf__row")).toHaveCount(2);
   });
 
-  test("at fit zoom every clip is legitimately on-screen (nothing hidden); waveform canvases match 1:1", async ({
+  test("at fit zoom every clip is legitimately on-screen (nothing hidden), and canvases follow the width rule", async ({
     page,
   }) => {
     await reachResult(page);
@@ -364,7 +365,19 @@ test.describe(`timeline scale (${TOTAL_PLACEMENTS} placements, 6 devices, 3-hour
     // missing at the zoom level an operator lands on first.
     const clips = page.locator(".clip");
     await expect(clips).toHaveCount(TOTAL_PLACEMENTS);
-    await expect(page.locator(".waveform__canvas")).toHaveCount(TOTAL_PLACEMENTS);
+
+    // MIGRATED in V05-W5 (D-072). This used to read `.waveform__canvas` count ===
+    // TOTAL_PLACEMENTS — one canvas per clip, unconditionally. That is no longer what the
+    // app does or should do: at this zoom a clip is ~9 px wide, which is three to ten bars
+    // of a waveform, and the canvas, its backing store, its per-pan draw and the
+    // `waveform_meta` read behind it are all waste. The claim the old assertion was
+    // actually making — "the canvas layer tracks the clips, one to one, rather than
+    // drifting" — survives, stated against the rule that now governs it.
+    const widths = await clips.evaluateAll((els) =>
+      els.map((el) => (el as HTMLElement).getBoundingClientRect().width),
+    );
+    const roomy = widths.filter((w) => w >= 24).length; // MIN_WAVEFORM_PX
+    await expect(page.locator(".waveform__canvas")).toHaveCount(roomy);
   });
 
   test("deep zoom mounts far fewer clips than exist, matching the virtualization window plus its overscan buffer", async ({
@@ -503,5 +516,394 @@ test.describe(`timeline scale (${TOTAL_PLACEMENTS} placements, 6 devices, 3-hour
     await page.locator(".timeline").focus();
     await page.keyboard.press("0");
     await expect(page.locator(".clip")).toHaveCount(TOTAL_PLACEMENTS);
+  });
+});
+
+// ---- Scenario: the metadata storm (V05-W5, D-072) --------------------------------------
+//
+// The owner's report, in a fixture: 400 clips land in one commit, every one of them mounts
+// a `WaveformCanvas`, and every one of those used to call `waveform_meta` for its own file
+// on its mount effect. The per-file dedup matched nothing — 400 distinct files — so 400
+// `invoke`s crossed the IPC boundary at once, each of them rejecting `cache_missing`
+// because no analysis existed yet.
+//
+// Two bounds are asserted here, and they are different claims:
+//   - at the FITTED zoom of a 400-file drop nothing is asked at all, because no clip is
+//     wide enough (`MIN_WAVEFORM_PX`) for a waveform to mean anything;
+//   - once the operator zooms in far enough that waveforms ARE worth reading, the queue
+//     caps what is outstanding at `META_CONCURRENCY`, so the storm cannot come back in the
+//     one situation where the reads are legitimate.
+
+const STORM_DEVICES = 4;
+const STORM_PER_DEVICE = 100;
+const STORM_TOTAL = STORM_DEVICES * STORM_PER_DEVICE; // 400
+const STORM_SPACING_SEC = (SPAN_SEC - CLIP_DUR_SEC) / (STORM_PER_DEVICE - 1);
+
+/** The cap `waveformStore.ts` enforces. Imported rather than repeated, so the assertion
+ *  below cannot drift away from the constant it is about. */
+const STORM_CAP = META_CONCURRENCY;
+
+function buildStormScan(): Record<string, unknown> {
+  const devices: Record<string, unknown>[] = [];
+  const files: Record<string, unknown>[] = [];
+  for (let d = 0; d < STORM_DEVICES; d += 1) {
+    const id = `storm${d}`;
+    const kind = d % 2 === 0 ? "video" : "audio";
+    const own: string[] = [];
+    for (let c = 0; c < STORM_PER_DEVICE; c += 1) {
+      const file = `/nas/${id}/s${d}_${String(c).padStart(3, "0")}.${kind === "video" ? "mp4" : "wav"}`;
+      own.push(file);
+      files.push({
+        file,
+        device: id,
+        duration_seconds: CLIP_DUR_SEC,
+        format_name: kind === "video" ? "mov,mp4" : "wav",
+        audio: { codec: kind === "video" ? "aac" : "pcm_s16le", sample_rate: 48000, channels: 2 },
+        video: kind === "video" ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" } : null,
+        creation_time: startedAt(c * STORM_SPACING_SEC),
+        date_tag: null,
+        modified_time: null,
+      });
+    }
+    devices.push({ id, label: `Storm ${d}`, kind, files: own });
+  }
+  return { schema: 1, devices, files, unsynced: [], skipped: [] };
+}
+
+const STORM_SCAN = buildStormScan();
+
+/**
+ * A `waveform_meta` fixture that RECORDS — the harness's own arg-recording pattern
+ * (`cancelThumbnailSpy`, `consentSetSpy`), extended to keep a peak-concurrency counter as
+ * well as a call list.
+ *
+ * It settles on a timer rather than immediately, because a fixture that resolves inside the
+ * same microtask can never have more than one call outstanding — the cap would read as
+ * "honoured" no matter what the code did.
+ */
+function metaSpyFixtures() {
+  return {
+    waveform_meta: fn(`(args) => {
+      const w = window;
+      w.__E2E_META__ = w.__E2E_META__ || { calls: [], inFlight: 0, peak: 0 };
+      const s = w.__E2E_META__;
+      s.calls.push(args.file);
+      s.inFlight += 1;
+      if (s.inFlight > s.peak) s.peak = s.inFlight;
+      return new Promise((resolve) => setTimeout(() => {
+        s.inFlight -= 1;
+        resolve({ totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} });
+      }, 10));
+    }`),
+    waveform_level: fn(`(args) => {
+      const levels = ${LEVELS_EXPR};
+      const lvl = levels[args.level];
+      const bytes = new Uint8Array(lvl.bins * 2);
+      for (let i = 0; i < lvl.bins; i += 1) { bytes[i * 2] = 180; bytes[i * 2 + 1] = 100; }
+      return bytes.buffer;
+    }`),
+  };
+}
+
+interface MetaSpy {
+  calls: string[];
+  peak: number;
+}
+
+async function readMetaSpy(page: Page): Promise<MetaSpy> {
+  return page.evaluate(() => {
+    const s = (window as unknown as Record<string, MetaSpy | undefined>).__E2E_META__;
+    return { calls: s?.calls ?? [], peak: s?.peak ?? 0 };
+  });
+}
+
+/** Drop the 400-file card and settle on the pre-sync timeline — the exact moment the
+ *  owner's screen filled with rebuild buttons. */
+async function dropTheCard(page: Page): Promise<void> {
+  await boot(page, {
+    fixtures: {
+      ...BOOT_FIXTURES,
+      ...metaSpyFixtures(),
+      "plugin:dialog|open": ["/Volumes/nas/wedding"],
+      scan_inputs: STORM_SCAN,
+    },
+    settings: SETTLED_SETTINGS,
+  });
+  await page.getByRole("button", { name: en.dropFolder }).click();
+  await expect(page.locator(".clip")).toHaveCount(STORM_TOTAL);
+}
+
+/** A plain (non-ctrl) wheel pan, dispatched straight at the listening element — same
+ *  technique, and same reason, as `zoomInAroundCalibrationClip`. */
+async function panBy(page: Page, deltaX: number, times: number): Promise<void> {
+  await page.evaluate(
+    ({ deltaX, times }) => {
+      const body = document.querySelector(".timeline__body") as HTMLElement;
+      const vp = document.querySelector("#timeline-viewport") as HTMLElement;
+      const rect = vp.getBoundingClientRect();
+      const clientX = rect.left + rect.width / 2;
+      const clientY = rect.top + rect.height / 2;
+      for (let i = 0; i < times; i += 1) {
+        body.dispatchEvent(
+          new WheelEvent("wheel", { deltaX, bubbles: true, cancelable: true, clientX, clientY }),
+        );
+      }
+    },
+    { deltaX, times },
+  );
+}
+
+test.describe(`the metadata storm (${STORM_TOTAL} clips, D-072)`, () => {
+  test.use({ viewport: { width: 1280, height: 2000 } });
+
+  test("400 clips land in one commit and the shell is asked a BOUNDED number of times", async ({
+    page,
+  }) => {
+    await dropTheCard(page);
+    // Give any deferred work every chance to happen: the queue is idle-scheduled, so an
+    // assertion taken on the next tick would pass for the wrong reason.
+    await page.waitForTimeout(1500);
+
+    const spy = await readMetaSpy(page);
+    // The bound. 400 clips, and the number of `waveform_meta` calls does not scale with
+    // them — at this zoom every clip is ~9 px wide, which is not a waveform.
+    expect(spy.calls.length).toBeLessThanOrEqual(STORM_CAP * 2);
+    expect(spy.peak).toBeLessThanOrEqual(STORM_CAP);
+
+    // …and the reason is stated, not inferred: no clip is wide enough, and none of them
+    // carries a canvas either. The IPC, the element and the draw are one decision.
+    const widths = await page
+      .locator(".clip")
+      .evaluateAll((els) => els.map((el) => (el as HTMLElement).getBoundingClientRect().width));
+    expect(Math.max(...widths)).toBeLessThan(24); // MIN_WAVEFORM_PX
+    await expect(page.locator(".waveform__canvas")).toHaveCount(0);
+    // And nothing offers to rebuild anything — D-064's other half, at this scale.
+    await expect(page.locator(".waveform__regenerate")).toHaveCount(0);
+  });
+
+  test("panning does not produce a second storm", async ({ page }) => {
+    await dropTheCard(page);
+    await page.waitForTimeout(1000);
+    const before = (await readMetaSpy(page)).calls.length;
+
+    // Hard enough to cross most of a three-hour timeline, and repeatedly — every pointer
+    // move of a real drag is one of these, and each one recycles the virtualization window.
+    await panBy(page, 2000, 60);
+    await panBy(page, -2000, 60);
+    await page.waitForTimeout(1500);
+
+    const after = (await readMetaSpy(page)).calls.length;
+    expect(after - before).toBeLessThanOrEqual(STORM_CAP);
+  });
+
+  test("the measurement behind D-072's memo note: a pan moves EVERY mounted clip", async ({
+    page,
+  }) => {
+    await dropTheCard(page);
+    // Zoomed in first, because at FIT zoom the visible window already equals the whole
+    // content span and `clampScroll` refuses to move it — a pan that cannot pan measures
+    // nothing. Four notches is enough to make the view scrollable while leaving most of
+    // the drop mounted, so this stays a measurement over hundreds of clips.
+    await page.evaluate(() => {
+      const body = document.querySelector(".timeline__body") as HTMLElement;
+      const vp = document.querySelector("#timeline-viewport") as HTMLElement;
+      const rect = vp.getBoundingClientRect();
+      const clientX = rect.left + rect.width / 2;
+      const clientY = rect.top + rect.height / 2;
+      for (let i = 0; i < 4; i += 1) {
+        body.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: -120,
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+          }),
+        );
+      }
+    });
+
+    const before = await page.locator(".clip").evaluateAll((els) =>
+      els.map((el) => ({
+        file: el.getAttribute("data-file") ?? "",
+        left: (el as HTMLElement).style.left,
+      })),
+    );
+    expect(before.length).toBeGreaterThan(50);
+
+    await panBy(page, 200, 1);
+
+    const after = new Map(
+      (
+        await page.locator(".clip").evaluateAll((els) =>
+          els.map((el) => [el.getAttribute("data-file") ?? "", (el as HTMLElement).style.left] as const),
+        )
+      ).map(([file, left]) => [file, left]),
+    );
+
+    // Not "most" — every single clip that is still mounted. `Clip`'s `left` is
+    // `msToX(startMs, view)` and a pan changes `view.scrollMs`, so a `memo` around `Clip`
+    // can skip nothing: its props really did all change. Off-screen clips are not mounted
+    // at all (`Track` renders only `visibleClips`), so there is no third population for the
+    // memo to help either. That is D-072's third finding, measured rather than argued.
+    const stillMounted = before.filter((c) => after.has(c.file));
+    expect(stillMounted.length).toBeGreaterThan(50);
+    const unchanged = stillMounted.filter((c) => after.get(c.file) === c.left);
+    expect(unchanged.map((c) => c.file)).toEqual([]);
+  });
+
+  test("at the fitted zoom of 400 clips no box shows two texts, at any width", async ({ page }) => {
+    // D-065 × the real zoom the owner lands on. Not a unit-tested threshold — the rendered
+    // boxes, measured. A clip may show a name, or a status, or neither; what it may never
+    // do is draw two things over each other, which is exactly what the screenshot showed.
+    await dropTheCard(page);
+    const overlaps = await page.locator(".clip").evaluateAll((els) =>
+      els
+        .map((el) => {
+          const name = el.querySelector(".clip__name");
+          const status = el.querySelector(".clip__status");
+          if (!name || !status) return null;
+          const a = name.getBoundingClientRect();
+          const b = status.getBoundingClientRect();
+          const overlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          return overlap > 0.5 ? (el.getAttribute("data-file") ?? "?") : null;
+        })
+        .filter((f) => f !== null),
+    );
+    expect(overlaps).toEqual([]);
+
+    // …and nothing spills out of its own box either.
+    const spills = await page.locator(".clip").evaluateAll((els) =>
+      els
+        .filter((el) => {
+          const box = el.getBoundingClientRect();
+          return Array.from(el.querySelectorAll(".clip__name, .clip__status")).some((child) => {
+            const c = child.getBoundingClientRect();
+            return c.left < box.left - 0.5 || c.right > box.right + 0.5;
+          });
+        })
+        .map((el) => el.getAttribute("data-file") ?? "?"),
+    );
+    expect(spills).toEqual([]);
+  });
+
+  test("the icon-form rebuild control is still a real target once a clip can hold one", async ({
+    page,
+  }) => {
+    // The other half of D-065's rationing: a control that shrinks to a glyph must still be
+    // aimable and still carry its whole sentence to a screen reader. Measured on a clip
+    // between NAME_AND_ICON_MIN_PX and NAME_AND_TEXT_MIN_PX, where the icon form lives.
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Volumes/nas/wedding"],
+        scan_inputs: STORM_SCAN,
+        waveform_meta: fn(`(args) => Promise.reject("cache_missing:" + args.file)`),
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await expect(page.locator(".clip")).toHaveCount(STORM_TOTAL);
+
+    // Zoom one notch at a time until a clip lands in the icon band. Adaptive rather than a
+    // fixed count on purpose: the band is `STATUS_ICON_MIN_PX`…`NAME_AND_TEXT_MIN_PX` and
+    // where a given notch puts a 90-second clip depends on the viewport, so a hardcoded
+    // number would be a test that passes on one screen size and not another.
+    const zoomOneNotch = () =>
+      page.evaluate(() => {
+        const body = document.querySelector(".timeline__body") as HTMLElement;
+        const vp = document.querySelector("#timeline-viewport") as HTMLElement;
+        const rect = vp.getBoundingClientRect();
+        body.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: -120,
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+          }),
+        );
+      });
+
+    const icon = page.locator(".clip__status--icon").first();
+    for (let i = 0; i < 24 && (await icon.count()) === 0; i += 1) {
+      await zoomOneNotch();
+      await page.waitForTimeout(250); // the queue is idle-scheduled (D-072)
+    }
+    await expect(icon).toBeVisible();
+    const box = (await icon.boundingBox())!;
+    // Aimable: a target with real area, not a hairline.
+    expect(box.width).toBeGreaterThanOrEqual(8);
+    expect(box.height).toBeGreaterThanOrEqual(8);
+    // Only the PIXELS are rationed — the accessible name is the whole sentence.
+    await expect(icon).toHaveAttribute("aria-label", en.waveformRegenerate);
+    await expect(icon).toHaveRole("button");
+
+    // …and it can actually be pressed. Aimed at an icon whose box is genuinely inside the
+    // lanes column: a clip scrolled partly off the left edge is CLIPPED by
+    // `.track__lane`'s `overflow: hidden`, but its layout rect still reaches under the
+    // device gutter, so a click at that rect's centre lands on the gutter's own icon. That
+    // is an artefact of aiming at a layout rect rather than at what is painted — the app
+    // is behaving correctly — so the assertion aims where the operator would.
+    const gutterRight = await page
+      .locator(".track__gutter")
+      .first()
+      .evaluate((el) => el.getBoundingClientRect().right);
+    const clickable = await page
+      .locator(".clip__status--icon")
+      .evaluateAll(
+        (els, right) =>
+          els.findIndex((el) => el.getBoundingClientRect().left > right + 4),
+        gutterRight,
+      );
+    expect(clickable).toBeGreaterThanOrEqual(0);
+    await page.locator(".clip__status--icon").nth(clickable).click();
+  });
+
+  test("zoomed in far enough for waveforms to mean something, the queue caps the reads", async ({
+    page,
+  }) => {
+    await dropTheCard(page);
+    await page.waitForTimeout(500);
+
+    // Zoom until the clips are genuinely wide. Anchored on the viewport centre; the
+    // assertion below is about the CAP, not about which clips are on screen.
+    await page.evaluate(() => {
+      const body = document.querySelector(".timeline__body") as HTMLElement;
+      const vp = document.querySelector("#timeline-viewport") as HTMLElement;
+      const rect = vp.getBoundingClientRect();
+      const clientX = rect.left + rect.width / 2;
+      const clientY = rect.top + rect.height / 2;
+      for (let i = 0; i < 12; i += 1) {
+        body.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: -120,
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+          }),
+        );
+      }
+    });
+    await page.waitForTimeout(1500);
+
+    const widths = await page
+      .locator(".clip")
+      .evaluateAll((els) => els.map((el) => (el as HTMLElement).getBoundingClientRect().width));
+    // The zoom really did take the clips past the threshold — otherwise the rest is vacuous.
+    expect(Math.max(...widths)).toBeGreaterThanOrEqual(24);
+
+    const spy = await readMetaSpy(page);
+    // Reads DO happen now — the threshold defers work, it does not refuse it forever.
+    expect(spy.calls.length).toBeGreaterThan(0);
+    // …and never more than the cap at once, which is the queue's whole job.
+    expect(spy.peak).toBeLessThanOrEqual(STORM_CAP);
+    // Each canvas that exists belongs to a clip wide enough to hold one.
+    const canvases = await page.locator(".waveform__canvas").count();
+    expect(canvases).toBeLessThanOrEqual(widths.filter((w) => w >= 24).length);
   });
 });

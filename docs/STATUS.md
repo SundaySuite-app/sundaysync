@@ -55,6 +55,31 @@ their cameras' clocks claimed they were to where their own audio says they actua
 Gates at the end of the round: 255 vitest, 116 Playwright, both cargo workspaces clean under
 `clippy -D warnings` in both D-025 PATH variants.
 
+**v0.5 (unreleased) is at W1–W5 complete — the round is done.** It is the round the owner's
+own 386-file wedding wrote: every stage started from something he saw on his screen, and every
+measurement in it was taken on `/Volumes/Delt Fossland/LINNEA&SIGURD/`, read-only. The app
+stops making claims it cannot support — about which files are footage, about when they were
+recorded, and about what it is doing to them — and stops spending work on pixels that cannot
+show anything.
+
+| v0.5 stage | State | What it added |
+| --- | --- | --- |
+| W1 — the storm at its root | ✅ | A cancelled pre-analysis is not a failed one; `sync/start` re-pends, `sync/done` clears and invalidates through a store epoch; the clip becomes `.clip__chrome` over the canvas with a width rule in `timeline/clipChrome.ts` (D-064, D-065). |
+| W2 — what is not footage | ✅ | `.LRF` proxies and still images skipped before the probe, counted out loud through `ScanManifest.skipped` (D-066). |
+| W3 — when it was recorded | ✅ | The recording-time ladder with provenance (`timeline/recordingTime.ts`, five rungs), sequential layout for the rest (`naturalSort.ts`), the growing session-window gate, off-session files named with their date, and a `max-height: 60vh` scrolling timeline (D-067, D-068, D-071). |
+| W4a — one frame | ✅ | `video_frame` + `cancel_thumbnail`: one JPEG over binary IPC, hybrid seek, two permits, no new capability (D-069). |
+| W4b — the panel | ✅ | The always-visible `PreviewPanel`; the selection becomes a file path and `ClipDetail` is deleted; `frameStore` with `cancelFramesExcept` (D-070, D-073). |
+| W5 — scale + the round's QA sweep | ✅ | The `waveform_meta` queue (cap 6, idle-drained, droppable) and `MIN_WAVEFORM_PX`; the `Clip`-memo measurement; three sweep defects fixed; the test harness's shared scratch path scoped per process (D-072). |
+
+Measured on the real corpus at the end of the round: 386 files scanned, 9 skipped
+(8 `.LRF` + 1 `.HEIC`), 37 with no audio stream on the unsynced shelf, 375 files positioned
+by the ladder and 11 named as belonging to another day. At the zoom the operator lands on,
+the median clip is 3 px wide and **`waveform_meta` is called zero times** where it was called
+386.
+
+Gates at the end of the round: 399 vitest, 150 Playwright, both cargo workspaces clean under
+`fmt --check` / `clippy --all-targets -D warnings` / `test` in both D-025 PATH variants.
+
 The UX overhaul (branch `feat/ui-overhaul`) fixed two launch-blocking bugs found in
 review — the missing Tauri 2 capabilities file (dialogs/events/opener were ACL-denied)
 and drag-drop written against the Tauri 1 API (drops did nothing) — and rebuilt the app
