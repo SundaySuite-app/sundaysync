@@ -90,7 +90,7 @@ export const nb = {
   // Tidslinjen som hovedvisning (v0.4, D-061) — klippene vises før synkronisering,
   // plassert etter filenes egne tidsstempler. Det er en gjetning, og teksten sier det.
   presyncMeta: "Foreløpig plassering fra filenes tidsstempler",
-  presyncStart: "opptaksstart",
+  presyncStart: "starter",
   presyncStartUnknown: "ukjent opptakstidspunkt",
   presyncUnknownStart: (n: number) =>
     n === 1
@@ -365,7 +365,7 @@ export const en: Strings = {
   clipDurationUnknown: "Length unknown",
 
   presyncMeta: "Provisional positions from the files' own timestamps",
-  presyncStart: "recorded at",
+  presyncStart: "starts at",
   presyncStartUnknown: "unknown recording time",
   presyncUnknownStart: (n: number) =>
     n === 1
