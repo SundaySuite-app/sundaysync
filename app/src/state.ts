@@ -57,11 +57,28 @@ export interface Banner {
  * *transition* into it that makes a clip re-read its waveform (`WaveformCanvas`).
  *
  * `failed` means "stop waiting, nothing was written for this file" — a file that would
- * not decode (`prewarm:file` with `ok: false`) and a pass that ended before reaching it
- * (`prewarm/settled`) are the same thing to every consumer: no analysis arrived, and the
- * ordinary regenerate affordance is the right offer.
+ * not decode (`prewarm:file` with `ok: false`) and a pass that FINISHED before reaching it
+ * (`prewarm/settled` with `reason: "done"`) are the same thing to every consumer: no
+ * analysis arrived, and the ordinary regenerate affordance is the right offer.
+ *
+ * **A pass that was CANCELLED says none of that (V05-W1, D-064).** It was preempted or
+ * superseded, so it never got as far as an opinion about the files it had not reached —
+ * and the app has none either. Those files leave the map entirely rather than being
+ * declared `failed`: an absent entry is "no opinion", which is the only true thing to say.
  */
 export type PrewarmStatus = "pending" | "ready" | "failed";
+
+/**
+ * Why a pre-analysis pass stopped (V05-W1, D-064).
+ *
+ * - `done` — it ran to its own end (resolved), or died of something that is genuinely a
+ *   failure. Nothing more is coming for the files it never wrote, and the regenerate
+ *   control is the right offer for them.
+ * - `cancelled` — it was preempted by a sync, superseded by a newer drop, or refused the
+ *   activity slot outright (`busy:`, D-046). Whoever took the slot is doing the same
+ *   extraction; the pass has no verdict to hand down.
+ */
+export type PrewarmEndReason = "done" | "cancelled";
 
 export interface AppState {
   phase: Phase;
@@ -76,7 +93,10 @@ export interface AppState {
    * through this, and `scan/done` prunes it back to what the scan actually found.
    */
   excluded: string[];
-  /** file → pre-analysis status, for files the current scan handed to `prewarm_analysis`. */
+  /** file → analysis status, for files the app currently believes are being analysed: the
+   *  ones this scan handed to `prewarm_analysis`, and (V05-W1, D-064) the ones a running
+   *  `run_sync` is extracting, which is the same work under a different caller. Empty
+   *  between runs — an absent entry means "no opinion", not "failed". */
   prewarm: Record<string, PrewarmStatus>;
   /** The aggregate `prewarm:progress` tick, or null when no pass is running. */
   prewarmProgress: { completed: number; total: number } | null;
@@ -115,7 +135,7 @@ export type Action =
   | { type: "files/restore"; file: string }
   | { type: "prewarm/file"; file: string; ok: boolean }
   | { type: "prewarm/progress"; completed: number; total: number }
-  | { type: "prewarm/settled"; seq: number }
+  | { type: "prewarm/settled"; seq: number; reason: PrewarmEndReason }
   | { type: "sync/start" }
   | { type: "sync/progress"; progress: ProgressEvent }
   | { type: "sync/done"; outcome: SyncOutcome }
@@ -320,21 +340,39 @@ export function reducer(state: AppState, action: Action): AppState {
       // drop's promise resolving. The launching sequence travels with the action so a late
       // settlement can only ever settle its own pass.
       if (action.seq !== state.scanSeq) return state;
-      // The pass ended — finished, refused as busy, superseded, or preempted by a sync.
-      // Whatever the reason, nothing more is coming, so nothing may still be `pending`:
-      // a clip left waiting on an event that will never arrive would show the
-      // «analyserer …» placeholder forever, with no way back to the regenerate control.
+      // V05-W1 (D-064): and is there still a pass to settle? `sources` is the only phase a
+      // live pre-analysis belongs to — the same rule `prewarm/progress` above already
+      // follows, and for the same reason. A `run_sync` preempts the prewarm, so the
+      // preempted pass's rejection lands just AFTER `sync/start` has (truthfully) marked
+      // every unanalysed file `pending` for the sync's own extraction. Letting the dying
+      // pass rewrite that map is how 386 clips ended up wearing a rebuild button while the
+      // sync that was rebuilding them ran.
+      if (state.phase.name !== "sources") return state;
+      // The pass ended. What that means for the files it never reached depends entirely on
+      // WHY, and the first build had only one answer for both.
       //
+      // `done` — it finished, or it broke. Nothing more is coming, so nothing may still be
+      // `pending`: a clip left waiting on an event that will never arrive would show the
+      // «analyserer …» placeholder forever, with no way back to the regenerate control.
       // `pending → failed`, NOT a wholesale clear. React batches state updates within one
       // task, and the last file's `prewarm:file` can land in the same batch as the
       // promise's resolution; wiping the map here would erase that file's `ready` before
       // any component saw it, and the waveform it had just written would never be read.
       // Rewriting only the pending entries is order-insensitive.
+      //
+      // `cancelled` — it was preempted, superseded or refused the slot. It never formed an
+      // opinion about the files it had not reached, and neither has the app: those entries
+      // are DELETED. `failed` would be an invention (§7.5), and an invention with a
+      // consequence — it is exactly what put a rebuild control on every clip.
       const settled: Record<string, PrewarmStatus> = {};
       let changed = false;
       for (const [file, status] of Object.entries(state.prewarm)) {
-        settled[file] = status === "pending" ? "failed" : status;
-        if (settled[file] !== status) changed = true;
+        if (status === "pending") {
+          changed = true;
+          if (action.reason === "done") settled[file] = "failed";
+          continue; // cancelled: no entry at all — the app has no opinion about this file
+        }
+        settled[file] = status;
       }
       if (!changed && state.prewarmProgress === null) return state;
       return { ...state, prewarm: settled, prewarmProgress: null };
@@ -343,10 +381,31 @@ export function reducer(state: AppState, action: Action): AppState {
     case "sync/start": {
       const manifest = currentManifest(state.phase);
       if (!manifest) return state;
+      // V05-W1 (D-064): a sync IS the analysis. `run_sync` extracts the analysis audio for
+      // every file in the run, so while it is running an unanalysed file genuinely is
+      // being analysed — and `pending` is the word for that. Saying so here is not a
+      // workaround for the settled-storm below; it is the fact that makes the storm
+      // impossible by construction, because there is nothing left for a dying prewarm to
+      // turn into a rebuild button.
+      //
+      // Built from the MANIFEST rather than from the old map on purpose: a cancelled pass
+      // deletes its pending entries, so by the time Sync is pressed the map may hold
+      // nothing at all — and every file in the run is about to be analysed whether or not
+      // the prewarm ever had an entry for it. `ready` is the one status that survives: its
+      // analysis is already written, and the sync will find it there.
+      const stillExcluded = new Set(state.excluded);
+      const prewarm: Record<string, PrewarmStatus> = {};
+      for (const { file } of manifest.files) {
+        if (stillExcluded.has(file)) continue;
+        prewarm[file] = state.prewarm[file] === "ready" ? "ready" : "pending";
+      }
       return {
         ...state,
         banner: null,
         cancelling: false,
+        prewarm,
+        // No pass of its own is running any more — the sync took the slot (D-059).
+        prewarmProgress: null,
         phase: {
           name: "syncing",
           inputs: currentInputs(state.phase),
@@ -365,6 +424,14 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         cancelling: false,
+        // V05-W1 (D-064): the run is over and it wrote whatever it wrote. Every entry here
+        // described the run's own extraction, and holding on to it would leave clips
+        // «analyserer …» forever. Emptying the map hands each clip back to the truth in the
+        // cache — `App.tsx` drops the store's memos on the same event
+        // (`waveformStore.invalidateAll`), so each canvas re-reads once and shows a
+        // waveform where there is one and the rebuild control where there is not.
+        prewarm: {},
+        prewarmProgress: null,
         phase: {
           name: "result",
           inputs: state.phase.inputs,
@@ -381,6 +448,12 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         cancelling: false,
+        // Same reasoning as `sync/done`, and it matters more here: a cancelled run has
+        // written analysis for the files it got through and nothing for the rest, and the
+        // only honest way to say that is to stop claiming anything and let each clip read
+        // the cache again.
+        prewarm: {},
+        prewarmProgress: null,
         banner: {
           kind: action.error.kind === "notice" ? "info" : "error",
           text: action.error.text,

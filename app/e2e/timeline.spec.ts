@@ -479,7 +479,11 @@ test.describe("a clip whose duration the outcome does not carry (finding 15)", (
       durations: { "/Users/e2e/shoot/ZOOM0001.WAV": 3600 },
     });
 
-    const clip = clipBox(page);
+    // Addressed by `data-file`, not by its text: since D-065 a clip only draws its name
+    // when there is room for a name, and this one is the 3 px sliver the whole test is
+    // about. What it says it says in `aria-label` and `title` — asserted right below, and
+    // the point of the test — not in three pixels of ellipsis.
+    const clip = page.locator(`.clip[data-file="/Users/e2e/shoot/CamA/C0001.MP4"]`);
     await expect(clip).toHaveClass(/clip--nodur/);
     await expect(clip).toHaveAttribute("aria-label", new RegExp(en.clipDurationUnknown));
     await expect(clip).toHaveAttribute("title", new RegExp(en.clipDurationUnknown));

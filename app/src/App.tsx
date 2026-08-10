@@ -26,10 +26,14 @@ import { GearIcon } from "./components/icons";
 
 import { mapEngineError } from "./errors";
 import { invokeWithTimeout } from "./invoke";
-import { detectLang, dictionaries, type Lang } from "./i18n";
+import { detectLang, dictionaries, type Lang, type Strings } from "./i18n";
 import { getSettings, saveSettings } from "./settings";
-import { initialState, reducer } from "./state";
-import { invalidate as invalidateWaveform } from "./timeline/waveformStore";
+import { initialState, reducer, type PrewarmEndReason } from "./state";
+import {
+  BUSY_PREFIX,
+  invalidate as invalidateWaveform,
+  invalidateAll as invalidateAllWaveforms,
+} from "./timeline/waveformStore";
 import { getTelemetryStatus, reportFrontendError } from "./telemetry";
 import { checkForUpdate } from "./update";
 import { gateErrorReport, initialErrorGateState, shapeErrorPayload } from "./telemetryErrors";
@@ -39,6 +43,25 @@ import type { ProgressEvent, ScanManifest, SidecarStatus, SyncOutcome } from "./
 interface PrewarmFileEvent {
   file: string;
   ok: boolean;
+}
+
+/**
+ * Why the pre-analysis promise settled the way it did (V05-W1, D-064).
+ *
+ * Every rejection here is swallowed — a prewarm is an optimisation, and none of the ways
+ * it can end is worth a word on screen. But they are not the same *kind* of ending, and
+ * the reducer needs to know which one it got: a pass that was preempted or refused has no
+ * verdict about the files it never reached, while one that broke on its own does.
+ *
+ * Classified through the prefixes the app already relies on, never a fresh string match:
+ * `errors.ts`'s `cancelled` → `notice` mapping (D-030, and `run_sync`'s preemption and
+ * `prewarm_analysis`'s supersession both answer exactly that), and `waveformStore.ts`'s
+ * `BUSY_PREFIX` for the D-046 activity-guard refusal.
+ */
+function prewarmEndReason(e: unknown, t: Strings): PrewarmEndReason {
+  const raw = e instanceof Error ? e.message : String(e);
+  if (raw.includes(BUSY_PREFIX)) return "cancelled";
+  return mapEngineError(raw, t).kind === "notice" ? "cancelled" : "done";
 }
 
 export function App() {
@@ -286,12 +309,18 @@ export function App() {
       .map((f) => f.file)
       .filter((file) => !excludedNow.has(file));
     if (files.length === 0) {
-      dispatch({ type: "prewarm/settled", seq });
+      dispatch({ type: "prewarm/settled", seq, reason: "done" });
       return;
     }
-    void invoke("prewarm_analysis", { files, cacheDir: getSettings().cacheDir })
-      .catch(() => {})
-      .then(() => dispatch({ type: "prewarm/settled", seq }));
+    // V05-W1 (D-064): the rejection is still swallowed — nothing about it reaches the
+    // screen — but it is READ first. `.catch(() => {}).then(…)` threw the one piece of
+    // information the reducer needed away before asking it a question, and answered
+    // "finished" for a pass that had been shoved aside. That is what wrote `failed` across
+    // every clip the moment the operator pressed Sync.
+    void invoke("prewarm_analysis", { files, cacheDir: getSettings().cacheDir }).then(
+      () => dispatch({ type: "prewarm/settled", seq, reason: "done" }),
+      (e: unknown) => dispatch({ type: "prewarm/settled", seq, reason: prewarmEndReason(e, t) }),
+    );
     // `excludedRef` is read but intentionally not a dependency: see the note above — an
     // exclusion must not restart the pass. The scan sequence is what re-runs this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -334,8 +363,20 @@ export function App() {
           correctDrift: settings.correctDrift,
         },
       });
+      // V05-W1 (D-064): the run rewrote the analysis cache for every file in it, so every
+      // memo this session holds — a `cache_missing` rejection from before the run, bins
+      // from an entry the run replaced — is now a claim about a cache that is gone. Dropped
+      // BEFORE the phase change, so the same render that empties the prewarm map is the one
+      // that sends each canvas back to the shell to look again. Without this the waveforms
+      // the sync had just built never appeared: the map was cleared, the clips stopped
+      // saying «analyserer …», and every one of them replayed the rejection it had cached
+      // half an hour earlier.
+      invalidateAllWaveforms();
       dispatch({ type: "sync/done", outcome });
     } catch (e) {
+      // Cancelled or broken, the run still wrote analysis for the files it got through —
+      // and wrote nothing for the rest. Same wholesale re-read, same reason.
+      invalidateAllWaveforms();
       dispatch({ type: "sync/failed", error: mapEngineError(String(e), t) });
     }
   }, [state.phase, state.reference, state.overrides, state.excluded, t]);

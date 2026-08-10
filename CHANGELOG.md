@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — v0.5
+
+### Fixed
+
+- **The clips stop offering to rebuild a waveform the sync is already building (D-064).**
+  Press Sync while the app is still pre-analysing your files and every clip on the timeline
+  used to sprout a «Bygg bølgeform på nytt» button — on a 386-file wedding, all 386 of them,
+  offering an action that could only answer "opptatt". The background pass had been pushed
+  aside by your Sync press, exactly as it should be, and the app read that as "the pass
+  finished and never got to these files" rather than "the pass was interrupted". A pass that
+  was interrupted has nothing to say about the files it never reached, and the app now says
+  nothing on its behalf. While the sync runs, the clips say what is actually happening:
+  *Analyserer …* — because the sync is doing that analysis itself.
+- **The waveforms the sync builds now appear when it finishes (D-064).** They were being
+  built and written correctly; no clip ever went back to look. Every clip was still holding
+  the "there is nothing here yet" answer it got before the run started. When a run ends —
+  finished, cancelled or failed — every clip reads again, once, and shows what is really
+  there.
+- **A clip shows what fits in it (D-065).** The filename and the waveform's status used to
+  be drawn on top of each other, at every zoom level; in a three-pixel box that meant an
+  unreadable smear with a button in it that could not be aimed at. They share one row now,
+  the name truncates with an ellipsis instead of shoving anything aside, and a clip too
+  narrow for both keeps whichever one matters: the button when there is something to press,
+  the filename when there is not. A control that shrinks to an icon keeps its full name for
+  screen readers and its detail on hover — only the pixels are rationed. A three-pixel clip
+  stays a coloured tick, as it should.
+
 ## Unreleased
 
 ### New

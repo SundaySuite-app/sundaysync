@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Strings } from "../../i18n";
+import type { ClipChrome, ClipStatusKind } from "../../timeline/clipChrome";
 import type { TimelineView } from "../../timeline/geometry";
 import {
   barAmplitudes,
@@ -11,8 +12,10 @@ import {
   classifyWaveformError,
   fetchWaveformLevel,
   fetchWaveformMeta,
+  getEpoch,
   invalidate,
   regenerateAnalysis,
+  subscribeEpoch,
   type WaveformError,
 } from "../../timeline/waveformStore";
 import type { PrewarmStatus } from "../../state";
@@ -27,8 +30,50 @@ const RMS_ALPHA = 0.85;
  *  the loudest possible sample does not visually fuse with the clip box's own border. */
 const HEADROOM = 0.92;
 
+/** The glyph the rebuild control shrinks to when a clip is too narrow for its sentence
+ *  (D-065). It carries no meaning of its own — the element keeps the full localized string
+ *  as its `aria-label` and the engine's detail in its `title`, so only the pixels are
+ *  rationed. Not an i18n string: a rotation arrow is the same in every language. */
+const REGENERATE_GLYPH = "↻";
+
 /**
- * The canvas that fills `Clip.tsx`'s `.clip__waveform` slot — v0.3 S4.
+ * What a clip has to say in its chrome, beside its name (V05-W1, D-065).
+ *
+ * A *description*, not JSX, because the thing that owns those pixels is `Clip.tsx`: the
+ * name and the status are flex siblings in one `.clip__chrome` row, and they cannot be
+ * laid out against each other by a component that can only see one of them. That is the
+ * whole first half of D-065 — the two used to be independently positioned children drawn
+ * on top of one another, and no amount of care inside this file could have stopped it.
+ */
+export type ClipWaveformStatus =
+  | { kind: "none" }
+  | {
+      kind: "control";
+      /** The v0.3 class the control has always had; the e2e suite and the stylesheet both
+       *  know it by that name. */
+      className: string;
+      /** The full localized label — the visible text when there is room, the `aria-label`
+       *  when there is not. */
+      label: string;
+      /** The engine's own detail, for `title`. Never swallowed (§7.5). */
+      detail: string;
+      disabled: boolean;
+      onClick: (e: React.MouseEvent | React.KeyboardEvent) => void;
+      onKeyDown: (e: React.KeyboardEvent) => void;
+    }
+  | { kind: "info"; className: string; label: string; detail: string | null };
+
+export interface ClipWaveform {
+  canvasRef: React.RefObject<HTMLCanvasElement>;
+  status: ClipWaveformStatus;
+}
+
+/** The discriminant IS `clipChrome`'s `ClipStatusKind` — stated once, so the width rule and
+ *  the thing being measured can never drift into two vocabularies. */
+export type { ClipStatusKind };
+
+/**
+ * The canvas behind `Clip.tsx`'s chrome, and the fetch/draw machinery behind it — v0.3 S4.
  *
  * Three states, and only three:
  *   - **loading** — nothing rendered. The wait for a resident (or freshly streamed)
@@ -56,8 +101,17 @@ const HEADROOM = 0.92;
  * the D-046 busy refusal, and the bytes it would rebuild are already being written.
  * `pending → ready` is what makes the waveforms appear one by one instead of all at once
  * after a sync; `pending → failed` simply hands the regenerate control back.
+ *
+ * **v0.5 (D-064): it is a hook, and it returns a DESCRIPTION rather than JSX.** What the
+ * clip has to say competes for pixels with the clip's own filename, and the two cannot be
+ * laid out against each other by a component that can only see one of them — which is
+ * precisely how they came to be drawn on top of each other (D-065). This owns the state and
+ * the fetching; `Clip.tsx` owns the row they share. The same decision widened
+ * `analysisStatus` to cover a running sync, so «Analyserer …» now stands for the whole time
+ * anything is analysing this file, and added the store epoch below, which is what makes a
+ * clip re-read after a run instead of replaying a rejection forever.
  */
-export function WaveformCanvas({
+export function useClipWaveform({
   t,
   file,
   span,
@@ -70,7 +124,7 @@ export function WaveformCanvas({
   view: TimelineView;
   /** Where the background pass is with this file (D-062); null when it is not tracking it. */
   analysisStatus?: PrewarmStatus | null;
-}) {
+}): ClipWaveform {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [meta, setMeta] = useState<WaveformMeta | null>(null);
   const [error, setError] = useState<WaveformError | null>(null);
@@ -101,13 +155,26 @@ export function WaveformCanvas({
     return cancel;
   }, [file, t]);
 
+  // The store's epoch (V05-W1, D-064). A wholesale `invalidateAll()` — a sync has just
+  // rewritten the analysis cache for every file in the run — drops every memo, and this is
+  // what makes a MOUNTED clip go back and look. Without it the drop was silent: this
+  // component only ever re-reads on a file change, a regenerate, a `pending → ready`
+  // transition or a zoom-bucket change, so a clip that met a `cache_missing` rejection
+  // before the run replayed that same rejection for the rest of the session — and the
+  // waveform the sync had just built for it never appeared. Subscribed the way
+  // `playhead.ts` does it, so a bump costs one render in the clips that are mounted and
+  // nothing anywhere else.
+  const epoch = useSyncExternalStore(subscribeEpoch, getEpoch);
+
   // A fresh file (the virtualization window recycling this DOM node onto a different
   // clip) is a fresh everything — old bytes for a different clip must never flash up
-  // while the new fetch is in flight.
+  // while the new fetch is in flight. A fresh epoch is the same event for every file at
+  // once, so it re-runs the same way.
   useEffect(() => {
+    void epoch; // read as a *reason to look again*, not as a value this effect uses
     setMeta(null);
     return loadMeta();
-  }, [loadMeta]);
+  }, [loadMeta, epoch]);
 
   // Unmount: whatever load is outstanding, whoever started it.
   useEffect(() => () => cancelMetaRef.current?.(), []);
@@ -215,12 +282,10 @@ export function WaveformCanvas({
     loadMeta();
   }, [zoomBucket, isOther, file, loadMeta]);
 
-  // A `role="button"` SPAN, deliberately not a `<button>`: `Clip.tsx`'s own root IS a
-  // real `<button>` (it has to stay one — see its comment), and the HTML parser un-nests
-  // a `<button>` inside a `<button>` rather than just failing a validator. `stopPropagation`
-  // does the other half of the job a native nested button would have needed anyway: the
-  // clip underneath is its own click target (opens ClipDetail), and this control must act
-  // on its own click without also triggering that.
+  // `stopPropagation` does the half of the job a native nested button would have done for
+  // free (`ClipStatus` explains why this cannot be one): the clip underneath is its own
+  // click target (it opens ClipDetail), and this control must act on its own click without
+  // also triggering that.
   const onRegenerate = useCallback(
     (e: React.MouseEvent | React.KeyboardEvent) => {
       e.stopPropagation();
@@ -238,57 +303,140 @@ export function WaveformCanvas({
     [onRegenerate],
   );
 
-  if (analysisStatus === "pending" && (error?.kind === "cacheMissing" || error?.kind === "busy")) {
-    // D-062: not an offer, a status. Deliberately not a control — see the component note
-    // above for why the regenerate button would be the wrong thing to show here, and
-    // `.waveform__analysing` in styles.css for why it must stay click-through.
-    return <span className="waveform__analysing">{t.waveformAnalysing}</span>;
-  }
+  const status = ((): ClipWaveformStatus => {
+    if (analysisStatus === "pending" && (error?.kind === "cacheMissing" || error?.kind === "busy")) {
+      // D-062: not an offer, a status. Deliberately not a control — see the component note
+      // above for why the regenerate button would be the wrong thing to show here.
+      //
+      // V05-W1 (D-064) widened WHEN this is true rather than what it says: `sync/start`
+      // now marks every unanalysed file `pending`, because a run really is analysing them.
+      // The clip says «analyserer …» for the duration of the sync and never offers a
+      // rebuild it could not honour.
+      return { kind: "info", className: "waveform__analysing", label: t.waveformAnalysing, detail: null };
+    }
 
-  if (error?.kind === "cacheMissing" || error?.kind === "busy") {
-    // Both are answered by the same action — rebuild this one clip's analysis — so both
-    // get the same control, relabelled. "busy" (D-046: a sync or another maintenance pass
-    // is already running) is expected to clear on its own, and now says so in the user's
-    // own language instead of surfacing the engine's raw English refusal through
-    // `errUnknown` (finding 6); the raw detail moves to the `title`, where it stays
-    // available without shouting in a ~28 px slot that cannot wrap.
-    const label = regenerating
-      ? t.waveformRegenerating
-      : error.kind === "busy"
-        ? t.waveformBusy
-        : t.waveformRegenerate;
+    if (error?.kind === "cacheMissing" || error?.kind === "busy") {
+      // Both are answered by the same action — rebuild this one clip's analysis — so both
+      // get the same control, relabelled. "busy" (D-046: a sync or another maintenance
+      // pass is already running) is expected to clear on its own, and says so in the
+      // user's own language instead of surfacing the engine's raw English refusal through
+      // `errUnknown` (finding 6); the raw detail moves to the `title`, where it stays
+      // available without shouting in a slot that cannot wrap.
+      const label = regenerating
+        ? t.waveformRegenerating
+        : error.kind === "busy"
+          ? t.waveformBusy
+          : t.waveformRegenerate;
+      return {
+        kind: "control",
+        className: "waveform__regenerate",
+        label,
+        detail: error.text,
+        disabled: regenerating,
+        onClick: onRegenerate,
+        onKeyDown: onRegenerateKeyDown,
+      };
+    }
+
+    if (error) {
+      // `other` — an unexpected shell error. Deliberately NOT a control, unlike the two
+      // above: recovery is automatic (see the zoom-bucket effect above), so the honest
+      // thing is a status line the clip can still be clicked through, with the detail on
+      // hover. `.clip__chrome` is `pointer-events: none` for exactly that reason, which is
+      // now a property of the ROW rather than a promise each status has to keep on its own.
+      return {
+        kind: "info",
+        className: "waveform__status",
+        label: t.waveformUnavailable,
+        detail: error.text,
+      };
+    }
+
+    return { kind: "none" };
+  })();
+
+  return { canvasRef, status };
+}
+
+/**
+ * The clip's waveform layer: an absolutely-positioned slot filling the clip box, with the
+ * `<canvas>` inside it when there is something to draw.
+ *
+ * Underneath `.clip__chrome`, never mixed into it (D-065). The canvas positions itself in
+ * pixels from `barGeometry`, so it cannot be a flex item; the name and the status must be
+ * flex items, or they overlap. One layer each, and the stacking order says which is on top
+ * instead of two `z-index`es hoping.
+ */
+export function WaveformCanvas({
+  waveform,
+  title,
+}: {
+  waveform: ClipWaveform;
+  /** What the slot says on hover when the chrome had no room to say it in the box — the
+   *  clip's own `title` (its filename) otherwise, which is why this is usually absent. */
+  title?: string;
+}) {
+  return (
+    <span className="clip__waveform" data-waveform-slot="" title={title}>
+      {waveform.status.kind === "none" ? (
+        <canvas ref={waveform.canvasRef} className="waveform__canvas" aria-hidden="true" />
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * The status child of `.clip__chrome` — a control to press or a line to read, in the form
+ * the clip's width can afford (D-065).
+ *
+ * `mode` comes from `clipChrome()`, never from a measurement taken here: the name and the
+ * status are sized by one rule together, and a component that can only see one of them
+ * cannot apply it.
+ *
+ * The control is a `role="button"` SPAN, deliberately not a `<button>`: `Clip.tsx`'s own
+ * root IS a real `<button>` (it has to stay one — see its comment), and the HTML parser
+ * un-nests a `<button>` inside a `<button>` rather than just failing a validator.
+ * `stopPropagation` (in the handler) does the other half of the job a native nested button
+ * would have needed anyway.
+ */
+export function ClipStatus({
+  status,
+  mode,
+}: {
+  status: ClipWaveformStatus;
+  mode: ClipChrome["status"];
+}) {
+  if (status.kind === "none" || mode === "none") return null;
+
+  const className = `clip__status ${status.className}${mode === "icon" ? " clip__status--icon" : ""}`;
+
+  if (status.kind === "info") {
+    // Never a control and never a click target: there is nothing to press, and this stands
+    // exactly where the operator aims to click the clip itself.
     return (
-      <span
-        role="button"
-        tabIndex={regenerating ? -1 : 0}
-        aria-disabled={regenerating}
-        className="waveform__regenerate"
-        title={error.text}
-        onClick={onRegenerate}
-        onKeyDown={onRegenerateKeyDown}
-      >
-        {label}
+      <span className={className} title={status.detail ?? undefined}>
+        {status.label}
       </span>
     );
   }
 
-  if (error) {
-    // `other` — an unexpected shell error. Deliberately NOT a control, unlike the two
-    // above: `.clip__waveform` is centred and fills the whole clip, so a `role="button"`
-    // here would sit exactly where the user aims to click the clip itself and would
-    // swallow that click (`stopPropagation`), making a clip with a broken waveform
-    // impossible to select. The two cases above earn that cost — they are the only way to
-    // get the waveform back and the user went looking for them. This one does not:
-    // recovery is automatic (see the zoom-bucket effect above), so the honest thing here
-    // is a status line the clip can still be clicked through, with the detail on hover.
-    return (
-      <span className="waveform__status" title={error.text}>
-        {t.waveformUnavailable}
-      </span>
-    );
-  }
-
-  return <canvas ref={canvasRef} className="waveform__canvas" aria-hidden="true" />;
+  return (
+    <span
+      role="button"
+      tabIndex={status.disabled ? -1 : 0}
+      aria-disabled={status.disabled}
+      // The icon form is pixels-only rationing: the accessible name is the whole sentence
+      // either way, and a screen reader hears no difference between a 22 px clip and a
+      // 400 px one.
+      aria-label={mode === "icon" ? status.label : undefined}
+      className={className}
+      title={status.detail}
+      onClick={status.onClick}
+      onKeyDown={status.onKeyDown}
+    >
+      {mode === "icon" ? REGENERATE_GLYPH : status.label}
+    </span>
+  );
 }
 
 /**

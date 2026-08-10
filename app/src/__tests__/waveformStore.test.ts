@@ -11,9 +11,12 @@ import {
   classifyWaveformError,
   fetchWaveformLevel,
   fetchWaveformMeta,
+  getEpoch,
   invalidate,
+  invalidateAll,
   regenerateAnalysis,
   resetWaveformCachesForTest,
+  subscribeEpoch,
 } from "../timeline/waveformStore";
 
 const FILE_A = "/Users/e2e/shoot/CamA/C0001.MP4";
@@ -143,6 +146,68 @@ describe("invalidate", () => {
     const stillCachedB = await fetchWaveformLevel(FILE_B, 0);
     expect(Array.from(stillCachedB)).toEqual([9]);
     expect(invokeMock).toHaveBeenCalledTimes(4); // 3 initial + 1 re-fetch, no extra for B
+  });
+});
+
+// V05-W1, D-064. `invalidate()` forgets; the epoch is what makes a MOUNTED component go
+// back and look. Both halves are needed and only the first one existed — which is why the
+// waveforms a sync had just built never appeared: the memo was dropped and no clip ever
+// asked again.
+
+describe("invalidateAll and the epoch", () => {
+  it("forgets every file, not just one", async () => {
+    invokeMock.mockResolvedValueOnce(META);
+    invokeMock.mockResolvedValueOnce(META);
+    await fetchWaveformMeta(FILE_A);
+    await fetchWaveformMeta(FILE_B);
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+
+    invalidateAll();
+
+    invokeMock.mockResolvedValueOnce({ ...META, totalSamples: 7 });
+    invokeMock.mockResolvedValueOnce({ ...META, totalSamples: 8 });
+    expect((await fetchWaveformMeta(FILE_A)).totalSamples).toBe(7);
+    expect((await fetchWaveformMeta(FILE_B)).totalSamples).toBe(8);
+    expect(invokeMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("forgets the level bytes too — a run rewrote those as well", async () => {
+    invokeMock.mockResolvedValueOnce(new Uint8Array([1]).buffer);
+    await fetchWaveformLevel(FILE_A, 0);
+
+    invalidateAll();
+
+    invokeMock.mockResolvedValueOnce(new Uint8Array([100]).buffer);
+    expect(Array.from(await fetchWaveformLevel(FILE_A, 0))).toEqual([100]);
+  });
+
+  it("bumps the epoch once per call and tells every subscriber", () => {
+    const seen: number[] = [];
+    const unsubscribe = subscribeEpoch(() => seen.push(getEpoch()));
+    const before = getEpoch();
+
+    invalidateAll();
+    invalidateAll();
+
+    expect(getEpoch()).toBe(before + 2);
+    expect(seen).toEqual([before + 1, before + 2]);
+
+    // Unsubscribing really stops it — a virtualized timeline mounts and unmounts these
+    // constantly, and a leaked listener is a re-render of a clip that is not on screen.
+    unsubscribe();
+    invalidateAll();
+    expect(seen).toEqual([before + 1, before + 2]);
+  });
+
+  it("does not disturb the dedup within one epoch", () => {
+    // The epoch is a reason to look AGAIN, not a reason to look twice at once: two clips
+    // for the same file after an invalidation still share one in-flight invoke.
+    invokeMock.mockReturnValueOnce(new Promise(() => {}));
+    invalidateAll();
+
+    void fetchWaveformMeta(FILE_A);
+    void fetchWaveformMeta(FILE_A);
+    expect(invokeMock).toHaveBeenCalledTimes(1);
   });
 });
 
