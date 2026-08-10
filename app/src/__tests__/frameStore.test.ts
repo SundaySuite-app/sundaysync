@@ -142,6 +142,64 @@ describe("fetchFrame", () => {
     await expect(fetchFrame(FILE_A, 30)).resolves.toBeNull();
     expect(hasFrame(FILE_A)).toBe(false);
   });
+
+  // ── V05-W5 sweep finding ─────────────────────────────────────────────────────────────
+  //
+  // The seam between two layers that are each correct on their own. The SHELL supersedes:
+  // `video_frame` calls `install_thumbnail_cancel`, which cancels whatever token was there
+  // before, so starting a grab kills every grab before it. The STORE dedupes: an entry that
+  // has not settled is handed straight back to the next caller. Between them there is a
+  // window — from the moment a newer grab starts until the older one's `cancelled`
+  // rejection has crossed the IPC — in which the memo for the older file is a promise that
+  // is already dead, and `fetchFrame` hands it out as if it were live.
+  //
+  // What the operator does to hit it: click clip A, click clip B, click back on A. Over SMB
+  // a 4K frame takes ~4.4 s (D-069), so that window is seconds wide, not microseconds. The
+  // panel then renders the supersession's `null` as «ingen bilde» — permanently, because
+  // `PreviewFrame`'s effect is keyed on the file and will not run again — for a file with a
+  // perfectly good picture in it. Exactly the shape D-070's own header warns about, one
+  // layer further out than where it was guarded.
+  it("never hands back a grab the shell has already superseded", async () => {
+    let rejectA!: (e: unknown) => void;
+    invokeMock.mockImplementationOnce(() => new Promise((_res, rej) => (rejectA = rej)));
+    const first = fetchFrame(FILE_A, 30);
+
+    // The operator clicks B. This grab's own `install_thumbnail_cancel` has now killed A's
+    // token in the shell; A's rejection is merely in flight.
+    invokeMock.mockImplementationOnce(() => new Promise(() => {}));
+    void fetchFrame(FILE_B, 30);
+
+    // …and clicks straight back on A, before that rejection lands.
+    invokeMock.mockImplementationOnce(() => Promise.resolve(jpegBytes()));
+    const again = fetchFrame(FILE_A, 30);
+
+    rejectA("cancelled");
+    await expect(first).resolves.toBeNull(); // the dead one still answers its own caller
+    expect(await again).toBe(BITMAP); // …but the new caller gets a real grab
+    expect(peekFrame(FILE_A)).toBe(BITMAP);
+    expect(hasFrame(FILE_A)).toBe(true);
+  });
+
+  it("a superseded grab's late answer never overwrites the memo of the one that replaced it", async () => {
+    // The other order: the doomed grab happens to WIN its race with the cancel and comes
+    // back with real bytes after a newer grab for the same file has already settled. The
+    // newer answer is the one that describes the cache as it is now.
+    let resolveA!: (v: unknown) => void;
+    invokeMock.mockImplementationOnce(() => new Promise((res) => (resolveA = res)));
+    const doomed = fetchFrame(FILE_A, 30);
+
+    invokeMock.mockImplementationOnce(() => new Promise(() => {}));
+    void fetchFrame(FILE_B, 30);
+
+    const fresh = { width: 1, height: 1 } as unknown as ImageBitmap;
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(fresh));
+    invokeMock.mockImplementationOnce(() => Promise.resolve(jpegBytes()));
+    expect(await fetchFrame(FILE_A, 30)).toBe(fresh);
+
+    resolveA(jpegBytes());
+    await doomed;
+    expect(peekFrame(FILE_A)).toBe(fresh);
+  });
 });
 
 describe("hasFrame / peekFrame", () => {

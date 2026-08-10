@@ -52,8 +52,21 @@ fn require_ffmpeg() -> Option<Sidecar> {
     }
 }
 
+/// A clean scratch directory for one suite, scoped to this **process** (V05-W5).
+///
+/// See `stability.rs`'s `scratch` for the full reasoning. In short: the path used to be a
+/// fixed shared location, so two `cargo test` processes (the D-025 gate runs the suite in
+/// both PATH variants) wiped and rebuilt each other's fixtures under one another.
+///
+/// `measurements_are_reproducible` below builds the "quick-7" suite twice through this,
+/// which means the second pass runs against a **cold** cache — that part is deliberate and
+/// stays. Fixture emission was measured byte-identical across runs while chasing the flake,
+/// so re-emitting is not itself a source of variance.
 fn scratch(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join("sundaysync-accuracy").join(name);
+    let d = std::env::temp_dir()
+        .join("sundaysync-accuracy")
+        .join(format!("pid-{}", std::process::id()))
+        .join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d

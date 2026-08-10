@@ -102,24 +102,83 @@ Judging the final audio still means exporting and listening in Resolve.
   validator. The span is keyboard-operable (`tabIndex`, Enter/Space, `aria-disabled`), so
   the practical cost is the flagged rule, not a lost control. See D-054/D-055/D-057.
 
-## The pre-sync timeline shows camera clocks, not the answer (v0.4)
+## The pre-sync timeline shows camera clocks, not the answer (v0.4, extended in v0.5)
 
-Files land on the timeline the moment they are scanned, positioned by the `creation_time`
-their container carries. That is the only clock the app has before it has listened to
-anything, and it is frequently wrong: cameras drift, cameras are set to the wrong time zone,
-and a camera that lost its battery comes back reading 1970. Those clips are drawn in a muted
-grey rather than the placed green, and they say «foreløpig» in as many words — but the
-picture is still a *claim by the cards*, not by SundaySync, until the sync corrects it.
+Files land on the timeline the moment they are scanned, positioned by whatever clock the app
+can find without listening to anything. That is frequently wrong: cameras drift, cameras are
+set to the wrong time zone, and a camera that lost its battery comes back reading 1970. Those
+clips are drawn in a muted grey rather than the placed green, and they say «foreløpig» in as
+many words — but the picture is still a *claim by the cards*, not by SundaySync, until the
+sync corrects it.
 
-Two specific shapes of that:
+Since v0.5 (D-067) that clock is a **ladder of four kinds of evidence**, not one field, and
+the specific shapes are these:
 
-- **Files with no usable recording time sit at the start, together.** A field recorder's WAV
-  usually carries no timestamp at all, and a stamp that falls outside the drop's plausible
-  session window is discarded rather than believed (D-063). Both cases pile at zero, and the
-  note above the timeline counts them. They are *not* spread out in file order — that would
-  be drawing an order the app does not know.
+- **Everything below the top rung is an estimate, and only the top rung is a measurement.**
+  A container `creation_time` is the camera's own record of when it started rolling. A BWF's
+  split date + clock, a timestamp spelled into a filename, and an mtime minus the file's
+  duration are all *reconstructions*, and the app marks them as such — a dashed top edge on
+  the clip, «anslått fra …» in its spoken description, and its own count in the legend. On the
+  owner's real corpus 163 of 386 files are positioned this way. A pre-sync position below the
+  top rung is a starting guess for the eye, never a number to act on.
+- **An mtime does not survive every copy (R1).** The lowest rung reads the file's modification
+  time and subtracts its duration, which is exact when the file has been left alone — measured
+  to the second across 136 AVCHD `.MTS` files. It is *worthless* when the card was copied by
+  something that did not preserve mtimes: every file then carries the time of the copy, they
+  agree with each other perfectly, and nothing in the file says so. The session gate catches
+  the case where a real clock exists to contradict them — a block of copy-dated files lands
+  outside the day the timestamped cameras agree on and is demoted rather than placed. It
+  cannot catch a drop where the copy-dated files are the *only* evidence there is: they are
+  then self-consistent, admitted, and laid out in a plausible-looking order that is a fact
+  about the copy rather than about the shoot. **The sync is the answer to this**, and it
+  always was: nothing downstream of the correlator depends on the ladder.
+- **Files nothing can time are laid out in filename order (v0.5, D-068).** They used to pile
+  at zero; they now sit end to end on their own device's row, after that device's last placed
+  clip. The app does not know when they started; it does know what followed what. The strip
+  is an *order*, not a schedule — the gaps between those files are not real, and their end is
+  not a claim about when the device stopped recording. Measured on the real corpus, the strips
+  add **0.7 %** to the timeline's total length.
 - **The hop after a sync is the correction, and it can be large.** A ten-minute jump means
   the card's clock was ten minutes out, not that anything went wrong.
+
+## Waveforms are not drawn below 24 px, and are not read either (v0.5)
+
+A clip narrower than 24 px carries no waveform: no `<canvas>`, no draw, and no
+`waveform_meta` read behind it (D-072). `barGeometry` draws one bar per device pixel, so a
+3 px box is three bars — a smudge, not a shape. On the owner's 386-file corpus at fit zoom the
+median clip is 3 px and only 24 of 386 clear the threshold, so **most of a real drop shows no
+waveforms until you zoom in**, which is the intended behaviour and not a failure to load. They
+appear as soon as a clip is wide enough to hold one.
+
+## "Fit" does not fit a session longer than about eleven hours (v0.3, measured in v0.5)
+
+`MIN_PX_PER_MS` is 2 × 10⁻⁵, so the widest view the timeline will ever adopt shows about
+**11.6 hours** in an 840 px lane column. The owner's real wedding spans **15.5 hours** end to
+end, and at Fit the last quarter of it is off the right edge — measured in this round: 346 of
+386 clips mounted, 40 (25 Fuji, 15 AVCHD) past the edge until the operator pans. Pressing Fit
+again changes nothing, because Fit is already at the floor.
+
+Nothing is lost — the scrollbar row is there and panning reaches them — but "Fit" quietly
+stops meaning "everything on screen" past that length, with nothing saying so.
+
+Deliberately **not** changed in v0.5. The zoom floor is a v0.3 constant that governs every
+timeline, and at the current floor one device pixel is already ~50 s of audio against a
+coarsest pyramid bin of ~41 s (`peaks.rs`, 13 levels) — lowering it puts the waveform layer in
+a regime it was not designed for. That is not a change to make at the last gate before a
+release, in a stage that cannot drive the native window to look at the result. It is the
+highest-value item this round found for the next one.
+
+## A stale pre-analysis tick can survive one drop into the next (v0.5)
+
+`prewarm:progress` carries no sequence number of its own — the backend emits a plain
+`ProgressEvent` — so the reducer can only gate it on the phase. Drop a second folder while the
+first is still pre-analysing and the abandoned pass is cancelled, but it goes on emitting
+until it notices; between the new scan landing and that moment, one stale tick can move the
+«analyserer N av M» line to the old drop's counts.
+
+Cosmetic, self-correcting within one file, and deliberately **not** patched with a heuristic
+(matching on `total`, say) that would look like a rule while being a guess. The honest fix is
+a sequence on the backend event, and it is not worth an IPC change at a release gate.
 
 ## The background analysis starts before you have finished choosing (v0.4)
 

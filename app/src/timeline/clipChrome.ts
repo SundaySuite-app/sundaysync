@@ -41,6 +41,30 @@ export interface ClipChrome {
 /** Below this a filename is a smear, not a name — an initial and a half. */
 export const NAME_MIN_PX = 30;
 
+/**
+ * Below this a waveform is not a waveform (V05-W5, D-072).
+ *
+ * `barGeometry` draws one bar per device pixel, so a 3–10 px box — which is what every clip
+ * of a 386-file drop is at its fitted zoom — is three to ten bars: a smudge whose shape
+ * carries no information about the audio. Everything behind it is therefore waste, and it
+ * is the *expensive* kind: one `waveform_meta` IPC per clip in a single commit (the storm
+ * D-072 is written for), a `<canvas>` element and a backing store per clip, and a draw pass
+ * per pan frame.
+ *
+ * It sits just under {@link NAME_MIN_PX} on purpose, and the composition is the argument: a
+ * box too small to say which file it is has nothing to gain from a picture of its audio
+ * either. 24 rather than 30 because the two rules answer different questions — a name needs
+ * room for glyphs, a waveform needs enough bars to have a shape — and pinning them to one
+ * another would make one of the two a coincidence.
+ */
+export const MIN_WAVEFORM_PX = 24;
+
+/** Is this clip wide enough for its waveform to be worth reading, drawing — or asking the
+ *  shell about at all? See {@link MIN_WAVEFORM_PX}. */
+export function waveformFits(widthPx: number): boolean {
+  return Number.isFinite(widthPx) && widthPx >= MIN_WAVEFORM_PX;
+}
+
 /** A square-ish tap target with a glyph in it. The floor for a control that must remain
  *  aimable; below it there is nothing honest to draw. */
 export const STATUS_ICON_MIN_PX = 22;

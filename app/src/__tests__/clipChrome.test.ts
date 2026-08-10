@@ -5,8 +5,10 @@ import {
   NAME_AND_TEXT_MIN_PX,
   NAME_MIN_PX,
   NAME_PLUS_STATUS_GAP_PX,
+  MIN_WAVEFORM_PX,
   STATUS_ICON_MIN_PX,
   STATUS_TEXT_MIN_PX,
+  waveformFits,
 } from "../timeline/clipChrome";
 
 // V05-W1, D-065. Every threshold from BOTH sides: a width rule whose boundaries are only
@@ -119,5 +121,46 @@ describe("widths that are not measurements", () => {
 
   it("treats a negative width as no room", () => {
     expect(clipChrome(-40, "control")).toEqual({ name: "none", status: "none" });
+  });
+});
+
+// V05-W5, D-072. The waveform's own floor, and the composition with the name's.
+
+describe("waveformFits", () => {
+  it("is exact at the threshold, from both sides", () => {
+    expect(waveformFits(MIN_WAVEFORM_PX - 0.01)).toBe(false);
+    expect(waveformFits(MIN_WAVEFORM_PX)).toBe(true);
+    expect(waveformFits(MIN_WAVEFORM_PX + 1)).toBe(true);
+  });
+
+  it("refuses the widths a 386-file drop actually draws at its fitted zoom", () => {
+    // Measured: 302 placements across three hours in a ~1150 px viewport put every clip
+    // between 3 and 10 px. Not one of them is a waveform.
+    for (const w of [3, 5, 9.2, 10, 23]) expect(waveformFits(w)).toBe(false);
+  });
+
+  it("treats a width that is not a measurement as no room, like clipChrome does", () => {
+    expect(waveformFits(Number.NaN)).toBe(false);
+    expect(waveformFits(Number.POSITIVE_INFINITY)).toBe(false);
+    expect(waveformFits(-40)).toBe(false);
+  });
+
+  it("sits under the name's floor: a box too small for a name is too small for a waveform", () => {
+    // The composition D-072 claims, asserted rather than described. Anything wide enough
+    // for a filename is wide enough for a waveform, and there is a band in between where a
+    // clip draws bars and no name — which is deliberate, not an accident of two constants.
+    expect(MIN_WAVEFORM_PX).toBeLessThan(NAME_MIN_PX);
+    for (let w = 0; w <= 60; w += 0.5) {
+      if (clipChrome(w, "none").name !== "none") expect(waveformFits(w)).toBe(true);
+    }
+  });
+
+  it("a clip that can still show its rebuild control may have no waveform behind it", () => {
+    // 22 px (STATUS_ICON_MIN_PX) < 24 px: the control is the last thing to go (D-065) and
+    // the waveform is not, so the two floors do NOT coincide. Stated here so a later reader
+    // does not "tidy" them into one number.
+    expect(STATUS_ICON_MIN_PX).toBeLessThan(MIN_WAVEFORM_PX);
+    expect(clipChrome(STATUS_ICON_MIN_PX, "control").status).toBe("icon");
+    expect(waveformFits(STATUS_ICON_MIN_PX)).toBe(false);
   });
 });

@@ -22,6 +22,8 @@ fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir()
         .join("sundaysync-tests")
         .join("evict-it")
+        // Per-process (V05-W5): see `stability.rs`'s `scratch` for why the pid is here.
+        .join(format!("pid-{}", std::process::id()))
         .join(name);
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();

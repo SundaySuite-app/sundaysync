@@ -42,22 +42,171 @@ function cacheDir(): string | null {
   return getSettings().cacheDir;
 }
 
+/* ── The meta queue (V05-W5, D-072) ─────────────────────────────────────────────────────
+ *
+ * Dedup per file was the ONLY thing standing between the timeline and the shell. On the
+ * owner's 386-file drop every clip mounts a `WaveformCanvas` whose mount effect calls
+ * `fetchWaveformMeta` — 386 distinct files, so the memo deduped nothing, and 386 `invoke`s
+ * went out in one commit. Each of them crosses the IPC boundary, takes a Tokio task and a
+ * cache-dir stat, and (before the sync has run) comes back `cache_missing`.
+ *
+ * The fix is a queue with a concurrency cap, drained from an idle callback. Three
+ * properties, and each one is there for its own reason:
+ *
+ *   - **the cap** bounds what is outstanding at once, so the shell sees a trickle instead
+ *     of a flood however many clips are on screen;
+ *   - **the idle scheduling** puts the first batch behind the commit that mounted the
+ *     clips, so the boxes, the ruler and the panel paint before anything is asked of the
+ *     backend — a drop's first frame is not owed a waveform;
+ *   - **the drop** (see {@link releaseWaveformMeta}) means a request whose canvas unmounted
+ *     while it was still waiting in line is never sent at all. Panning across a card dump
+ *     recycles the virtualization window many times a second, and a queue that faithfully
+ *     issues every request it was ever handed is a slower storm, not a smaller one.
+ *
+ * The dedup is unchanged and still sits in front of all of it: `metaCache` is consulted
+ * first, and a queued entry IS its file's `metaCache` entry.
+ */
+
+/** How many `waveform_meta` reads may be outstanding at once. Six is the same order as the
+ *  engine's own decode parallelism and comfortably below any plausible IPC saturation; the
+ *  number that matters is that it is a constant rather than "however many clips there
+ *  are". */
+export const META_CONCURRENCY = 6;
+
+/** Upper bound on how long the drain may sit in the idle queue. `requestIdleCallback` with
+ *  no timeout can be starved indefinitely by a busy main thread — which is exactly the
+ *  state a freshly-dropped card dump is in — and a waveform that never arrives is worse
+ *  than one that arrives a frame late. */
+const IDLE_TIMEOUT_MS = 150;
+
+interface QueuedMeta {
+  file: string;
+  /** How many live consumers are waiting for this. Dropped when it reaches zero. */
+  waiters: number;
+  promise: Promise<WaveformMeta>;
+  resolve: (meta: WaveformMeta) => void;
+  reject: (error: unknown) => void;
+}
+
+/** Waiting to be issued, in the order they were asked for. */
+const metaQueue: QueuedMeta[] = [];
+/** The same entries by file, so a release can find one in O(1). An entry leaves this map
+ *  the moment it is issued: from then on it can no longer be dropped, only awaited. */
+const queuedMeta = new Map<string, QueuedMeta>();
+let metaInFlight = 0;
+let drainScheduled = false;
+
+/** The rejection a dropped request settles with. Never reaches a screen: the only way an
+ *  entry is dropped is that every consumer of it has already cancelled. */
+const DROPPED = "cancelled: waveform meta request dropped before it was issued";
+
+function scheduleDrain(): void {
+  if (drainScheduled) return;
+  drainScheduled = true;
+  const run = () => {
+    drainScheduled = false;
+    drainMetaQueue();
+  };
+  const idle = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void })
+    .requestIdleCallback;
+  if (typeof idle === "function") idle(run, { timeout: IDLE_TIMEOUT_MS });
+  else setTimeout(run, 0);
+}
+
+function drainMetaQueue(): void {
+  while (metaInFlight < META_CONCURRENCY && metaQueue.length > 0) {
+    const entry = metaQueue.shift()!;
+    queuedMeta.delete(entry.file);
+    metaInFlight += 1;
+    // `Promise.resolve` + `try` around the call, not around the await: a synchronous throw
+    // out of `invoke` (a shell that is not there at all) would otherwise leave
+    // `metaInFlight` incremented forever and stall every later drain — the queue's own
+    // version of a leaked permit.
+    let request: Promise<WaveformMeta>;
+    try {
+      request = Promise.resolve(
+        invoke<WaveformMeta>("waveform_meta", { file: entry.file, cacheDir: cacheDir() }),
+      );
+    } catch (error) {
+      metaInFlight -= 1;
+      entry.reject(error);
+      continue;
+    }
+    request.then(
+      (meta) => {
+        metaInFlight -= 1;
+        entry.resolve(meta);
+        scheduleDrain();
+      },
+      (error: unknown) => {
+        metaInFlight -= 1;
+        entry.reject(error);
+        scheduleDrain();
+      },
+    );
+  }
+}
+
 /**
  * The shape of a clip's waveform (bin counts per level, no bytes yet). Cached and
  * deduped: two `Clip`s for the same file (should not happen, but the virtualization
  * window remounting one while a fetch is still in flight very much can) share one
  * in-flight `invoke`.
+ *
+ * Since V05-W5 (D-072) the `invoke` does not go out here — the request joins the queue
+ * above and is issued when the queue reaches it. Every caller must pair this with exactly
+ * one {@link releaseWaveformMeta} when it stops caring about the answer.
  */
 export function fetchWaveformMeta(file: string): Promise<WaveformMeta> {
   const cached = metaCache.get(file);
-  if (cached) return cached;
-  const promise = invoke<WaveformMeta>("waveform_meta", { file, cacheDir: cacheDir() });
+  if (cached) {
+    // Still in line: one more consumer is waiting for it, so it takes one more release to
+    // drop it. Already issued: there is nothing left to drop and nothing to count.
+    const queued = queuedMeta.get(file);
+    if (queued) queued.waiters += 1;
+    return cached;
+  }
+
+  let resolve!: (meta: WaveformMeta) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<WaveformMeta>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
   promise.catch(() => {
     // A rejected fetch is not a fact worth remembering forever — see the file header.
     if (metaCache.get(file) === promise) metaCache.delete(file);
   });
   metaCache.set(file, promise);
+  const entry: QueuedMeta = { file, waiters: 1, promise, resolve, reject };
+  queuedMeta.set(file, entry);
+  metaQueue.push(entry);
+  scheduleDrain();
   return promise;
+}
+
+/**
+ * One consumer has stopped waiting for `file`'s meta.
+ *
+ * When the last one goes and the request has not been issued yet, it is removed from the
+ * queue and never sent. That is the half of D-072 a cap alone does not buy: a pan across a
+ * 386-file drop mounts and unmounts hundreds of canvases a second, and every one of them
+ * would otherwise leave a request behind for a clip that is no longer on screen.
+ *
+ * A request already in flight is left alone — `invoke` has no cancellation
+ * (`app/src/invoke.ts`), so there is nothing to stop, and its answer is worth memoising for
+ * whoever pans back.
+ */
+export function releaseWaveformMeta(file: string): void {
+  const entry = queuedMeta.get(file);
+  if (!entry) return;
+  entry.waiters -= 1;
+  if (entry.waiters > 0) return;
+  queuedMeta.delete(file);
+  const index = metaQueue.indexOf(entry);
+  if (index >= 0) metaQueue.splice(index, 1);
+  if (metaCache.get(file) === entry.promise) metaCache.delete(file);
+  entry.reject(DROPPED);
 }
 
 /**
@@ -85,6 +234,12 @@ export function fetchWaveformLevel(file: string, level: number): Promise<Uint8Ar
  * back to the shell rather than replay the memo.
  */
 export function invalidate(file: string): void {
+  // Deliberately does NOT touch the queue (V05-W5, D-072). A queued entry is somebody's
+  // outstanding promise, and rejecting it here would raise an error on a clip whose only
+  // crime was to be mid-read when its own regenerate landed — `runRegenerate` calls this
+  // one line before `loadMeta()`, which cancels first and releases the entry properly. The
+  // queued read simply answers whoever is still holding it; the next `fetchWaveformMeta`
+  // queues a fresh one because the memo is gone.
   metaCache.delete(file);
   const prefix = `${file}\0`;
   for (const key of levelCache.keys()) {
@@ -180,6 +335,18 @@ function rawMessage(e: unknown): string {
 export function resetWaveformCachesForTest(): void {
   metaCache.clear();
   levelCache.clear();
+  // The queue is module state too, and a test that left three entries in line would hand
+  // them to the NEXT test's mock (V05-W5, D-072). The in-flight counter goes with them:
+  // leaving it at 6 would stall every later drain.
+  metaQueue.length = 0;
+  queuedMeta.clear();
+  metaInFlight = 0;
+}
+
+/** Test hook: how many `waveform_meta` requests are waiting in line, and how many are
+ *  outstanding. The queue's whole purpose is a number, so the number is observable. */
+export function metaQueueStateForTest(): { queued: number; inFlight: number } {
+  return { queued: metaQueue.length, inFlight: metaInFlight };
 }
 
 /**

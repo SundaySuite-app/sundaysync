@@ -438,3 +438,118 @@ describe("sourceSpans and clocks that cannot be true", () => {
     expect(layout.timeSource.get("/a/C1.MP4")).toBe("container");
   });
 });
+
+// ── V05-W5 sweep, R2: what the sequential strip costs the content span ─────────────────
+//
+// W3 shipped the per-device strip after measuring +0.7 % on the owner's real corpus, where
+// every device has *most* of its files placed and only a handful trailing. That is the
+// benign shape. This block measures the OTHER one — a device with nothing placed at all and
+// a long total — so the number is on record before it is ever a surprise, and so a
+// regression that made it far worse would fail rather than merely look odd on screen.
+
+describe("a device with EVERYTHING unplaced and a long total (R2)", () => {
+  const SESSION_MS = 4 * 3600_000; // the wedding itself: four hours of timed cameras
+  const MIXER_FILES = 11;
+  const MIXER_EACH_MS = 26 * 60_000; // ~26 min per file, as the owner's mixer writes them
+  const MIXER_TOTAL_MS = MIXER_FILES * MIXER_EACH_MS; // 4 h 46 min — LONGER than the shoot
+
+  function drop() {
+    const files: FileEntry[] = [
+      file({
+        file: "/FUJI/A.MOV",
+        device: "fuji",
+        creation_time: "2026-07-25T10:00:00Z",
+        duration_seconds: 600,
+      }),
+      file({
+        file: "/FUJI/B.MOV",
+        device: "fuji",
+        creation_time: new Date(Date.parse("2026-07-25T10:00:00Z") + SESSION_MS - 600_000).toISOString(),
+        duration_seconds: 600,
+      }),
+    ];
+    for (let i = 0; i < MIXER_FILES; i += 1) {
+      files.push(
+        file({
+          file: `/MIKSER/take${String(i).padStart(2, "0")}.wav`,
+          device: "mikser",
+          duration_seconds: MIXER_EACH_MS / 1000,
+        }),
+      );
+    }
+    return sourceSpans(manifest([device("fuji"), device("mikser", "audio")], files), {});
+  }
+
+  it("the strip starts at zero and runs its own length — nothing is invented", () => {
+    const spans = spansOf(drop());
+    expect(spans.get("/MIKSER/take00.wav")).toEqual({
+      file: "/MIKSER/take00.wav",
+      startMs: 0,
+      endMs: MIXER_EACH_MS,
+    });
+    expect(spans.get("/MIKSER/take10.wav")!.endMs).toBe(MIXER_TOTAL_MS);
+  });
+
+  it("MEASURED: the content span becomes the strip's length, +19 % over the session", () => {
+    const layout = drop();
+    const spanMs = contentBounds(layout.tracks.flatMap((t) => t.spans)).spanMs;
+    expect(spanMs).toBe(MIXER_TOTAL_MS);
+    const stretch = spanMs / SESSION_MS - 1;
+    expect(stretch).toBeGreaterThan(0.15);
+    expect(stretch).toBeLessThan(0.25);
+    // The bound that actually matters, and the reason this is not being "fixed": the strip
+    // can only ever be as long as the material it is made of, so the worst case is the sum
+    // of one device's own durations — never the 1.8 × 10¹² ms a dead camera clock used to
+    // produce (D-071's opening paragraph). Fit zoom stays usable by construction.
+    expect(spanMs).toBeLessThanOrEqual(SESSION_MS + MIXER_TOTAL_MS);
+  });
+
+  it("the fit zoom that follows is still a working zoom, not a clamped one", () => {
+    const layout = drop();
+    const { spanMs } = contentBounds(layout.tracks.flatMap((t) => t.spans));
+    // 1150 px of viewport over the stretched span: the mixer strip costs roughly a fifth of
+    // the horizontal resolution, and every clip is still drawn at a real width.
+    const pxPerMs = (1150 - 24) / spanMs;
+    expect(MIXER_EACH_MS * pxPerMs).toBeGreaterThan(24); // wider than MIN_WAVEFORM_PX
+    expect(600_000 * pxPerMs).toBeGreaterThan(24); // …and so is a ten-minute camera clip
+  });
+
+  it("still one lane, however long the strip is — end to end cannot overlap", () => {
+    const mixer = drop().tracks.find((t) => t.device.id === "mikser")!;
+    expect(stackClips(mixer.spans)).toHaveLength(1);
+  });
+
+  it("a device with SOME clips placed anchors its strip on them, not on zero", () => {
+    // The benign shape W3 measured, kept beside the pathological one so the difference is
+    // visible: the strip is an extension of the device's own row, and only what hangs off
+    // the END of the last placed clip can stretch the drop at all.
+    const layout = sourceSpans(
+      manifest(
+        [device("fuji")],
+        [
+          file({
+            file: "/FUJI/A.MOV",
+            device: "fuji",
+            creation_time: "2026-07-25T10:00:00Z",
+            duration_seconds: 600,
+          }),
+          file({
+            file: "/FUJI/B.MOV",
+            device: "fuji",
+            creation_time: "2026-07-25T11:00:00Z",
+            duration_seconds: 600,
+          }),
+          file({ file: "/FUJI/C.MOV", device: "fuji", duration_seconds: 300 }),
+        ],
+      ),
+      {},
+    );
+    const spans = spansOf(layout);
+    expect(spans.get("/FUJI/C.MOV")).toEqual({
+      file: "/FUJI/C.MOV",
+      startMs: 4200_000, // where B ended (1 h + 10 min)
+      endMs: 4500_000,
+    });
+    expect(contentBounds(layout.tracks.flatMap((t) => t.spans)).spanMs).toBe(4500_000);
+  });
+});

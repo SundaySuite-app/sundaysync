@@ -3427,3 +3427,120 @@ Nothing is written to disk, nothing is written back into `SyncResult`, and clips
 not drag. The spawn is bounded on both sides by W4a: two permits so a preview can never
 starve a running sync's decoders, and no claim on the D-046 activity slot, so a sync never
 blanks the picture either.
+
+## D-072 — V05-W5: the waveform reads are queued, capped, and not taken at all below 24 px
+
+**The report:** the owner's 386-file wedding, again, and the same commit that produced
+D-064's rebuild-button storm. Every clip on the timeline mounts a `WaveformCanvas`, and its
+mount effect called `fetchWaveformMeta` for its own file. The store dedupes **per file**, and
+386 clips are 386 distinct files — so the memo matched nothing and **~386 `waveform_meta`
+`invoke`s crossed the IPC boundary in one commit**. No queue, no cap, no deferral. Before a
+sync has run, every one of them rejects `cache_missing`.
+
+Three separate things were wrong, and only the first is the one that was reported.
+
+### 1. The queue: a cap of six, drained from an idle callback
+
+`fetchWaveformMeta` no longer calls `invoke`. It puts the request in a queue and asks for an
+idle callback; `drainMetaQueue` issues at most `META_CONCURRENCY = 6` at a time and refills
+as each one settles. Three properties, each there for its own reason:
+
+- **the cap** bounds what is outstanding regardless of how many clips are on screen, so the
+  shell sees a trickle instead of a flood;
+- **the idle scheduling** puts the first batch behind the commit that mounted the clips —
+  the boxes, the ruler and the panel paint first. A drop's first frame is not owed a
+  waveform. `requestIdleCallback` is given a 150 ms timeout, because a freshly-dropped card
+  dump is exactly the busy main thread that starves an untimed idle callback, and a waveform
+  that never arrives is worse than one that arrives a frame late;
+- **the drop**: `releaseWaveformMeta(file)` decrements a waiter count, and a request whose
+  last consumer went away **before it was issued is removed from the queue and never sent**.
+  A pan across a card dump mounts and unmounts hundreds of canvases a second, and a queue
+  that faithfully issues everything it was ever handed is a slower storm, not a smaller one.
+  A request already in flight is left alone: `invoke` has no cancellation, so there is
+  nothing to stop, and its answer is worth memoising for whoever pans back.
+
+The dedup is unchanged and still sits in front of all of it — a queued entry **is** its
+file's `metaCache` entry, which is what keeps "one read per file" and "one queue slot per
+file" from becoming two bookkeeping systems that can disagree.
+
+`invalidate(file)` deliberately does not touch the queue. It is called one line before
+`loadMeta()` in the regenerate path, and `loadMeta` cancels-then-releases; rejecting the
+entry from inside `invalidate` would raise an error on a clip whose only crime was to be
+mid-read when its own rebuild landed.
+
+### 2. No read at all below `MIN_WAVEFORM_PX = 24`
+
+The cap alone would still have asked 386 times, just six at a time. The deeper answer is
+that **at the fitted zoom of a 386-file drop there is nothing to draw**. Measured on the real
+corpus (`/Volumes/Delt Fossland/LINNEA&SIGURD/`, read-only): 386 files, a content span of
+15.5 hours, and at fit zoom the clip widths are **min 3 px, median 3 px, 90th percentile
+10.6 px, max 225 px — 24 of 386 clips are 24 px or wider**. `barGeometry` draws one bar per
+device pixel, so a 3 px box is three bars: a smudge that carries no information about the
+audio. The IPC, the `<canvas>` element, its backing store and its per-pan draw are all waste,
+and they are the *expensive* kind.
+
+So `useClipWaveform` is gated on the clip's drawn width, and the gate covers all four costs —
+the fetch, the `<canvas>`, the draw, and the standing error a narrow clip would otherwise
+still be showing a rebuild control for.
+
+**Measured, e2e, on a 400-clip fixture at fit zoom: `waveform_meta` is called 0 times.**
+With the threshold disabled the same fixture reaches 312 calls within 1.5 s and climbs to
+400. Panning across the whole timeline adds no more.
+
+The gate is a **derived boolean** in the effect's dependency list, not the width and not the
+zoom bucket. A boolean only changes when the threshold is *crossed*, so the effect re-runs
+exactly once per crossing and never on the hundreds of `view` updates a pan produces. The
+zoom bucket that drives the `other`-error recovery is too coarse for this: 24 px can be
+crossed well inside one power-of-two bucket, and a clip that widened past the threshold
+without changing bucket would sit there empty.
+
+24 rather than 30 (`NAME_MIN_PX`) is deliberate and the composition is asserted rather than
+described (`clipChrome.test.ts`): anything wide enough for a filename is wide enough for a
+waveform, and there is a band between 24 and 30 where a clip draws bars and no name. The two
+rules answer different questions — a name needs room for glyphs, a waveform needs enough bars
+to have a shape — and pinning them to each other would make one of the two a coincidence. It
+also sits *above* `STATUS_ICON_MIN_PX` (22): the rebuild control is the last thing to go
+(D-065) and the waveform is not, so a 23 px clip can still be pressed and has no picture
+behind it.
+
+### 3. The `Clip` memo is not the lever — measured, and stated so nobody re-derives it
+
+The obvious next move is to blame `memo(Clip)` for the cost of a pan. **It was measured and
+the argument does not hold.**
+
+- A pan changes `view.scrollMs`, and `left` is `msToX(span.startMs, view)`. On a 400-clip
+  drop, across one wheel notch, **0 of the mounted clips kept their previous `left`** — every
+  single one had genuinely new props, so the memo can skip none of them.
+- `Track` renders only `visibleClips(row, visStart, visEnd)`, so a clip outside the window is
+  not mounted at all. There is no second population for the memo to help either.
+
+The assertion is in `e2e/timeline-scale.spec.ts` («a pan moves EVERY mounted clip») and the
+conclusion is written on the component. The `memo` **stays**, because it is still right for
+the props that do *not* move — a `prewarm:file` event for one file, a `t` that never changes
+— which is exactly why `analysisStatus` and `timeSource` are passed as scalars rather than as
+the maps they come from. What it is not is a fix for the cost of a pan. That cost is the
+number of mounted clips, and the levers for it are the virtualization window and the width
+threshold above.
+
+### Deferred on purpose: `.LRF` as a faster preview source
+
+W4a measured a DJI `.LRF` proxy decoding a preview frame in **0.5 s against 4.4 s** for its
+816 MB 4K original, and W2 already knows which `.LRF` belongs to which clip (that pairing is
+how `sidecar` skipping works, D-066). Using the proxy for the *picture* is therefore a real,
+nearly-free 9× on the slowest preview in the drop.
+
+It is **not built**, and the reason is that it is a correctness question wearing a performance
+costume: a proxy is a different file, at a different resolution, and — on some DJI firmware —
+with a different frame timebase, so "the frame 10 % into the proxy" is not provably the frame
+10 % into the original. A preview that is silently of a *different moment* is worse than a
+slow one, and answering that needs a measurement against real DJI files that this stage has
+no budget for. Recorded here so the next round starts from the measurement rather than
+rediscovering it.
+
+### What the e2e actually holds
+
+A 400-clip drop, at the zoom the operator lands on: a bounded call count in the first commit
+(0, asserted `<= 12`), a bounded peak concurrency (`<= 6`), no second storm across 120 wheel
+events of panning, zero canvases and zero rebuild controls. Zoomed in far enough for
+waveforms to mean something: reads **do** happen — the threshold defers work, it does not
+refuse it forever — and the peak is still capped at six.

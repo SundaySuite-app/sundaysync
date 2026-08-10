@@ -40,6 +40,21 @@ const LABEL_KEEP_PX = 36;
  * reconstructed start with no sync in sight. `onSelect` therefore takes the path, not the
  * placement, and the invariant the note above actually argues for is untouched: the element
  * is a `<button>` in both phases and the tag never swaps.
+ *
+ * ## The `memo` is not the lever, and this note exists so nobody reaches for it again
+ *
+ * **Measured in V05-W5 (D-072), on a 400-clip drop:** a pan changes `left` on **every
+ * single mounted clip** — 0 of them kept their previous value across one wheel notch — and
+ * `Track` renders only `visibleClips`, so a clip that is off screen is not mounted at all.
+ * There is no population the memo can skip: the visible ones all have genuinely new props,
+ * and the invisible ones do not exist. The assertion is in
+ * `e2e/timeline-scale.spec.ts` («a pan moves EVERY mounted clip»).
+ *
+ * The `memo` stays because it is still right for the props that DON'T move — `prewarm:file`
+ * arriving for one file, a `t` that never changes — which is exactly why `analysisStatus`
+ * and `timeSource` are passed as scalars rather than as the maps they come from. What it is
+ * not is a fix for the cost of a pan; that cost is the number of mounted clips, and the
+ * lever for it is the virtualization window and D-072's width threshold.
  */
 export const Clip = memo(function Clip({
   t,
@@ -98,7 +113,7 @@ export const Clip = memo(function Clip({
   // The waveform's own state, and what it wants to say about itself. Held here rather than
   // inside the canvas component because the answer competes for pixels with the filename
   // (D-065), and the two have to be laid out by whoever can see both.
-  const waveform = useClipWaveform({ t, file: span.file, span, view, analysisStatus });
+  const waveform = useClipWaveform({ t, file: span.file, span, view, widthPx: width, analysisStatus });
   const status = waveform.status;
   const chrome = clipChrome(width, status.kind);
   // Too narrow to say it in the box: the sentence moves to the slot's tooltip, next to the

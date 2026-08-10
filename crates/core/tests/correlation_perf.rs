@@ -45,6 +45,8 @@ fn require_ffmpeg() -> Option<Sidecar> {
 fn scratch(name: &str) -> PathBuf {
     let d = std::env::temp_dir()
         .join("sundaysync-correlation-perf")
+        // Per-process (V05-W5): see `stability.rs`'s `scratch` for why the pid is here.
+        .join(format!("pid-{}", std::process::id()))
         .join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();

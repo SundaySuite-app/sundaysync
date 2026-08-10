@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Strings } from "../../i18n";
-import type { ClipChrome, ClipStatusKind } from "../../timeline/clipChrome";
+import { waveformFits, type ClipChrome, type ClipStatusKind } from "../../timeline/clipChrome";
 import type { TimelineView } from "../../timeline/geometry";
 import {
   barAmplitudes,
@@ -15,6 +15,7 @@ import {
   getEpoch,
   invalidate,
   regenerateAnalysis,
+  releaseWaveformMeta,
   subscribeEpoch,
   type WaveformError,
 } from "../../timeline/waveformStore";
@@ -66,6 +67,10 @@ export type ClipWaveformStatus =
 export interface ClipWaveform {
   canvasRef: React.RefObject<HTMLCanvasElement>;
   status: ClipWaveformStatus;
+  /** Is this clip wide enough for a waveform to mean anything (`MIN_WAVEFORM_PX`, D-072)?
+   *  False suppresses the `<canvas>` as well as the read behind it — the element, its
+   *  backing store and its per-pan draw are all part of the same waste. */
+  showCanvas: boolean;
 }
 
 /** The discriminant IS `clipChrome`'s `ClipStatusKind` — stated once, so the width rule and
@@ -116,12 +121,16 @@ export function useClipWaveform({
   file,
   span,
   view,
+  widthPx,
   analysisStatus = null,
 }: {
   t: Strings;
   file: string;
   span: ClipExtent;
   view: TimelineView;
+  /** The clip's drawn width, as `Clip.tsx` computed it. The waveform's whole pipeline —
+   *  the IPC, the canvas, the draw — is gated on it since V05-W5 (D-072). */
+  widthPx: number;
   /** Where the background pass is with this file (D-062); null when it is not tracking it. */
   analysisStatus?: PrewarmStatus | null;
 }): ClipWaveform {
@@ -148,7 +157,13 @@ export function useClipWaveform({
       },
     );
     const cancel = () => {
+      // Idempotent: this is reachable twice (an effect cleanup holding the handle, and the
+      // unmount effect reading `cancelMetaRef`), and a second release would decrement
+      // another consumer's waiter count — dropping a queued request somebody is still
+      // waiting for (V05-W5, D-072).
+      if (cancelled) return;
       cancelled = true;
+      releaseWaveformMeta(file);
       if (cancelMetaRef.current === cancel) cancelMetaRef.current = null;
     };
     cancelMetaRef.current = cancel;
@@ -166,15 +181,35 @@ export function useClipWaveform({
   // nothing anywhere else.
   const epoch = useSyncExternalStore(subscribeEpoch, getEpoch);
 
+  /**
+   * Is this clip wide enough to be worth a waveform at all (V05-W5, D-072)?
+   *
+   * A BOOLEAN in the dependency list, not the width and not the zoom bucket, and that is
+   * the whole mechanism: a derived boolean only changes when the threshold is *crossed*, so
+   * the effect below re-runs exactly once per crossing and never on the hundreds of `view`
+   * updates a pan produces. The zoom bucket underneath the `other`-error recovery is too
+   * coarse for this — 24 px can be crossed well inside one power-of-two bucket, and a clip
+   * that widened past the threshold without changing bucket would sit there empty.
+   */
+  const fits = waveformFits(widthPx);
+
   // A fresh file (the virtualization window recycling this DOM node onto a different
   // clip) is a fresh everything — old bytes for a different clip must never flash up
   // while the new fetch is in flight. A fresh epoch is the same event for every file at
-  // once, so it re-runs the same way.
+  // once, so it re-runs the same way. And a clip that has just grown past
+  // `MIN_WAVEFORM_PX` is a clip that now has something to show.
   useEffect(() => {
     void epoch; // read as a *reason to look again*, not as a value this effect uses
     setMeta(null);
+    if (!fits) {
+      // Below the threshold the clip claims nothing about its waveform. The error is
+      // cleared with the meta because a standing `cacheMissing` would otherwise still be
+      // offering a rebuild control in a 23 px box, from a read taken at a wider zoom.
+      setError(null);
+      return;
+    }
     return loadMeta();
-  }, [loadMeta, epoch]);
+  }, [loadMeta, epoch, fits]);
 
   // Unmount: whatever load is outstanding, whoever started it.
   useEffect(() => () => cancelMetaRef.current?.(), []);
@@ -193,8 +228,11 @@ export function useClipWaveform({
   useEffect(() => {
     const arrived = lastStatus.current === "pending" && analysisStatus === "ready";
     lastStatus.current = analysisStatus;
-    if (arrived) loadMeta();
-  }, [analysisStatus, loadMeta]);
+    // …unless there is nowhere to draw it (D-072). A 3 px clip's analysis landing is not a
+    // reason to spend an IPC; the read happens when the operator zooms in far enough to
+    // have asked for it.
+    if (arrived && fits) loadMeta();
+  }, [analysisStatus, loadMeta, fits]);
 
   // Draw: rAF-throttled against `view` (pan/zoom), `span` (a placement override moving
   // this clip), and `meta`. Level bytes are fetched lazily, only once meta is in and only
@@ -356,7 +394,7 @@ export function useClipWaveform({
     return { kind: "none" };
   })();
 
-  return { canvasRef, status };
+  return { canvasRef, status, showCanvas: fits };
 }
 
 /**
@@ -379,7 +417,7 @@ export function WaveformCanvas({
 }) {
   return (
     <span className="clip__waveform" data-waveform-slot="" title={title}>
-      {waveform.status.kind === "none" ? (
+      {waveform.showCanvas && waveform.status.kind === "none" ? (
         <canvas ref={waveform.canvasRef} className="waveform__canvas" aria-hidden="true" />
       ) : null}
     </span>

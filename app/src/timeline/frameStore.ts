@@ -68,8 +68,17 @@ const frames = new Map<string, Promise<ImageBitmap | null>>();
  *  reporting work that is not happening. */
 const settled = new Map<string, ImageBitmap | null>();
 
-/** Files whose grab is still running — what {@link cancelFrame} is allowed to interrupt. */
-const inFlight = new Set<string>();
+/**
+ * Files whose grab is still running, and WHICH grab owns each one.
+ *
+ * A `Set<string>` until V05-W5, and the promise is the half that was missing: every write
+ * to the bookkeeping below is guarded by "is this still my entry?", the same identity check
+ * the shell's own `clear_thumbnail_cancel_if_ours` performs on the cancel slot (F3). Two
+ * grabs for one file can genuinely overlap — the operator clicks away and straight back —
+ * and without the guard the older one's late settlement cleared the newer one's marker and
+ * suppressed its memoised answer.
+ */
+const inFlight = new Map<string, Promise<ImageBitmap | null>>();
 
 /** Has this file already been answered? Then {@link fetchFrame} costs no IPC. */
 export function hasFrame(file: string): boolean {
@@ -97,7 +106,30 @@ export function fetchFrame(file: string, durationSeconds: number): Promise<Image
   const cached = frames.get(file);
   if (cached) return cached;
 
-  inFlight.add(file);
+  // ── V05-W5 sweep: everything already running is dead, so stop memoising it ───────────
+  //
+  // The shell supersedes on its own: `video_frame` opens with `install_thumbnail_cancel`,
+  // which cancels whatever token was installed before it (`lib.rs`). Starting the grab
+  // below therefore kills every grab that is currently in flight — that is a fact about
+  // the backend, not a possibility.
+  //
+  // The memo has to say the same thing at the same moment. Until this, a doomed entry sat
+  // in `frames` until its own `cancelled` rejection had crossed the IPC, and `fetchFrame`
+  // handed it straight back to anyone who asked for that file in the meantime — a window
+  // seconds wide over SMB (D-069: 4.4 s for a 4K frame). The caller then got the
+  // supersession's `null`, which says nothing about the file, and `PreviewPanel` rendered
+  // it as «ingen bilde» for good: its effect is keyed on the file and never runs again.
+  // Click A, click B, click back on A — and the picture was gone for the session.
+  //
+  // Forgetting them here rather than when their rejections arrive closes the window
+  // entirely. Their promises still settle and still answer whoever was already awaiting
+  // them; they simply stop being the app's answer ABOUT those files.
+  for (const doomed of [...inFlight.keys()]) {
+    if (doomed === file) continue;
+    frames.delete(doomed);
+    inFlight.delete(doomed);
+  }
+
   const grab = (async (): Promise<ImageBitmap | null> => {
     const bytes = await invoke<ArrayBuffer>("video_frame", {
       file,
@@ -113,19 +145,28 @@ export function fetchFrame(file: string, durationSeconds: number): Promise<Image
       // A supersession says nothing about the file — forget it so the next selection looks
       // again. Everything else (a timeout, an unreadable file, a blown ceiling) is a fact
       // about this file, and stands.
-      if (isSupersession(e)) frames.delete(file);
+      //
+      // Guarded by identity since V05-W5: by the time a doomed grab's rejection arrives,
+      // a NEWER grab for the same file may already own the entry, and deleting it here
+      // would throw away a perfectly good in-flight (or already settled) answer on the
+      // strength of an older grab's death.
+      if (isSupersession(e) && frames.get(file) === grab) frames.delete(file);
       return null;
     })
     .then((value) => {
-      inFlight.delete(file);
-      // Only remember what is still the memo's own answer: a superseded grab deleted its
-      // entry above, and writing its `null` here would put the very fact back that deleting
-      // the entry was meant to forget.
+      // Same guard, both writes. A grab that finishes late must not clear the marker of
+      // the grab that replaced it — `cancelFramesExcept` reads this Map to decide what is
+      // worth stopping, and a cleared marker means a running ffmpeg nobody can end.
+      if (inFlight.get(file) === grab) inFlight.delete(file);
+      // Only remember what is still the memo's own answer: a superseded grab loses its
+      // entry (above, or to the newer grab that replaced it), and writing its `null` here
+      // would put back the very fact that forgetting the entry was meant to forget.
       if (frames.get(file) === grab) settled.set(file, value);
       return value;
     });
 
   frames.set(file, grab);
+  inFlight.set(file, grab);
   return grab;
 }
 
@@ -157,7 +198,7 @@ export function fetchFrame(file: string, durationSeconds: number): Promise<Image
  * backend, in the browser tier) is not a condition anything on screen should react to.
  */
 export function cancelFramesExcept(file: string | null): void {
-  for (const other of inFlight) {
+  for (const other of inFlight.keys()) {
     if (other === file) continue;
     void invoke("cancel_thumbnail").catch(() => {});
     return;

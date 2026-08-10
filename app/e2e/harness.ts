@@ -396,6 +396,91 @@ export function videoFrameNoPicture(): Fixtures {
  * can assert that a superseded grab was actually stopped — `invoke` has no cancellation of
  * its own, so that call is the only thing that ends a running ffmpeg.
  */
+/**
+ * `video_frame` + `cancel_thumbnail` with the SHELL's own supersession semantics (V05-W5).
+ *
+ * The plain `videoFrameOk()` fixture answers immediately and never cancels anything, which
+ * makes every preview spec written against it a test of the uninterrupted path only. The
+ * real command does two things this stands in for, both in `lib.rs`:
+ *
+ *   1. `install_thumbnail_cancel()` at the top of `video_frame` — **starting a grab cancels
+ *      the one before it**, whether or not anybody asked;
+ *   2. `cancel_thumbnail` fires the installed token, and a cancelled run comes back as the
+ *      ordinary `cancelled` rejection.
+ *
+ * Both are modelled here, so a spec can put the app through the sequence that actually
+ * happens on a card of 386 clips — click A, click B, click back on A before A's cancelled
+ * rejection has crossed the IPC — instead of one where nothing is ever interrupted.
+ */
+export function videoFrameCancellable(): Fixtures {
+  return {
+    video_frame: fn(`(args) => {
+      const w = window;
+      w.__E2E_FRAME_CALLS__ = (w.__E2E_FRAME_CALLS__ || []).concat(args.file);
+      // The shell supersedes on its own: a new grab cancels the previous token. The
+      // rejection then has to cross the IPC, which takes real time — modelled as a lag,
+      // because the window between "the shell has killed this grab" and "the renderer knows"
+      // is exactly where V05-W5's supersession bug lived.
+      if (w.__E2E_FRAME_PENDING__) {
+        const previous = w.__E2E_FRAME_PENDING__;
+        w.__E2E_FRAME_PENDING__ = null;
+        setTimeout(() => previous.settleRejected("cancelled"), w.__E2E_FRAME_LAG_MS__ ?? 250);
+      }
+      return new Promise((resolve, reject) => {
+        w.__E2E_FRAME_PENDING__ = {
+          file: args.file,
+          settleRejected: reject,
+          reject: (why) => { w.__E2E_FRAME_PENDING__ = null; reject(why); },
+          resolve: () => {
+            w.__E2E_FRAME_PENDING__ = null;
+            const c = document.createElement("canvas");
+            c.width = 16; c.height = 9;
+            const ctx = c.getContext("2d");
+            ctx.fillStyle = "#ebb84b";
+            ctx.fillRect(0, 0, 16, 9);
+            const b64 = c.toDataURL("image/jpeg").split(",")[1];
+            const bin = atob(b64);
+            const out = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+            resolve(out.buffer);
+          },
+        };
+      });
+    }`),
+    cancel_thumbnail: fn(`() => {
+      const w = window;
+      w.__E2E_CANCEL_THUMBNAIL__ = (w.__E2E_CANCEL_THUMBNAIL__ || 0) + 1;
+      // Firing the token does not end the run: ffmpeg has to be killed and the command has
+      // to return before the renderer hears anything. Same lag as the supersession path,
+      // and for the same reason — that gap is where the bug lived.
+      if (w.__E2E_FRAME_PENDING__) {
+        const previous = w.__E2E_FRAME_PENDING__;
+        w.__E2E_FRAME_PENDING__ = null;
+        setTimeout(() => previous.settleRejected("cancelled"), w.__E2E_FRAME_LAG_MS__ ?? 250);
+      }
+      return undefined;
+    }`),
+  };
+}
+
+/** Wait until `videoFrameCancellable()` has a grab outstanding, then settle it with a real
+ *  JPEG — the frame the operator was waiting for. */
+export async function resolveFrame(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => !!(window as unknown as Record<string, any>).__E2E_FRAME_PENDING__,
+  );
+  await page.evaluate(() =>
+    (window as unknown as Record<string, any>).__E2E_FRAME_PENDING__.resolve(),
+  );
+}
+
+/** Every file `video_frame` was asked for, in order. */
+export async function frameCalls(page: Page): Promise<string[]> {
+  return page.evaluate(
+    () => ((window as unknown as Record<string, unknown>).__E2E_FRAME_CALLS__ as string[]) ?? [],
+  );
+}
+
 export function cancelThumbnailSpy(): Fixtures {
   return {
     cancel_thumbnail: fn(`() => {
