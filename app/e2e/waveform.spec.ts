@@ -16,12 +16,13 @@ const FILE = "/Users/e2e/shoot/CamA/C0001.MP4";
 // count always agree.
 const TOTAL_SAMPLES = 12_000 * 3550;
 
-/** The same 9-level, doubling-bin ladder shape `peaks.rs` builds, as a JS source
- *  fragment — inlined into every `fn()` fixture below rather than shared through an
- *  import, because fixtures cross the `addInitScript` boundary as plain source text
- *  (see harness.ts's header) and cannot `import` anything. */
+/** The same 13-level, doubling-bin ladder shape `peaks.rs` builds (10 ms → 40.96 s; the
+ *  bound is the renderer's, see D-056), as a JS source fragment — inlined into every
+ *  `fn()` fixture below rather than shared through an import, because fixtures cross the
+ *  `addInitScript` boundary as plain source text (see harness.ts's header) and cannot
+ *  `import` anything. */
 const LEVELS_EXPR =
-  `Array.from({ length: 9 }, (_, i) => { ` +
+  `Array.from({ length: 13 }, (_, i) => { ` +
   `const binSamples = 120 * Math.pow(2, i); ` +
   `return { binSamples, bins: Math.ceil(${TOTAL_SAMPLES} / binSamples) }; })`;
 
@@ -48,6 +49,20 @@ function waveformMetaCacheMissingThenOk(): unknown {
 /** Never has a cache entry — every call rejects. */
 function waveformMetaAlwaysCacheMissing(): unknown {
   return fn(`(args) => Promise.reject("cache_missing:" + args.file)`);
+}
+
+/** Fails the FIRST call with something that is neither a cache miss nor a busy refusal
+ *  (an IO blip, a sweep that raced the read), then answers normally — the transient the
+ *  `other` branch used to turn into a permanent, unclearable dead end (finding 7). */
+function waveformMetaTransientThenOk(): unknown {
+  return fn(`(() => {
+    let calls = 0;
+    return (args) => {
+      calls += 1;
+      if (calls === 1) return Promise.reject("io: Resource temporarily unavailable");
+      return { totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} };
+    };
+  })()`);
 }
 
 /** Deterministic `[peak, rms]` `u8` bytes, sized to whichever level was actually asked
@@ -181,14 +196,70 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     await expect(regenerate).toBeVisible();
     await regenerate.click();
 
-    // Relabelled with the (generically-mapped) busy detail, not silently stuck or blank.
-    const busyLabel = en.errUnknown("busy: sync in progress");
+    // Relabelled with the app's OWN busy copy — not the engine's raw English refusal
+    // dressed up as a crash by `errUnknown` (finding 6). The raw detail is still there,
+    // in the title, for anyone who needs it.
+    const busyLabel = en.waveformBusy;
     const busy = clipBox(page).getByRole("button", { name: busyLabel });
     await expect(busy).toBeVisible();
     await expect(busy).not.toHaveAttribute("aria-disabled", "true");
+    await expect(busy).toHaveAttribute("title", /busy: sync in progress/);
+    await expect(clipBox(page).getByText(en.errUnknown("busy: sync in progress"))).toHaveCount(0);
 
     // Retrying is the same action, still available — not a dead end.
     await busy.click();
     await expect(clipBox(page).getByRole("button", { name: busyLabel })).toBeVisible();
+  });
+
+  test("a transient error is not a dead end — a zoom change brings the waveform back", async ({
+    page,
+  }) => {
+    // Finding 7: the draw effect is gated on `!error` and only a fresh `loadMeta` cleared
+    // it — reachable on a file change or a regenerate, neither of which this branch
+    // offers. One transient failure therefore killed that clip's waveform for the rest of
+    // the session. Recovery is now automatic on a material zoom change.
+    await reachResult(page, {
+      waveform_meta: waveformMetaTransientThenOk(),
+      waveform_level: waveformLevelOk(),
+      ...regenerateSpyOk(),
+    });
+
+    const status = clipBox(page).locator(".waveform__status");
+    await expect(status).toHaveText(en.waveformUnavailable);
+    // The raw engine detail is kept, on hover — never swallowed (§7.5).
+    await expect(status).toHaveAttribute("title", /Resource temporarily unavailable/);
+    await expect(clipBox(page).locator(".clip__waveform canvas")).toHaveCount(0);
+
+    // Zoom until the quantized zoom bucket changes (BUTTON_FACTOR is 1.4, so at most a
+    // few clicks) — no reload, no re-sync.
+    const zoomIn = page.getByRole("button", { name: en.zoomIn });
+    for (let i = 0; i < 4; i++) {
+      await zoomIn.click();
+      if ((await clipBox(page).locator(".clip__waveform canvas").count()) > 0) break;
+    }
+    await expect(clipBox(page).locator(".clip__waveform canvas")).toBeVisible();
+    await expect(status).toHaveCount(0);
+
+    // Recovery re-READS; it must never have re-extracted the source media behind the
+    // user's back.
+    expect(
+      await page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_REGENERATE__),
+    ).toBeUndefined();
+  });
+
+  test("an unreadable clip can still be selected — the status line is not a click target", async ({
+    page,
+  }) => {
+    // The reason the `other` branch is a plain span and not a `role="button"`:
+    // `.clip__waveform` is centred and fills the clip, so a control here would sit
+    // exactly where the user aims to click the clip and would swallow that click.
+    await reachResult(page, {
+      waveform_meta: fn(`(args) => Promise.reject("io: Resource temporarily unavailable")`),
+      waveform_level: waveformLevelOk(),
+    });
+
+    await expect(clipBox(page).locator(".waveform__status")).toBeVisible();
+    await clipBox(page).click();
+    await expect(page.getByRole("dialog", { name: "C0001.MP4" })).toBeVisible();
   });
 });

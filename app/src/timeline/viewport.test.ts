@@ -102,6 +102,49 @@ describe("scrollbarMetrics", () => {
     const m = scrollbarMetrics(view({ pxPerMs: 1 }), 36_000_000);
     expect(m.thumbFrac).toBeGreaterThanOrEqual(0.02);
   });
+
+  it("both ends of travel are exact: 0 at the start, flush right at the end", () => {
+    const span = 4_000_000;
+    const v = view();
+    const visibleMs = v.widthPx / v.pxPerMs;
+    const start = scrollbarMetrics({ ...v, scrollMs: 0 }, span);
+    const end = scrollbarMetrics({ ...v, scrollMs: span - visibleMs }, span);
+    expect(start.offsetFrac).toBe(0);
+    expect(end.offsetFrac + end.thumbFrac).toBeCloseTo(1, 12);
+  });
+
+  it("the thumb keeps moving over the last stretch at deep zoom (finding 10)", () => {
+    // 3 hours at maximum zoom: the visible window is 0.00005 of the content, so
+    // `thumbFrac` is inflated to its 0.02 floor. Expressing the offset as a fraction of
+    // the CONTENT then runs past the end of the thumb's travel, and the old
+    // `Math.min(1 - thumbFrac, …)` clamp pinned it there — measured at 0.9800 for both
+    // 99 % and 100 % of maximum scroll, i.e. a thumb frozen across the last ~4 minutes
+    // while the timeline underneath kept scrolling.
+    const span = 3 * 3_600_000;
+    const v = view({ pxPerMs: MAX_PX_PER_MS, widthPx: 1000 });
+    const maxScroll = span - v.widthPx / v.pxPerMs;
+
+    const at99 = scrollbarMetrics({ ...v, scrollMs: maxScroll * 0.99 }, span);
+    const atEnd = scrollbarMetrics({ ...v, scrollMs: maxScroll }, span);
+    expect(at99.thumbFrac).toBe(0.02);
+    expect(atEnd.offsetFrac).toBeGreaterThan(at99.offsetFrac + 0.005);
+    expect(atEnd.offsetFrac).toBeCloseTo(0.98, 12);
+
+    // ...and it is strictly monotonic the whole way, never stalling anywhere.
+    let previous = -1;
+    for (let i = 0; i <= 100; i++) {
+      const m = scrollbarMetrics({ ...v, scrollMs: (maxScroll * i) / 100 }, span);
+      expect(m.offsetFrac).toBeGreaterThan(previous);
+      expect(m.offsetFrac + m.thumbFrac).toBeLessThanOrEqual(1 + 1e-12);
+      previous = m.offsetFrac;
+    }
+  });
+
+  it("pins to zero rather than dividing by it when everything already fits", () => {
+    const m = scrollbarMetrics(view({ scrollMs: 999 }), 500_000);
+    expect(m.thumbFrac).toBe(1);
+    expect(m.offsetFrac).toBe(0);
+  });
 });
 
 describe("scrollbarFracToScrollMs", () => {

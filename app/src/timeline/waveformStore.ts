@@ -107,9 +107,11 @@ export type WaveformErrorKind = "cacheMissing" | "busy" | "other";
 
 export interface WaveformError {
   kind: WaveformErrorKind;
-  /** User-facing text — `errors.ts`'s real `cacheMissing` copy for that kind, otherwise
-   *  the same generic mapping every other engine error in the app gets (§7.5: the raw
-   *  detail is kept, never swallowed into a bare "something went wrong"). */
+  /** The detail, for the control's `title` — `errors.ts`'s real `cacheMissing` copy for
+   *  that kind, the engine's raw refusal for `busy` (see below), otherwise the same
+   *  generic mapping every other engine error in the app gets (§7.5: the raw detail is
+   *  kept, never swallowed into a bare "something went wrong"). NOT the visible label:
+   *  `WaveformCanvas` chooses that from `kind`. */
   text: string;
   /** Only set for `cacheMissing` — the source file the regenerate button should name. */
   path?: string;
@@ -139,9 +141,12 @@ export function resetWaveformCachesForTest(): void {
  *
  * - `cacheMissing` — regenerable, gets the button (`errors.ts`'s real copy for it).
  * - `busy` — a `regenerateAnalysis` call that lost the D-046 race; retryable once the
- *   sync/maintenance pass in front of it finishes. Reuses `mapEngineError`'s existing
- *   generic mapping rather than inventing a second translation table for one prefix —
- *   the raw "busy: sync in progress" detail surfacing inline is itself the useful part.
+ *   sync/maintenance pass in front of it finishes. It gets its OWN copy (`waveformBusy`):
+ *   `mapEngineError` has no busy branch, so routing it through there fell all the way to
+ *   `errUnknown`, and a Norwegian UI showed «Noe gikk galt: busy: sync in progress» —
+ *   English engine text, crash-shaped wording for an expected self-clearing condition,
+ *   and far too long for a slot that is ~28 px tall and cannot wrap. The raw detail is
+ *   not lost: `WaveformCanvas` puts `text` in the control's `title`.
  * - `other` — anything else (a genuinely unreadable source file, an unexpected shell
  *   error): shown as unavailable, no regenerate button offered for a problem regenerating
  *   cannot fix.
@@ -155,7 +160,7 @@ export function classifyWaveformError(e: unknown, t: Strings): WaveformError {
     }
   }
   if (raw.includes(BUSY_PREFIX)) {
-    return { kind: "busy", text: mapEngineError(raw, t).text };
+    return { kind: "busy", text: raw };
   }
   return { kind: "other", text: mapEngineError(raw, t).text };
 }

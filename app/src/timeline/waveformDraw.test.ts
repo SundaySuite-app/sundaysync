@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { TimelineView } from "./geometry";
-import { ANALYSIS_RATE_HZ, barGeometry, binDurationMs, pickLevel, type Level } from "./waveformDraw";
+import { MIN_PX_PER_MS, type TimelineView } from "./geometry";
+import {
+  ANALYSIS_RATE_HZ,
+  barAmplitudes,
+  barGeometry,
+  binDurationMs,
+  MAX_BINS_PER_PX,
+  pickLevel,
+  type Level,
+} from "./waveformDraw";
 
-/** The real ladder shape: 9 levels, 120 samples doubling each step (peaks.rs). */
-function ladder(levelCount = 9, totalSamples = 12_000 * 3600): { levels: Level[]; totalSamples: number } {
+/** The real ladder shape: 13 levels, 120 samples doubling each step (peaks.rs). */
+function ladder(levelCount = 13, totalSamples = 12_000 * 3600): { levels: Level[]; totalSamples: number } {
   const levels: Level[] = [];
   let binSamples = 120;
   for (let i = 0; i < levelCount; i++) {
@@ -38,10 +46,19 @@ describe("pickLevel — zoom extremes", () => {
   });
 
   it("returns the coarsest level at the widest zoom-out", () => {
-    // 0.00002 px/ms (MIN_PX_PER_MS): even the coarsest 2.56s bin is a fraction of a
-    // pixel wide, so every level is still over the 2 bins/px ceiling — the best
-    // available is the last one, not a crash.
-    expect(pickLevel(levels, 0.00002)).toBe(levels.length - 1);
+    // The zoom floor. A level ladder that ran out before here would be clamped to its
+    // last entry rather than crashing — that fallback is what this pins.
+    expect(pickLevel(levels.slice(0, 9), MIN_PX_PER_MS)).toBe(8);
+  });
+
+  it("the shipped ladder actually reaches the zoom floor, so the fallback never fires", () => {
+    // Finding 11: with only 9 levels (the old 2.56s bound) the coarsest bin is 0.05 px
+    // wide at MIN_PX_PER_MS — ~19.5 bins per pixel, i.e. a 4000-element `xs` array per
+    // clip per frame to paint a couple of hundred pixels. `peaks.rs` now runs the ladder
+    // to 40.96 s, which clears the ceiling at the floor zoom with room to spare.
+    const chosen = pickLevel(levels, MIN_PX_PER_MS);
+    const pxPerBin = binDurationMs(levels[chosen]) * MIN_PX_PER_MS;
+    expect(1 / pxPerBin).toBeLessThanOrEqual(MAX_BINS_PER_PX + 1e-9);
   });
 
   it("picks a level in between at a middling zoom, never finer than the ceiling allows", () => {
@@ -134,9 +151,78 @@ describe("barGeometry — intersection clipping", () => {
   });
 });
 
+describe("barGeometry — anchored to real time, never stretched to the box", () => {
+  // The clip box says 3600.000 s (ffprobe's container duration); the analysis cache
+  // decoded 3599.200 s (AAC priming, an edit list, audio that ended before the video —
+  // `probe.rs` and `extract.rs` measure different things and routinely disagree). The
+  // drawn position of a bin must come from the fixed analysis rate alone.
+  const CONTAINER_MS = 3_600_000;
+  const DECODED_MS = 3_599_200;
+  const meta = ladder(13, Math.round((ANALYSIS_RATE_HZ * DECODED_MS) / 1000));
+  const span = { startMs: 0, endMs: CONTAINER_MS };
+
+  it("bin k sits at span.startMs + k · binDurationMs, whatever totalSamples says", () => {
+    const view: TimelineView = { pxPerMs: 0.001, scrollMs: 0, widthPx: 800 };
+    const geom = barGeometry(span, meta, view, 1)!;
+    expect(geom).not.toBeNull();
+    expect(geom.stride).toBe(1);
+    const binMs = binDurationMs(meta.levels[geom.level]);
+
+    for (let i = 0; i < geom.xs.length; i += 37) {
+      const k = geom.binStart + i;
+      const expectedMsInClip = k * binMs;
+      // xs is canvas-local device px; at dpr 1 and leftCssPx 0 that is clip-local CSS px.
+      expect(geom.xs[i]).toBeCloseTo(expectedMsInClip * view.pxPerMs - geom.leftCssPx, 9);
+    }
+  });
+
+  it("the same bin lands in the same place no matter how wrong totalSamples is", () => {
+    const view: TimelineView = { pxPerMs: 0.001, scrollMs: 0, widthPx: 800 };
+    const honest = barGeometry(span, meta, view, 1)!;
+    // Half the samples, double the samples — neither may move a single bar.
+    for (const factor of [0.5, 2, 1000]) {
+      const skewed = {
+        ...meta,
+        totalSamples: Math.round(meta.totalSamples * factor),
+      };
+      const g = barGeometry(span, skewed, view, 1)!;
+      expect(g.level).toBe(honest.level);
+      expect(g.binStart).toBe(honest.binStart);
+      expect(g.xs.length).toBe(honest.xs.length);
+      for (let i = 0; i < honest.xs.length; i++) {
+        expect(g.xs[i]).toBeCloseTo(honest.xs[i], 9);
+      }
+    }
+  });
+
+  it("an analysis shorter than the container leaves the tail unpainted, not stretched", () => {
+    // Zoomed onto the clip's last two seconds. The decoded audio stops 800 ms before the
+    // box does, so the last 800 ms of the box has no bins — and the bins that DO exist
+    // must still be at their true times, not smeared out to reach the right edge.
+    const view: TimelineView = {
+      pxPerMs: 0.5,
+      scrollMs: CONTAINER_MS - 2_000,
+      widthPx: 1000,
+    };
+    const geom = barGeometry(span, meta, view, 1)!;
+    expect(geom).not.toBeNull();
+    const binMs = binDurationMs(meta.levels[geom.level]);
+    const lastBin = geom.binStart + (geom.binCount - 1) * geom.stride;
+    const lastBinEndMs = (lastBin + 1) * binMs;
+    // Painting stops at the decoded end (within one bin), well short of the box.
+    expect(lastBinEndMs).toBeLessThanOrEqual(DECODED_MS + binMs + 1e-6);
+    expect(lastBinEndMs).toBeLessThan(CONTAINER_MS - 700);
+    // ...and the last bar's x is its own true time, not the box's right edge.
+    expect(geom.xs[geom.binCount - 1]).toBeCloseTo(
+      lastBin * binMs * view.pxPerMs - geom.leftCssPx,
+      6,
+    );
+  });
+});
+
 describe("barGeometry — DPR", () => {
   const totalSamples = ANALYSIS_RATE_HZ * 60; // a 1-minute clip
-  const meta = ladder(9, totalSamples);
+  const meta = ladder(13, totalSamples);
   const span = { startMs: 0, endMs: 60_000 };
   const view: TimelineView = { pxPerMs: 0.5, scrollMs: 0, widthPx: 400 };
 
@@ -164,6 +250,152 @@ describe("barGeometry — DPR", () => {
         expect(g.xs[i] - g.xs[i - 1]).toBeCloseTo(g.barWidthPx, 3);
       }
     }
+  });
+
+  it("bars never overlap at dpr 1, at every zoom the timeline allows", () => {
+    // Finding 2: `barWidthPx` used to be floored at 1 device px while `xs` spacing was
+    // not, so any level whose bins were under one device pixel wide had every bar
+    // overpainting its neighbour — up to 100 % at dpr 1 (spacing 0.5, width 1.0). The old
+    // fixture's single zoom never engaged the floor, so the assertion above passed
+    // vacuously. This sweeps the whole zoom range at BOTH device pixel ratios.
+    const oneHour = ladder(13, ANALYSIS_RATE_HZ * 3600);
+    const hourSpan = { startMs: 0, endMs: 3_600_000 };
+    for (const dpr of [1, 2]) {
+      for (const pxPerMs of [
+        MIN_PX_PER_MS, 0.00005, 0.000125, 0.0005, 0.00125, 0.0125, 0.05, 0.2, 0.75, 2,
+      ]) {
+        const g = barGeometry(hourSpan, oneHour, { pxPerMs, scrollMs: 0, widthPx: 900 }, dpr);
+        if (!g) continue;
+        const label = `dpr ${dpr}, pxPerMs ${pxPerMs}`;
+        expect(g.barWidthPx, label).toBeGreaterThan(0);
+        for (let i = 1; i < g.xs.length; i++) {
+          expect(g.xs[i] - g.xs[i - 1], label).toBeCloseTo(g.barWidthPx, 6);
+        }
+      }
+    }
+  });
+
+  it("level selection is device-pixel-relative, so dpr 2 may pick a finer level", () => {
+    // The mechanism behind the fix: MAX_BINS_PER_PX is a claim about DEVICE pixels, and a
+    // retina panel really can resolve twice the detail at the same zoom.
+    const oneHour = ladder(13, ANALYSIS_RATE_HZ * 3600);
+    const hourSpan = { startMs: 0, endMs: 3_600_000 };
+    const v: TimelineView = { pxPerMs: 0.0125, scrollMs: 0, widthPx: 900 };
+    const g1 = barGeometry(hourSpan, oneHour, v, 1)!;
+    const g2 = barGeometry(hourSpan, oneHour, v, 2)!;
+    expect(g2.level).toBe(g1.level - 1);
+    // And the chosen level's bins are at least half a device pixel wide in both cases —
+    // the guarantee that makes the defensive width floor unreachable.
+    for (const [g, dpr] of [
+      [g1, 1],
+      [g2, 2],
+    ] as const) {
+      const binDevicePx = binDurationMs(oneHour.levels[g.level]) * v.pxPerMs * dpr;
+      expect(binDevicePx).toBeGreaterThanOrEqual(1 / MAX_BINS_PER_PX - 1e-9);
+    }
+  });
+});
+
+describe("barGeometry — the strided fallback bounds xs (finding 11)", () => {
+  it("a 3-hour clip at its fit zoom emits at most ~2 bars per device pixel", () => {
+    const threeHoursMs = 3 * 3_600_000;
+    const meta = ladder(13, ANALYSIS_RATE_HZ * 3 * 3600);
+    const span = { startMs: 0, endMs: threeHoursMs };
+    const widthPx = 1200;
+    // Fit: the whole thing across the window (viewport.ts `fitPxPerMs`, padding ignored).
+    const view: TimelineView = { pxPerMs: widthPx / threeHoursMs, scrollMs: 0, widthPx };
+
+    for (const dpr of [1, 2]) {
+      const g = barGeometry(span, meta, view, dpr)!;
+      expect(g).not.toBeNull();
+      // Concrete ceiling: 2 bars per device pixel of the DRAWN width, plus one for the
+      // partial bar at each edge. At dpr 1 that is 2402, not the 4219 the 9-level ladder
+      // produced; at dpr 2, 4802.
+      const ceiling = MAX_BINS_PER_PX * g.widthCssPx * dpr + 2;
+      expect(g.xs.length).toBeLessThanOrEqual(ceiling);
+      expect(g.xs.length).toBe(g.binCount);
+    }
+  });
+
+  it("clamps xs even against a pathologically short ladder", () => {
+    // Belt and braces: if `peaks.rs` ever stopped its ladder early again, the renderer
+    // strides rather than emitting one entry per bin.
+    const threeHoursMs = 3 * 3_600_000;
+    const stunted = ladder(3, ANALYSIS_RATE_HZ * 3 * 3600); // coarsest bin: 40 ms
+    const span = { startMs: 0, endMs: threeHoursMs };
+    const widthPx = 1200;
+    const view: TimelineView = { pxPerMs: widthPx / threeHoursMs, scrollMs: 0, widthPx };
+
+    const g = barGeometry(span, stunted, view, 1)!;
+    expect(g.stride).toBeGreaterThan(1);
+    expect(g.xs.length).toBeLessThanOrEqual(MAX_BINS_PER_PX * g.widthCssPx + 2);
+    // Strided bars are still abutting and still anchored to real time.
+    const binMs = binDurationMs(stunted.levels[g.level]);
+    for (let i = 1; i < g.xs.length; i++) {
+      expect(g.xs[i] - g.xs[i - 1]).toBeCloseTo(g.barWidthPx, 6);
+    }
+    expect(g.xs[0]).toBeCloseTo(g.binStart * binMs * view.pxPerMs - g.leftCssPx, 6);
+  });
+});
+
+describe("barAmplitudes — a buffer shorter than meta promised (finding 3)", () => {
+  const meta = ladder(13, ANALYSIS_RATE_HZ * 60);
+  const span = { startMs: 0, endMs: 60_000 };
+  const view: TimelineView = { pxPerMs: 0.05, scrollMs: 0, widthPx: 800 };
+
+  it("never yields NaN when the level buffer is short", () => {
+    // `metaCache` and `levelCache` are filled by two independent `invoke`s; the pyramid
+    // on disk can be rebuilt between them (mtime change, sweep, regenerate). The old
+    // draw loop indexed straight past the end, got `undefined / 255` = NaN, and sailed
+    // through `if (h <= 0) continue` because every NaN comparison is false.
+    const geom = barGeometry(span, meta, view, 1)!;
+    expect(geom.binCount).toBeGreaterThan(10);
+
+    const short = new Uint8Array(6); // three bins' worth, for hundreds of bars
+    const { peak, rms } = barAmplitudes(geom, short);
+    expect(peak.length).toBe(geom.binCount);
+    expect(rms.length).toBe(geom.binCount);
+    for (let i = 0; i < geom.binCount; i++) {
+      expect(Number.isFinite(peak[i]), `peak[${i}]`).toBe(true);
+      expect(Number.isFinite(rms[i]), `rms[${i}]`).toBe(true);
+    }
+    // An empty buffer is the same story, not a crash.
+    const none = barAmplitudes(geom, new Uint8Array(0));
+    expect(Array.from(none.peak).every((v) => v === 0)).toBe(true);
+  });
+
+  it("reads the bins it does have, in the right place", () => {
+    const geom = barGeometry(span, meta, view, 1)!;
+    const bytes = new Uint8Array((geom.binStart + geom.binCount) * 2);
+    bytes[geom.binStart * 2] = 255;
+    bytes[geom.binStart * 2 + 1] = 51;
+    const { peak, rms } = barAmplitudes(geom, bytes);
+    expect(peak[0]).toBeCloseTo(1, 6);
+    expect(rms[0]).toBeCloseTo(0.2, 6);
+    expect(peak[1]).toBe(0);
+  });
+
+  it("a strided bar takes the loudest bin of its group", () => {
+    const threeHoursMs = 3 * 3_600_000;
+    const stunted = ladder(3, ANALYSIS_RATE_HZ * 3 * 3600);
+    const widthPx = 1200;
+    const g = barGeometry(
+      { startMs: 0, endMs: threeHoursMs },
+      stunted,
+      { pxPerMs: widthPx / threeHoursMs, scrollMs: 0, widthPx },
+      1,
+    )!;
+    expect(g.stride).toBeGreaterThan(1);
+
+    const bytes = new Uint8Array(stunted.levels[g.level].bins * 2);
+    // One loud bin, buried in the middle of the very first bar's group.
+    const loud = g.binStart + (g.stride >> 1);
+    bytes[loud * 2] = 200;
+    bytes[loud * 2 + 1] = 100;
+    const { peak, rms } = barAmplitudes(g, bytes);
+    expect(peak[0]).toBeCloseTo(200 / 255, 6);
+    expect(rms[0]).toBeCloseTo(100 / 255, 6);
+    expect(peak[1]).toBe(0);
   });
 });
 

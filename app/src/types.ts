@@ -132,7 +132,7 @@ export interface WaveformLevelMeta {
 
 /**
  * Shape of a clip's waveform, from `invoke("waveform_meta", { file, cacheDir })` —
- * mirrors the shell's `WaveformMeta`. Nine levels, finest first, each bin twice the
+ * mirrors the shell's `WaveformMeta`. Thirteen levels, finest first, each bin twice the
  * previous; `levels[0].binSamples` is 120 (10 ms at the analysis rate).
  *
  * There is no sample rate here on purpose: it is already in the §5 contract as

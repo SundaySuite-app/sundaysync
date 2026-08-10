@@ -712,7 +712,7 @@ struct WaveformLevelMeta {
 /// The shape of a clip's waveform, without any of the bytes.
 ///
 /// Deliberately split from the data: the renderer needs to know how many bins exist at
-/// which zoom *before* it decides which level to fetch, and shipping nine levels of
+/// which zoom *before* it decides which level to fetch, and shipping every level of
 /// samples to answer "how long is this clip" would be the whole point of the pyramid
 /// thrown away. Sample rate is not repeated here — it is already in the §5 contract as
 /// `parameters.analysis_rate`, and two sources for one number is how they disagree.
@@ -1930,7 +1930,10 @@ mod waveform_tests {
         let value: serde_json::Value = response.deserialize().unwrap();
         assert_eq!(value["totalSamples"], 12_000);
         let levels = value["levels"].as_array().unwrap();
-        assert_eq!(levels.len(), 9);
+        // The ladder's depth is `peaks.rs`'s business (D-056 raised it from 9 to 13); what
+        // this test is actually about is the camelCase wire shape, so it pins the ladder's
+        // *shape* rather than a length it does not own.
+        assert_eq!(levels.len(), sundaysync_core::peaks::LEVEL_COUNT);
         assert_eq!(levels[0]["binSamples"], 120);
         assert_eq!(levels[0]["bins"], 100);
         assert_eq!(levels[1]["binSamples"], 240);

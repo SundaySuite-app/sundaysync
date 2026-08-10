@@ -523,12 +523,16 @@ select:hover, input:hover { border-color: var(--accent-border); }
 .waveform__regenerate:hover:not([aria-disabled="true"]) { background: rgba(4, 18, 10, 0.22); }
 .waveform__regenerate[aria-disabled="true"] { opacity: 0.65; cursor: default; }
 .waveform__regenerate:focus-visible { outline: 2px solid var(--accent2); outline-offset: 1px; }
+/* The `other` error state. Deliberately not a control and deliberately click-through:
+   `.clip__waveform` is centred over the whole clip, so anything clickable here would eat
+   the clip's own click. See WaveformCanvas.tsx (finding 7 / D-056). */
 .waveform__status {
   position: relative;
   z-index: 1;
   font-size: 0.65rem;
   opacity: 0.75;
   white-space: nowrap;
+  pointer-events: none;
 }
 
 /* ── Unsynced shelf ─────────────────────────────────────────────── */

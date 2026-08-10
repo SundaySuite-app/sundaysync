@@ -85,9 +85,11 @@ export const nb = {
   scrollbarAria: "Bla i tidslinjen",
 
   // Per-clip waveforms (v0.3 S4, D-052)
-  waveformUnavailable: "Bølgeform utilgjengelig",
   waveformRegenerate: "Bygg bølgeform på nytt",
   waveformRegenerating: "Bygger på nytt …",
+  waveformUnavailable: "Bølgeform utilgjengelig",
+  waveformBusy: "Opptatt — prøv igjen",
+
   // Avspilling (v0.3, D-055) — hør at synken stemmer før du eksporterer.
   transportAria: "Avspilling",
   play: "Spill av",
@@ -343,9 +345,11 @@ export const en: Strings = {
   scrollbarAria: "Scroll the timeline",
 
   // Per-clip waveforms (v0.3 S4, D-052)
-  waveformUnavailable: "Waveform unavailable",
   waveformRegenerate: "Rebuild waveform",
   waveformRegenerating: "Rebuilding …",
+  waveformUnavailable: "Waveform unavailable",
+  waveformBusy: "Busy — try again",
+
   // Playback (v0.3, D-055) — see the nb comment above.
   transportAria: "Playback",
   play: "Play",
