@@ -876,6 +876,106 @@ fn regenerate_analysis<R: tauri::Runtime>(
     }
 }
 
+// ---- Playback PCM windows (V03-S5, docs/DECISIONS.md D-055) -----------------------
+//
+// The playback engine's one shell command. Everything else about playback lives in the
+// renderer (`app/src/audio/`), because the browser already owns a sample-accurate
+// scheduler — Web Audio — and the only thing it lacks is the samples.
+//
+// Those samples already exist: the analysis cache holds every synced file as mono f32le
+// at `ANALYSIS_RATE`, which is exactly what the correlator listened to when it decided
+// where the clip belongs. Playing *that* is the honest thing to play — the operator hears
+// what the engine heard. It also means playback needs no decode, no second extraction, no
+// `asset://` protocol and no CSP hole: just a windowed read of a flat file of floats.
+//
+// Read-only, so — like the two waveform reads and for the same reason (D-046) — it does
+// **not** claim the activity slot. Playback must keep working while a sync runs.
+
+/// The largest window one call may ask for: 180 000 samples = 15 s at
+/// [`sundaysync_core::ANALYSIS_RATE`] = 720 KB of f32.
+///
+/// This is the renderer's chunk size (`app/src/audio/pcmPlan.ts`) expressed as a shell-side
+/// *limit*, not a hint. Without it a hostile or buggy `invoke` could ask for a whole
+/// three-hour service in one allocation — 130 MB memcopied through IPC — and the answer
+/// would be an out-of-memory kill rather than an error. Refusing loudly is the D-032
+/// trust-boundary posture applied to a size argument.
+const MAX_WINDOW_SAMPLES: u32 = 180_000;
+
+/// One window of a clip's analysis audio as raw `f32` little-endian bytes.
+///
+/// `start_sample` is an offset in *samples* from the start of the cache entry (i.e. from
+/// the start of the source recording); `len_samples` is how many to read.
+///
+/// Returns [`tauri::ipc::Response`], which the webview resolves to an **`ArrayBuffer`** —
+/// the same binary-IPC path `waveform_level` proved on these pinned Tauri versions (D-052);
+/// `read_audio_window_answers_with_raw_bytes_not_json` below pins it again for this
+/// command, because a silent fall back to JSON here would mean shipping every sample as
+/// decimal text.
+///
+/// **A short read is a success, not an error.** Asking past the end of a clip is the normal
+/// case at its last chunk, and an empty answer means "this clip has ended" — which is
+/// precisely what the scheduler needs to know to stop scheduling it. Erroring would turn
+/// the end of every clip into a failure.
+///
+/// A missing cache entry is reported with the [`CACHE_MISSING_PREFIX`] convention, so the
+/// renderer can tell "not built yet" from "broken" exactly as the waveform path does.
+#[tauri::command(async)]
+fn read_audio_window(
+    file: PathBuf,
+    start_sample: u64,
+    len_samples: u32,
+    cache_dir: Option<PathBuf>,
+) -> Result<tauri::ipc::Response, String> {
+    if len_samples > MAX_WINDOW_SAMPLES {
+        return Err(format!(
+            "requested {len_samples} samples; the window limit is {MAX_WINDOW_SAMPLES}"
+        ));
+    }
+
+    let dir = resolve_cache_dir(cache_dir)?;
+    // Reads the *source* file's metadata: a vanished source is not a missing cache entry,
+    // and must not offer to regenerate something that cannot be regenerated.
+    let key = sundaysync_core::CacheKey::for_file(&file, sundaysync_core::ANALYSIS_RATE)
+        .map_err(|e| e.to_string())?;
+    let entry = sundaysync_core::Cache::new(dir).entry_path(&key);
+
+    let mut f = std::fs::File::open(&entry).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!("{CACHE_MISSING_PREFIX}{}", file.display())
+        } else {
+            format!("failed to read {}: {e}", entry.display())
+        }
+    })?;
+
+    // `start_sample` is renderer-supplied, so the byte offset is computed in u64 with a
+    // checked multiply: a wrapped offset would seek to an arbitrary point in the file and
+    // hand back plausible-looking garbage.
+    let byte_offset = start_sample
+        .checked_mul(4)
+        .ok_or_else(|| format!("start sample {start_sample} is out of range"))?;
+
+    use std::io::{Read, Seek, SeekFrom};
+    // Seeking past the end is legal and leaves the cursor there; the read below then
+    // returns zero bytes, which is the "this clip has ended" answer.
+    f.seek(SeekFrom::Start(byte_offset))
+        .map_err(|e| format!("failed to read {}: {e}", entry.display()))?;
+
+    let want = len_samples as usize * 4;
+    let mut buf = Vec::new();
+    // `take` + `read_to_end` rather than a pre-zeroed `read_exact`: it costs one
+    // allocation of exactly what is there, and it makes the short read at EOF the
+    // ordinary path instead of an `UnexpectedEof` to special-case.
+    f.take(want as u64)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("failed to read {}: {e}", entry.display()))?;
+
+    // Whole samples only. A cache entry truncated mid-float (a crash during extraction)
+    // would otherwise hand the renderer a partial sample and be heard as a click.
+    buf.truncate(buf.len() - buf.len() % 4);
+
+    Ok(tauri::ipc::Response::new(buf))
+}
+
 /// §7.4: cancel must take effect within 2 s. The engine kills in-flight ffmpeg children,
 /// so this returns immediately and the run unwinds on its own.
 #[tauri::command]
@@ -1391,6 +1491,7 @@ pub fn run() {
             waveform_meta,
             waveform_level,
             regenerate_analysis,
+            read_audio_window,
             export_timeline,
             export_diagnostics,
             check_sidecar,
@@ -1722,14 +1823,17 @@ mod waveform_tests {
         }
     }
 
-    /// A headless app with `state` managed and the three waveform commands registered.
+    /// A headless app with `state` managed and every cache-reading command registered —
+    /// the three waveform ones (V03-S2) and playback's window read (V03-S5). They share
+    /// this module because they share the fixture: one fabricated cache entry.
     fn app_with(state: AppState) -> tauri::App<tauri::test::MockRuntime> {
         mock_builder()
             .manage(state)
             .invoke_handler(tauri::generate_handler![
                 waveform_meta,
                 waveform_level,
-                regenerate_analysis
+                regenerate_analysis,
+                read_audio_window
             ])
             .build(mock_context(noop_assets()))
             .expect("the mock app must build")
@@ -2056,5 +2160,176 @@ mod waveform_tests {
             chosen,
             "the caller's cache directory was ignored"
         );
+    }
+
+    // ---- Playback windows (V03-S5, D-055) ------------------------------------------
+    //
+    // Same fixture, different question: not "what shape is this clip" but "give me these
+    // exact samples". The scheduler's whole correctness claim rests on the bytes coming
+    // back being the bytes at that offset, so these tests read a ramp and check values,
+    // not just lengths.
+
+    /// The sample values a fixture window came back as.
+    fn decode(bytes: &[u8]) -> Vec<f32> {
+        bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect()
+    }
+
+    fn window(
+        f: &Fixture,
+        webview: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+        start: u64,
+        len: u32,
+    ) -> Result<Vec<u8>, String> {
+        match get_ipc_response(
+            webview,
+            request(
+                "read_audio_window",
+                serde_json::json!({
+                    "file": f.media,
+                    "startSample": start,
+                    "lenSamples": len,
+                    "cacheDir": f.cache_dir,
+                }),
+            ),
+        ) {
+            Ok(InvokeResponseBody::Raw(bytes)) => Ok(bytes),
+            Ok(InvokeResponseBody::Json(j)) => {
+                panic!("read_audio_window answered with JSON ({j}) — D-055's binary IPC assumption is broken")
+            }
+            Err(e) => Err(e.as_str().unwrap_or_default().to_string()),
+        }
+    }
+
+    #[test]
+    fn a_window_is_the_exact_samples_at_that_offset_as_raw_bytes() {
+        // A ramp, so a mis-seek cannot look like a hit: every sample is its own index.
+        let samples: Vec<f32> = (0..1000).map(|i| i as f32).collect();
+        let f = fixture(&samples);
+        let app = app_with(AppState::default());
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let bytes = window(&f, &webview, 250, 100).expect("the command must succeed");
+        assert_eq!(bytes.len(), 400, "expected 100 f32 samples");
+        let got = decode(&bytes);
+        let want: Vec<f32> = (250..350).map(|i| i as f32).collect();
+        assert_eq!(got, want, "the window came from the wrong offset");
+    }
+
+    #[test]
+    fn a_window_that_runs_off_the_end_returns_what_exists_and_then_nothing() {
+        // The last chunk of every clip takes this path, and past the end is what tells the
+        // scheduler the clip has ended. Neither is an error.
+        let samples: Vec<f32> = (0..1000).map(|i| i as f32).collect();
+        let f = fixture(&samples);
+        let app = app_with(AppState::default());
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let tail = window(&f, &webview, 900, 500).expect("a short read is a success");
+        assert_eq!(decode(&tail).len(), 100, "expected the last 100 samples");
+        assert_eq!(decode(&tail)[0], 900.0);
+
+        let past = window(&f, &webview, 1000, 500).expect("reading past EOF is a success");
+        assert!(
+            past.is_empty(),
+            "expected nothing past the end, got {past:?}"
+        );
+
+        let far = window(&f, &webview, 9_999_999, 500).expect("far past EOF too");
+        assert!(far.is_empty(), "expected nothing far past the end");
+    }
+
+    #[test]
+    fn a_truncated_entry_never_yields_a_partial_sample() {
+        // A crash mid-extraction can leave a trailing fragment. Handing three bytes of a
+        // float to the renderer would be heard as a click; the read drops the remainder.
+        let dir = tempfile::tempdir().unwrap();
+        let media = dir.path().join("C0002.MP4");
+        std::fs::write(&media, b"size and mtime").unwrap();
+        let cache_dir = dir.path().join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        let key = CacheKey::for_file(&media, ANALYSIS_RATE).unwrap();
+        // Two whole samples plus three stray bytes.
+        let mut bytes: Vec<u8> = 1.0f32.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&2.0f32.to_le_bytes());
+        bytes.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+        std::fs::write(cache_dir.join(format!("{}.f32", key.as_str())), &bytes).unwrap();
+
+        let f = Fixture {
+            _dir: dir,
+            media,
+            cache_dir,
+            key,
+        };
+        let app = app_with(AppState::default());
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let got = window(&f, &webview, 0, 100).expect("the command must succeed");
+        assert_eq!(decode(&got), vec![1.0, 2.0], "a partial sample leaked out");
+    }
+
+    #[test]
+    fn a_missing_cache_entry_is_the_same_state_the_waveform_path_reports() {
+        // One convention for "not built yet" across every cache reader (D-052), so
+        // `errors.ts` needs no second matcher and the UI can offer the same affordance.
+        let samples = vec![0.1f32; 100];
+        let f = fixture(&samples);
+        std::fs::remove_file(f.cache_dir.join(format!("{}.f32", f.key.as_str()))).unwrap();
+
+        let app = app_with(AppState::default());
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let err = window(&f, &webview, 0, 100).expect_err("the entry is gone");
+        assert!(
+            err.starts_with(CACHE_MISSING_PREFIX),
+            "expected a cache_missing refusal, got {err}"
+        );
+    }
+
+    #[test]
+    fn a_window_past_the_limit_is_refused_before_anything_is_allocated() {
+        // D-032's posture applied to a size argument: the answer to "give me three hours
+        // in one call" is a sentence, not an out-of-memory kill.
+        let f = fixture(&[0.0f32; 10]);
+        let app = app_with(AppState::default());
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let err = window(&f, &webview, 0, MAX_WINDOW_SAMPLES + 1)
+            .expect_err("an oversized window must be refused");
+        assert!(err.contains("window limit"), "{err}");
+
+        // …and the limit itself is allowed, or the renderer's chunk size would be one
+        // sample too large forever.
+        window(&f, &webview, 0, MAX_WINDOW_SAMPLES).expect("the limit itself is legal");
+    }
+
+    #[test]
+    fn reading_a_playback_window_is_allowed_while_a_sync_is_running() {
+        // The D-046 asymmetry, restated for playback: pausing the audio because a second
+        // sync started would be a bug, not a safety property.
+        let f = fixture(&vec![0.3f32; 100]);
+        let state = AppState::default();
+        let activity = Arc::clone(&state.activity);
+        let app = app_with(state);
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let _running = ActivityGuard::begin(&activity, Activity::Syncing).unwrap();
+
+        window(&f, &webview, 0, 100)
+            .expect("a read-only playback window must not be blocked by a running sync");
     }
 }

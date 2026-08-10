@@ -295,6 +295,28 @@ export const BOOT_FIXTURES: Fixtures = {
 };
 
 /**
+ * A deterministic `read_audio_window` (V03-S5, D-055).
+ *
+ * Answers every window with exactly `lenSamples` floats of a sine derived from the
+ * absolute sample index, so the buffer a spec gets back is a pure function of what it
+ * asked for — and never empty, which would be read as "this clip has ended".
+ *
+ * Real Tauri resolves this command to an `ArrayBuffer` (the shell answers with
+ * `tauri::ipc::Response`); returning `.buffer` here keeps the browser tier on the same
+ * shape the app will meet in production.
+ */
+export function pcmWindow(): Fixtures {
+  return {
+    read_audio_window: fn(`(args) => {
+      const len = args.lenSamples;
+      const out = new Float32Array(len);
+      for (let i = 0; i < len; i += 1) out[i] = Math.sin((args.startSample + i) / 400);
+      return out.buffer;
+    }`),
+  };
+}
+
+/**
  * Records every `set_telemetry_consent` call the page makes onto
  * `window.__E2E_CONSENT__`, so a spec can assert what the ANSWER was — not just that a
  * dialog advanced — while still answering with a realistic `TelemetryStatus`.

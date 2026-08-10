@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { PlacedClip } from "../../audio/schedulePlan";
+import { getPlaybackEngine } from "../../audio/scheduler";
 import type { Strings } from "../../i18n";
 import { formatDuration } from "../../i18n";
 import {
@@ -8,7 +10,7 @@ import {
   type TimelineView as View,
 } from "../../timeline/geometry";
 import { stackClips, type ClipSpan } from "../../timeline/laneLayout";
-import { publishPlayheadMs } from "../../timeline/playhead";
+import { getPlayheadMs, publishPlayheadMs } from "../../timeline/playhead";
 import {
   clampScroll,
   contentBounds,
@@ -21,6 +23,7 @@ import { ClipDetail } from "./ClipDetail";
 import { PlayheadLine } from "./PlayheadLine";
 import { Ruler } from "./Ruler";
 import { Track } from "./Track";
+import { Transport } from "./Transport";
 import { UnsyncedShelf } from "./UnsyncedShelf";
 import { warningText } from "./warnings";
 
@@ -76,7 +79,7 @@ export function TimelineView({
   const viewportRef = useRef<HTMLDivElement>(null);
 
   // ---- Content: seconds → ms, grouped per device, stacked into sub-tracks ----
-  const { tracks, contentSpanMs, placements } = useMemo(() => {
+  const { tracks, contentSpanMs, placements, audioClips } = useMemo(() => {
     const placements = new Map<string, Placement>();
     for (const p of result.placements) placements.set(p.file, p);
 
@@ -101,7 +104,22 @@ export function TimelineView({
       device,
       rows: stackClips(byDevice.get(device.id) ?? []),
     }));
-    return { tracks, contentSpanMs: spanMs, placements };
+
+    // What playback plays (D-055). Deliberately built from the SAME origin the boxes are
+    // drawn at: if the audio used a different zero, the playhead would be pointing at one
+    // clip while the ears heard another, and every judgement made here would be wrong.
+    // Drift correction is applied downstream, in `clipTransport`, so this stays the raw
+    // §5 placement — the thing the timeline draws.
+    const audioClips: PlacedClip[] = result.placements.map((p) => ({
+      file: p.file,
+      device: p.device,
+      startSec: (p.offset_seconds * 1000 - originMs) / 1000,
+      durationSec: durations[p.file] ?? 0,
+      driftPpm: p.drift_ppm,
+      projectedEndErrorMs: p.projected_end_error_ms,
+    }));
+
+    return { tracks, contentSpanMs: spanMs, placements, audioClips };
   }, [result, durations]);
 
   // ---- View state: zoom + pan, measured against the lane column's width ----
@@ -146,6 +164,21 @@ export function TimelineView({
   useEffect(() => {
     publishPlayheadMs(0);
   }, [result]);
+
+  // ---- Playback (v0.3, D-055) ----
+  const engine = getPlaybackEngine();
+  const playback = useSyncExternalStore(engine.subscribe, engine.getSnapshot);
+
+  // `"25/1"` → 25. The exporter's half-frame gate needs it so playback corrects exactly
+  // the clips the export will; an unparseable or mixed rate simply skips that gate.
+  const fps = useMemo(() => {
+    const [num, den] = result.sequence.fps.split("/").map(Number);
+    return Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : undefined;
+  }, [result.sequence.fps]);
+
+  const toggleMute = useCallback((id: string) => engine.toggleMute(id), [engine]);
+  const toggleSolo = useCallback((id: string) => engine.toggleSolo(id), [engine]);
+  const showSolo = result.devices.length > 1;
 
   const zoomBy = useCallback(
     (factor: number, anchorX?: number) =>
@@ -238,12 +271,23 @@ export function TimelineView({
     if (e.key === "+" || e.key === "=") zoomBy(BUTTON_FACTOR);
     else if (e.key === "-" || e.key === "_") zoomBy(1 / BUTTON_FACTOR);
     else if (e.key === "0") fit();
+    // Space is play/pause everywhere that has a transport (D-055). It is checked last so
+    // it cannot interfere with the existing +/−/0 zoom keys, and `preventDefault` below
+    // stops the browser scrolling the page — which is what Space would otherwise do, and
+    // would look like the timeline jumping.
+    else if (e.key === " ") void engine.toggle(getPlayheadMs() / 1000);
     else return;
     e.preventDefault();
   }
 
   const [visStart, visEnd] = visibleRange(view);
-  const seek = useCallback((x: number) => publishPlayheadMs(Math.max(0, xToMs(x, view))), [view]);
+  // Seeking goes through the engine rather than straight to `publishPlayheadMs`: while
+  // playing, moving the playhead has to rebuild the audio schedule too, and the engine is
+  // the only thing that knows whether it is playing.
+  const seek = useCallback(
+    (x: number) => engine.seekTo(Math.max(0, xToMs(x, view)) / 1000),
+    [engine, view],
+  );
 
   return (
     <section
@@ -304,6 +348,11 @@ export function TimelineView({
               isReference={result.reference?.device === device.id}
               laneHeight={LANE_H}
               onSelect={setSelected}
+              muted={playback.muted.includes(device.id)}
+              soloed={playback.soloed.includes(device.id)}
+              showSolo={showSolo}
+              onToggleMute={toggleMute}
+              onToggleSolo={toggleSolo}
             />
           ))}
 
@@ -341,6 +390,8 @@ export function TimelineView({
           </div>
         </div>
       </div>
+
+      <Transport t={t} clips={audioClips} fps={fps} />
 
       {result.unsynced.length > 0 && (
         <UnsyncedShelf

@@ -21,6 +21,13 @@ import { Clip } from "./Clip";
  * Only the clips inside the visible window get DOM nodes (`visibleClips`, plus
  * its overscan buffer), which is what keeps a hundreds-of-clips result smooth
  * while panning.
+ *
+ * The gutter also carries this device's mute and solo (v0.3, D-055). They are
+ * here rather than in the transport because "which of these two is the one
+ * that's late?" is a per-device question, and answering it means soloing a
+ * device while looking at its lane. Solo is hidden when there is only one
+ * device: soloing the only thing playing is a control with no effect, and a
+ * control with no effect is worse than no control.
  */
 export const Track = memo(function Track({
   t,
@@ -33,6 +40,11 @@ export const Track = memo(function Track({
   isReference,
   laneHeight,
   onSelect,
+  muted,
+  soloed,
+  showSolo,
+  onToggleMute,
+  onToggleSolo,
 }: {
   t: Strings;
   device: Device;
@@ -45,6 +57,12 @@ export const Track = memo(function Track({
   isReference: boolean;
   laneHeight: number;
   onSelect: (placement: Placement) => void;
+  muted: boolean;
+  soloed: boolean;
+  /** False when this result has a single device — see the note above. */
+  showSolo: boolean;
+  onToggleMute: (device: string) => void;
+  onToggleSolo: (device: string) => void;
 }) {
   const name = t.deviceLabel(device.id, device.label);
   const height = Math.max(1, rows.length) * laneHeight;
@@ -57,6 +75,28 @@ export const Track = memo(function Track({
           {name}
         </span>
         {isReference && <span className="badge badge--ref">{t.reference}</span>}
+        <span className="track__mix">
+          <button
+            type="button"
+            className={`mixbtn${muted ? " mixbtn--on mixbtn--mute" : ""}`}
+            aria-label={muted ? t.unmuteDevice(name) : t.muteDevice(name)}
+            aria-pressed={muted}
+            onClick={() => onToggleMute(device.id)}
+          >
+            {t.muteShort}
+          </button>
+          {showSolo && (
+            <button
+              type="button"
+              className={`mixbtn${soloed ? " mixbtn--on mixbtn--solo" : ""}`}
+              aria-label={soloed ? t.unsoloDevice(name) : t.soloDevice(name)}
+              aria-pressed={soloed}
+              onClick={() => onToggleSolo(device.id)}
+            >
+              {t.soloShort}
+            </button>
+          )}
+        </span>
       </div>
       <div className="track__lanes">
         {rows.length === 0 ? (

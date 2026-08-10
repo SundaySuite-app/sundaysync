@@ -88,6 +88,26 @@ export const nb = {
   waveformUnavailable: "Bølgeform utilgjengelig",
   waveformRegenerate: "Bygg bølgeform på nytt",
   waveformRegenerating: "Bygger på nytt …",
+  // Avspilling (v0.3, D-055) — hør at synken stemmer før du eksporterer.
+  transportAria: "Avspilling",
+  play: "Spill av",
+  pause: "Pause",
+  stopPlayback: "Stopp og gå til start",
+  buffering: "Laster lyd …",
+  volumeAria: "Volum",
+  // Sets the expectation before the first press: this is the 12 kHz mono audio the
+  // correlator listened to, not a mix. It is meant to prove alignment, nothing else.
+  playbackQualityNote: "Lyd for kontroll av synk (12 kHz analyselyd) — ikke eksportkvalitet",
+  muteDevice: (name: string) => `Demp ${name}`,
+  unmuteDevice: (name: string) => `Opphev demping av ${name}`,
+  soloDevice: (name: string) => `Solo ${name}`,
+  unsoloDevice: (name: string) => `Slå av solo for ${name}`,
+  muteShort: "M",
+  soloShort: "S",
+  playbackUnavailable: (n: number) =>
+    n === 1
+      ? "1 klipp mangler bufret lyd og spilles ikke av."
+      : `${n} klipp mangler bufret lyd og spilles ikke av.`,
 
   // Warnings (§5 Warning enum)
   // D-042 (E6): drift correction shipped — a per-clip <timeMap> retimes the export
@@ -326,6 +346,24 @@ export const en: Strings = {
   waveformUnavailable: "Waveform unavailable",
   waveformRegenerate: "Rebuild waveform",
   waveformRegenerating: "Rebuilding …",
+  // Playback (v0.3, D-055) — see the nb comment above.
+  transportAria: "Playback",
+  play: "Play",
+  pause: "Pause",
+  stopPlayback: "Stop and return to the start",
+  buffering: "Loading audio …",
+  volumeAria: "Volume",
+  playbackQualityNote: "Audio for checking sync (12 kHz analysis audio) — not export quality",
+  muteDevice: (name: string) => `Mute ${name}`,
+  unmuteDevice: (name: string) => `Unmute ${name}`,
+  soloDevice: (name: string) => `Solo ${name}`,
+  unsoloDevice: (name: string) => `Unsolo ${name}`,
+  muteShort: "M",
+  soloShort: "S",
+  playbackUnavailable: (n: number) =>
+    n === 1
+      ? "1 clip has no cached audio and will not play."
+      : `${n} clips have no cached audio and will not play.`,
 
   // D-042 (E6): drift correction shipped — see the nb comment above.
   drift: (ms: number) =>

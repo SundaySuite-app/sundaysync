@@ -667,3 +667,69 @@ hr.sep { border: none; border-top: 1px solid var(--border); }
 }
 
 .actions { display: flex; gap: 0.75rem; align-items: center; }
+
+/* ── Playback transport (v0.3, D-055) ───────────────────────────── */
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+
+.transport__play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem; height: 2rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+}
+.transport__play:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
+
+/* Tabular figures: a monospaced-width readout does not jitter sideways 60 times a
+   second, which is the difference between a clock and a distraction. */
+.transport__time {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9375rem;
+  color: var(--text);
+  min-width: 6.5rem;
+}
+
+.transport__buffering { color: var(--accent2); font-size: 0.8125rem; }
+.transport__dead { color: var(--orange); font-size: 0.8125rem; }
+
+.transport__volume { display: flex; align-items: center; gap: 0.4rem; color: var(--text3); }
+.transport__volume input[type="range"] { width: 7rem; accent-color: var(--accent); }
+
+/* Pushed to the right so the sentence reads as a caption on the whole bar rather than
+   as a label on the control next to it. */
+.transport__note { margin-left: auto; text-align: right; }
+
+/* ── Per-device mute / solo (v0.3, D-055) ───────────────────────── */
+
+.track__mix { display: flex; gap: 0.2rem; margin-left: auto; flex-shrink: 0; }
+
+.mixbtn {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: var(--rxs);
+  border: 1px solid var(--border2);
+  background: transparent;
+  color: var(--text3);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+.mixbtn:hover { color: var(--text); background: var(--surface2); }
+.mixbtn--on { border-color: transparent; }
+.mixbtn--mute.mixbtn--on { background: var(--red-bg); color: var(--red); }
+.mixbtn--solo.mixbtn--on { background: var(--accent-bg); color: var(--accent); }

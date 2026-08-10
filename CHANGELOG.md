@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **You can now hear whether the sync is right, before exporting (D-055).** The timeline
+  has a transport: press play (or Space) and every clip sounds at once, at the offsets the
+  engine worked out. Two recordings of the same room that are correctly aligned sound
+  *phasey* — a hollow, chorus-like doubling, which is what two copies of one sound a few
+  samples apart do. A distinct echo means something is wrong, and now you find that out in
+  ten seconds instead of after an export and a round trip through Resolve. Each device
+  gets **M** (mute) and **S** (solo) buttons in its track gutter, so "which one of these is
+  late?" is a question you can answer by ear. Click the ruler to seek while playing;
+  measured clock drift is corrected in playback exactly as it will be on export, and can
+  be switched off to compare. The audio is the **12 kHz mono analysis audio the sync
+  engine itself listened to** — dull and lo-fi on purpose, and the transport says so: it
+  is there to prove alignment, not to be a mix. No re-decoding, no second copy of your
+  media, no network: it is read straight out of the analysis cache the sync already wrote.
+  A clip whose cache entry has been swept says so and is skipped; the rest keeps playing.
 - **Waveforms now draw inside every clip on the timeline (D-052, D-054).** The peak+RMS
   pyramid S2 built now reaches the screen: each clip draws its own waveform — a faint
   peak outline behind a solid RMS body, symmetric around the clip's centre — sized to

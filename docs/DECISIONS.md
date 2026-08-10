@@ -1572,3 +1572,124 @@ inside a `<button>` (a dedicated rule in the "in body" insertion mode, not just 
 nit), which would have quietly broken `Clip`'s own DOM. The D-052 regenerate/busy control
 is a `role="button"` `<span>` instead, with `stopPropagation` and hand-rolled Enter/Space
 handling doing the rest of what a real nested button would have needed anyway.
+
+## D-055 — V03-S5: sample-accurate playback via PCM-over-IPC and scheduled Web Audio
+
+**The crown jewel of v0.3, and the one feature that changes what the app is for.** Until
+now SundaySync *asserted* alignment — a number in a dialog, a box on a timeline. The
+operator's only way to check it was to export, open Resolve, and listen there. Playback
+closes that loop: press play and hear whether two recordings of the same room line up,
+before committing to an export.
+
+### Architecture
+
+**PCM over IPC, scheduled through Web Audio. No CSP change, no asset protocol, no
+`HTMLAudioElement`.**
+
+The analysis cache already holds every synced file as mono `f32le` at `ANALYSIS_RATE`
+(12 kHz) — the exact samples the correlator listened to when it decided where the clip
+belongs. One new read-only shell command, `read_audio_window(file, start_sample,
+len_samples)`, hands the renderer a window of those samples as raw bytes (the binary-IPC
+path D-052 proved; pinned again for this command). The renderer decides *when* each window
+sounds and lets the audio hardware do the rest.
+
+```
+analysis cache (.f32)
+   └─ read_audio_window ──ArrayBuffer──▶ pcmStore ──Float32Array──▶ AudioBuffer
+                                                                        │
+                    schedulePlan.computeSchedule ──▶ AudioBufferSourceNode(playbackRate)
+                                                                        │
+                                              per-device GainNode (mute/solo)
+                                                                        │
+                                                    master GainNode ──▶ destination
+```
+
+**Sample-accurate by construction.** Every source is started at `base + whenOffset`, where
+`base` is one `AudioContext.currentTime` captured once per play. Two clips 4.2 s apart are
+4.2 s apart because both numbers were added to the same `base` and the hardware counted
+samples between them — not because anything was started "now". Nothing is ever scheduled
+relative to another source, so nothing accumulates. The alternative we refused (D-053) was
+Clypra's `HTMLAudioElement` transport with a 0.5–2.0 s drift tolerance: a preview allowed
+to wander by up to two seconds would make a correct sync sound broken and a broken one
+sound fine, which is the exact failure this feature exists to disprove.
+
+**No `decodeAudioData`.** The bytes are already PCM; `createBuffer` + `copyToChannel` at
+12 000 Hz hands the graph the samples unaltered and lets the output device resample.
+AudioBuffers are deliberately **not** cached — each backs exactly one source node, and
+caching them would silently double the memory budget with a second copy of every chunk.
+
+### The numbers
+
+| Quantity | Value | Why |
+| --- | --- | --- |
+| Chunk | 15 s = 180 000 samples = **720 KB** | Small enough that one fetch is not a visible stall over a NAS; large enough that a two-hour service is 480 round trips, not tens of thousands. Enforced shell-side as `MAX_WINDOW_SAMPLES` — a size argument from the renderer is trust-boundary data (D-032), and "give me three hours in one call" must be a sentence, not an out-of-memory kill. |
+| Horizon | **30 s ahead / 15 s behind** | Ahead is prefetch. Behind is not: nudging the playhead back a few seconds is *the* gesture for "wait, was that in sync?", and it should be instant. |
+| Budget | **256 MB** ≈ 372 chunks | An eight-camera three-hour shoot is 4.2 GB of analysis audio. A renderer that keeps all of it is a renderer that gets killed mid-service. |
+| Eviction | **farthest-from-playhead first**, LRU as tie-break | Playback is a sweep, not random access. Under pure LRU the chunk evicted to make room can easily be the one four seconds behind the playhead — precisely what a nudge backwards wants — while a chunk from a clip abandoned ten minutes ago survives on recency. Recency decides only between chunks at equal distance, where it is exactly right. |
+| Pre-roll | first **5 s** of every audible clip | The transport says «Laster lyd …» meanwhile. Honest: on a NAS this window is real. |
+
+### Drift — the sign, derived rather than guessed
+
+`crates/core/src/drift.rs` defines `ppm` as `d(offset)/d(position in clip)`: positive means
+the clip needs a progressively later offset, i.e. its own clock ran fast. `fcpxml.rs`'s
+`<timeMap>` (D-042) follows from that — a source position `p` belongs at reference time
+`offset₀ + (1 + k)·p` where `k = ppm·1e-6`, so a source span `L` must occupy `L·(1 + k)` of
+timeline. Inverting:
+
+```
+timeline_time = offset₀ + (1 + k)·source_pos
+source_pos    = (timeline_time − offset₀) / (1 + k)
+playbackRate  = d(source_pos)/d(timeline_time) = 1 / (1 + ppm·1e-6)
+```
+
+**So the playback rate is the reciprocal `1/(1 + k)`, not the naive `1 + k`** — which is
+D-019's resample factor written from the other side. The exact reciprocal is used, not the
+first-order approximation `1 − k`; at 500 ppm they differ by 0.25 ppm, which is free to get
+right. Inverting this does not sound like nothing: it moves the end the wrong way and
+**doubles** the error.
+
+`schedulePlan.test.ts` pins it, mirroring `drift.rs`'s own
+`correction_cancels_the_end_error_and_inversion_doubles_it`: for both signs and for the two
+real full-tier measurements, a corrected clip's end lands on the reference-correct instant
+(< 1 µs), the uncorrected end is one full drift out, the inverted rate is > 1.8 drifts out,
+and — beyond the endpoint — every chunk boundary satisfies `offset₀ + (1 + k)·p`.
+
+Two further behaviours are inherited from the exporter so that **what you hear is what you
+will get**: the start is re-referenced by `projected_end_error_ms / 2000` s (§4.3 places on
+the *median*, i.e. the offset at the clip midpoint — skipping this leaves both ends half a
+drift out, 250 ms for a 500 ppm 1000 s clip, which is an audible echo), and D-045's
+credibility bound plus the half-frame gate are re-applied, so playback corrects exactly the
+clips the export will. `playbackDriftCorrected` (Settings, default on) turns it off; it is
+deliberately separate from `correctDrift`, because comparing the two by ear is a legitimate
+thing to want.
+
+### Buffering, and what a missing clip does
+
+Three states, kept distinct: **absent** (not fetched — simply not scheduled, the 1 Hz
+top-up retries), **ended** (an empty window: the cache entry is shorter than the probed
+duration, which is normal and silent), and **dead** (`cache_missing:` — the entry is gone;
+the clip is written off for the session, named in the transport, and never retried, because
+a retry per chunk per second forever is how one missing entry hangs an app). A chunk that
+arrives *after* its moment is not played late (an echo) and not dropped (a gap): `catchUp`
+skips exactly the elapsed part and starts the remainder at its correct sample.
+
+### 12 kHz is the feature, and the copy says so
+
+This is the audio the correlator heard, which is the whole point — but it is dull and
+lo-fi, and someone expecting a mix concludes the app is broken. The transport therefore
+carries «Lyd for kontroll av synk (12 kHz analyselyd) — ikke eksportkvalitet». **Comb
+filtering is the pass condition**: two copies of the same sound a few samples apart cancel
+and reinforce across the spectrum, which is that hollow, phasey doubling. A distinct echo
+is a bug.
+
+### The honest limit of automation
+
+**Playwright cannot hear.** The engine mirrors its schedule — the exact numbers handed to
+`start()` — onto `window.__SUNDAYSYNC_AUDIO__` on every mutation, and `playback.spec.ts`
+asserts against that: offset deltas, drift rates and sign, generation bumps across a seek,
+mute/solo gains, the buffering state, dead-file handling. One spec goes further and renders
+the real `computeSchedule` output through an `OfflineAudioContext`, measuring where impulse
+trains actually land — sample-exact at the start, across a chunk seam, and at the end. That
+is as close to listening as a headless run gets. **Acoustics remain a manual smoke test**
+(two real files, one delayed; correct = phasey doubling, wrong = echo) **and the S7
+listening protocol.**
