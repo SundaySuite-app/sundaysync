@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — v0.5
+## v0.5.0-beta.1
 
 **v0.5 — the app stops claiming things it cannot support.** v0.4 put your files on the
 timeline before the sync. v0.5 is about everything the app was *saying* about them while they
