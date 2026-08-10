@@ -1511,3 +1511,64 @@ polling the media element for `currentTime`.
 
 `THIRD-PARTY-NOTICES` at the repo root carries Clypra's MIT text in full and names the
 adapted file, as the licence requires.
+
+## D-054 — Drawing the waveform: level selection, symmetric bars, and the D-052 linear-RMS review
+
+**V03-S4.** Closes the "open for S4 review" note D-052 left on RMS quantization, and
+records the three choices that turned S2's bytes into pixels.
+
+### Level selection: finest level with bins/px ≤ 2, no ANALYSIS_RATE plumbing through props
+
+`waveformDraw.ts`'s `pickLevel(levels, pxPerMs)` scans from level 0 (finest) upward and
+returns the first level whose bins/px does not exceed 2 — enough bins to represent the
+signal without more per-pixel overdraw than the eye can use, falling back to the coarsest
+level at an extreme zoom-out and to level 0 (the best available, not a failure) at an
+extreme zoom-in. It needs only the level ladder and the current `pxPerMs` because bin
+duration is a fixed function of level index (`ANALYSIS_RATE` is one constant for the whole
+pipeline, mirrored as `waveformDraw.ts`'s own `ANALYSIS_RATE_HZ`) — no need to thread
+`SyncResult.parameters.analysis_rate` down through `Clip`'s props for this.
+
+The bin→pixel mapping used for actually drawing (`barGeometry`) deliberately does NOT use
+that constant: it derives a bin's on-screen position from `totalSamples` and the clip's own
+drawn width (`span.endMs - span.startMs`) instead, so the waveform always exactly fills the
+box `Clip.tsx` already drew — immune to the few-millisecond disagreements ffprobe's
+duration and the analysis cache's sample count can have.
+
+### Symmetric peak+RMS, not Clypra's single-direction bars
+
+Clypra's bars grow from a baseline. SundaySync's are drawn symmetric around the clip's
+vertical centre — peak as a low-alpha (0.32) outline, RMS as a solid (0.85) body on top,
+both reaching equally up and down — because that is the convention every timeline in a
+real NLE uses, and it reads a silence-to-loud transition as a shape rather than a height.
+
+### The D-052 review: RMS stays linear, pending an owner listen
+
+D-052 flagged switching *RMS only* to a perceptual (e.g. log) curve as a one-function
+change in `peaks.rs` if the drawn result read as too quiet. S4 did not have a real service
+recording to judge that against (the e2e corpus is synthetic, deterministic bytes) — so
+this stays a reasoned default rather than a verified one: the two-layer peak/RMS composite
+should already give the eye separation between "silence" and "someone is talking" without a
+curve, and a curve costs the frontend the "linear number, apply any display curve you
+like" property D-052 built the quantization on into the bargain. Left as `u8`-linear;
+👤 an owner listen against a real recording is the actual close on this review, not this
+paragraph.
+
+### Colour without a `warn` prop
+
+`WaveformCanvas` does not take a colour or warn/ok prop. It reads
+`getComputedStyle(canvas).color` at draw time — `Clip.tsx`'s `.clip`/`.clip--warn` classes
+already set that (the near-black ink the clip's own label is drawn in), and `color` is
+CSS-inherited down to the canvas by default. The waveform tracks the §9.4 green/orange
+state for free, and cannot drift out of sync with it the way a duplicated colour prop
+eventually would.
+
+### The regenerate control could not be a nested `<button>`
+
+`Clip.tsx`'s own clickable box has to stay a real `<button>` (S5's `TimelineView.
+onPointerDown` tells a clip click from a background-pan gesture via `target.closest
+("button, select, label, .timeline__ruler")`, so anything else silently turns every clip
+click into a pan-start instead of a select). The HTML parser un-nests a `<button>` placed
+inside a `<button>` (a dedicated rule in the "in body" insertion mode, not just a validator
+nit), which would have quietly broken `Clip`'s own DOM. The D-052 regenerate/busy control
+is a `role="button"` `<span>` instead, with `stopPropagation` and hand-rolled Enter/Space
+handling doing the rest of what a real nested button would have needed anyway.

@@ -482,11 +482,54 @@ select:hover, input:hover { border-color: var(--accent-border); }
 }
 .clip--warn { background: var(--orange); color: #1d1503; }
 .clip__name { position: relative; display: inline-block; white-space: nowrap; }
-/* Reserved for the S4 waveform canvas — sized here so the clip box does not
-   reflow when the peaks arrive. */
-.clip__waveform { position: absolute; inset: 0; display: block; }
+/* Sized here so the clip box does not reflow when the S4 waveform canvas, or its
+   regenerate/status affordance, arrives. */
+.clip__waveform {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
 .clip:hover { filter: brightness(1.1); }
 .clip:focus-visible { outline: 2px solid var(--accent2); outline-offset: -2px; }
+
+/* ── Per-clip waveform (v0.3 S4, D-052) ─────────────────────────────────── */
+
+.waveform__canvas {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+  pointer-events: none;
+}
+.waveform__regenerate {
+  position: relative;
+  z-index: 1;
+  padding: 0 0.4rem;
+  line-height: 1.6;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: inherit;
+  border: 1px solid currentColor;
+  border-radius: var(--rxs);
+  background: rgba(4, 18, 10, 0.12);
+  cursor: pointer;
+  white-space: nowrap;
+}
+/* A `role="button"` span, not a real `<button>` (Clip.tsx's comment explains why), so
+   disabled-ness is `aria-disabled`, not the `:disabled` pseudo-class. */
+.waveform__regenerate:hover:not([aria-disabled="true"]) { background: rgba(4, 18, 10, 0.22); }
+.waveform__regenerate[aria-disabled="true"] { opacity: 0.65; cursor: default; }
+.waveform__regenerate:focus-visible { outline: 2px solid var(--accent2); outline-offset: 1px; }
+.waveform__status {
+  position: relative;
+  z-index: 1;
+  font-size: 0.65rem;
+  opacity: 0.75;
+  white-space: nowrap;
+}
 
 /* ── Unsynced shelf ─────────────────────────────────────────────── */
 

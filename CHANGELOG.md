@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Waveforms now draw inside every clip on the timeline (D-052, D-054).** The peak+RMS
+  pyramid S2 built now reaches the screen: each clip draws its own waveform — a faint
+  peak outline behind a solid RMS body, symmetric around the clip's centre — sized to
+  only the visible slice of the clip, never the full zoomed width, so a 60-minute clip at
+  a tight zoom never asks for a 100 000px-wide canvas. Redraws through pan/zoom without
+  storming the backend: the level fetched depends on the current zoom, and re-visiting an
+  already-seen zoom never re-fetches. A clip whose analysis cache entry has been swept (or
+  was never built) shows a small "Rebuild waveform" control in place of the canvas instead
+  of a blank box; one click regenerates it and the waveform appears. If a sync or another
+  cache-maintenance pass is already running, the same control relabels with why and stays
+  retryable rather than dead-ending.
 - **The result view is now a real timeline (D-051).** The old per-device lanes drew every
   clip as a percentage of the widest span, so a four-second offset inside a ninety-minute
   service was a sliver too small to judge. The new view has a zoom: fit the whole day on
