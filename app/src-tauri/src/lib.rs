@@ -167,10 +167,17 @@ const STALE_EXPORT_MSG: &str =
     "the sources changed since this timeline was synced — run the sync again before exporting";
 
 /// A cheap, deterministic fingerprint of everything that makes a sync result stale (F6):
-/// the source set (order- and duplicate-independent), the manual device overrides, and the
-/// chosen reference. Mirrors exactly the frontend's `stale` triggers (inputs / overrides /
-/// reference — see `state.ts`), so a UI that shows a fresh result and a backend that agrees
+/// the source set (order- and duplicate-independent), the manual device overrides, the
+/// chosen reference, and — since V04-U2 — the per-file exclusions. Mirrors exactly the
+/// frontend's `stale` triggers, so a UI that shows a fresh result and a backend that agrees
 /// it is fresh compute the same number.
+///
+/// **Exclusions belong in here, not beside it (D-060).** An exclusion changes which clips
+/// the run contains, so a result produced with one exclusion set and exported against
+/// another would write a timeline containing a file the user had removed — the exact class
+/// of silent wrongness F6 exists to refuse. Folded in sorted and deduplicated, for the same
+/// reason `inputs` is: the frontend keeps a `Set` and promises no order, so a mere reshuffle
+/// must not read as "the sources changed".
 ///
 /// `DefaultHasher` is fine here despite its "not stable across Rust versions" caveat: the
 /// stored fingerprint and the one `export_timeline` compares it against are produced by the
@@ -179,14 +186,21 @@ fn inputs_fingerprint(
     inputs: &[PathBuf],
     overrides: &BTreeMap<PathBuf, String>,
     reference: Option<&Path>,
+    exclude: &[PathBuf],
 ) -> u64 {
     let mut sorted: Vec<&PathBuf> = inputs.iter().collect();
     sorted.sort();
     sorted.dedup();
+    let mut excluded: Vec<&PathBuf> = exclude.iter().collect();
+    excluded.sort();
+    excluded.dedup();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     sorted.hash(&mut hasher);
     overrides.hash(&mut hasher); // BTreeMap hashes its entries in key order — deterministic.
     reference.hash(&mut hasher);
+    // Slices hash their own length, so an empty exclusion list cannot be confused with a
+    // shorter input list — the four components stay unambiguously separated.
+    excluded.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -211,6 +225,15 @@ struct AppState {
     /// touch a sync in flight. The token is wrapped in its own `Arc` so a finishing scan
     /// can prove the slot still holds *its* token before clearing it (F3, `Arc::ptr_eq`).
     scan_cancel: Arc<Mutex<Option<Arc<CancelToken>>>>,
+    /// V04-U2 (D-059): the background pre-analysis pass gets its own slot, on exactly the
+    /// `scan_cancel` pattern above — a new prewarm supersedes the previous one, and the
+    /// token is wrapped in its own `Arc` so a finishing pass can prove the slot still holds
+    /// *its* token before clearing it (`Arc::ptr_eq`).
+    ///
+    /// Separate from `cancel` and `scan_cancel` on purpose: `run_sync` fires this one to
+    /// preempt a prewarm, and it must be impossible for that to reach into a real sync or a
+    /// scan the user is waiting on.
+    prewarm_cancel: Arc<Mutex<Option<Arc<CancelToken>>>>,
     last: Arc<Mutex<Option<LastRun>>>,
     /// The ffmpeg/ffprobe pair every command decodes with, resolved once at startup
     /// (D-031). `None` means resolution failed — a user who installs ffmpeg while the
@@ -290,10 +313,46 @@ enum Activity {
     Idle,
     Syncing,
     Maintaining,
+    /// V04-U2 (D-059): background pre-analysis — decoding scanned files into the cache
+    /// before the user presses Sync, so the timeline can draw immediately afterwards.
+    ///
+    /// It spawns ffmpeg and writes the cache, so it is the same class of work as
+    /// `Maintaining` and takes the slot for the same reason. Unlike `Maintaining` it is
+    /// **speculative**, which is why exactly one caller may take the slot away from it —
+    /// see [`ActivityGuard::begin_preempting_prewarm`].
+    Prewarming,
 }
 
-/// RAII guard: holds the activity slot at `Syncing`/`Maintaining`, restores `Idle` on
-/// drop — every early `?` return included.
+/// The refusal a caller gets when the slot is held. Stable, prefix-matchable strings
+/// (D-030): `errors.ts` classifies on the `busy:` prefix alone, so a new activity needs
+/// no frontend change to be handled correctly.
+fn busy_message(current: Activity) -> String {
+    match current {
+        // Not reachable from `claim` (Idle is the success arm); named so the match stays
+        // exhaustive without a catch-all that would swallow a future variant.
+        Activity::Idle => "busy: the app is busy".to_string(),
+        Activity::Syncing => "busy: sync in progress".to_string(),
+        Activity::Maintaining => "busy: cache maintenance in progress".to_string(),
+        Activity::Prewarming => "busy: analysis in progress".to_string(),
+    }
+}
+
+/// How long [`ActivityGuard::begin_preempting_prewarm`] waits for a cancelled prewarm to
+/// let go before it gives up and reports the app busy.
+///
+/// §7.4 puts cancellation at ≤2 s (the engine kills in-flight ffmpeg children), so five is
+/// generous rather than tight. It is bounded at all because the guarantee is not absolute:
+/// a read stuck in an unkillable state on a vanished network volume can outlast any budget,
+/// and a Sync button that hangs forever is worse than one that says why it refused.
+const PREWARM_PREEMPT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How often that wait re-checks the slot. Short enough to be invisible next to a normal
+/// cancel, long enough not to spin on the mutex.
+const PREWARM_PREEMPT_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// RAII guard: holds the activity slot at `Syncing`/`Maintaining`/`Prewarming`, restores
+/// `Idle` on drop — every early `?` return included.
+#[derive(Debug)]
 struct ActivityGuard {
     slot: Arc<Mutex<Activity>>,
 }
@@ -302,7 +361,17 @@ impl ActivityGuard {
     /// Claims the slot for `want`, or returns a stable, prefix-matchable error naming
     /// what the app is busy with (D-030 style: the frontend maps the prefix).
     fn begin(slot: &Arc<Mutex<Activity>>, want: Activity) -> Result<Self, String> {
-        let mut guard = lock_state(slot, OnPoison::Recover)?;
+        Self::claim(slot, want).map_err(busy_message)
+    }
+
+    /// [`begin`](Self::begin) with the losing activity returned as a value rather than a
+    /// message, so a caller that wants to *do* something about a particular one can branch
+    /// on it instead of parsing the string it is about to show the user.
+    fn claim(slot: &Arc<Mutex<Activity>>, want: Activity) -> Result<Self, Activity> {
+        // `Recover` never errors, so the poison policy cannot make the slot unclaimable.
+        let Ok(mut guard) = lock_state(slot, OnPoison::Recover) else {
+            return Err(Activity::Idle);
+        };
         match *guard {
             Activity::Idle => {
                 *guard = want;
@@ -310,8 +379,57 @@ impl ActivityGuard {
                     slot: Arc::clone(slot),
                 })
             }
-            Activity::Syncing => Err("busy: sync in progress".to_string()),
-            Activity::Maintaining => Err("busy: cache maintenance in progress".to_string()),
+            other => Err(other),
+        }
+    }
+
+    /// Claims the slot for `Syncing`, **taking it from a running prewarm if that is what
+    /// holds it** (D-059).
+    ///
+    /// A real sync is what the user asked for; a prewarm is work the app started on its own
+    /// guess. So this one caller — and only this one — cancels the speculative job and waits
+    /// for it to let go. `regenerate_analysis` and every cache-maintenance command keep the
+    /// plain [`begin`](Self::begin) and get the honest `busy: analysis in progress` refusal:
+    /// they are not the user's headline action, and a prewarm they interrupted would only be
+    /// restarted moments later.
+    ///
+    /// The wait is bounded ([`PREWARM_PREEMPT_WAIT`]) and ends in the same refusal any other
+    /// caller would have got. Nothing here holds the activity lock while sleeping, and the
+    /// prewarm-cancel slot is only ever locked *after* the activity lock is released, so the
+    /// two locks are never nested.
+    fn begin_preempting_prewarm(state: &AppState) -> Result<Self, String> {
+        Self::begin_preempting_prewarm_within(state, PREWARM_PREEMPT_WAIT)
+    }
+
+    /// [`begin_preempting_prewarm`](Self::begin_preempting_prewarm) with the budget as an
+    /// argument, so the timeout path is testable in milliseconds instead of seconds.
+    fn begin_preempting_prewarm_within(
+        state: &AppState,
+        wait: std::time::Duration,
+    ) -> Result<Self, String> {
+        let busy = match Self::claim(&state.activity, Activity::Syncing) {
+            Ok(guard) => return Ok(guard),
+            Err(busy) => busy,
+        };
+        if busy != Activity::Prewarming {
+            return Err(busy_message(busy));
+        }
+
+        state.request_prewarm_cancel();
+
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            std::thread::sleep(PREWARM_PREEMPT_POLL);
+            match Self::claim(&state.activity, Activity::Syncing) {
+                Ok(guard) => return Ok(guard),
+                Err(still) => {
+                    if std::time::Instant::now() >= deadline {
+                        // Honest, and the same message any other loser gets: the prewarm
+                        // (or whatever claimed the slot meanwhile) is genuinely still there.
+                        return Err(busy_message(still));
+                    }
+                }
+            }
         }
     }
 }
@@ -389,6 +507,43 @@ impl AppState {
         }
     }
 
+    /// Installs a fresh prewarm-cancel token, cancelling and superseding any previous pass
+    /// (D-059). Returns the owning `Arc` so the caller can later prove ownership (F3).
+    fn install_prewarm_cancel(&self) -> Arc<CancelToken> {
+        let token = Arc::new(CancelToken::new());
+        if let Ok(mut slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover) {
+            if let Some(previous) = slot.replace(token.clone()) {
+                previous.cancel();
+            }
+        }
+        token
+    }
+
+    /// Clears the prewarm-cancel slot **only if it still holds `mine`** (F3's identity
+    /// guard, for the same reason it exists on the scan slot): a late-finishing pass that
+    /// cleared a newer one's token would leave the newer pass uncancellable — and a prewarm
+    /// that cannot be cancelled is a prewarm `run_sync` cannot preempt.
+    fn clear_prewarm_cancel_if_ours(&self, mine: &Arc<CancelToken>) {
+        if let Ok(mut slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover) {
+            if slot
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, mine))
+            {
+                *slot = None;
+            }
+        }
+    }
+
+    /// Fires the in-flight prewarm's cancel token, if there is one. Recovers a poisoned
+    /// lock like every other cancel path (F1).
+    fn request_prewarm_cancel(&self) {
+        if let Ok(slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover) {
+            if let Some(token) = slot.as_ref() {
+                token.cancel();
+            }
+        }
+    }
+
     /// Stores a freshly completed run. Recovers a poisoned lock and overwrites wholesale
     /// (the old value is being replaced by good data anyway), then clears the poison so the
     /// [`OnPoison::Reject`] read path in export works again after a healthy sync.
@@ -446,6 +601,11 @@ struct RunSyncArgs {
     reference: Option<PathBuf>,
     #[serde(default)]
     device_overrides: Option<BTreeMap<PathBuf, String>>,
+    /// V04-U2 (D-060): files the user took out of this run. Absent and empty mean the same
+    /// thing — run everything the scan found — so a frontend that never sends the field
+    /// behaves exactly as it did before.
+    #[serde(default)]
+    exclude_files: Option<Vec<PathBuf>>,
     #[serde(default)]
     segment_count: Option<usize>,
     /// E6 (D-042): drift correction. `None` uses the engine default (on). The export
@@ -464,7 +624,11 @@ fn run_sync(
 ) -> Result<SyncOutcome, String> {
     // D-046: claim the activity slot first — a maintenance conflict should surface
     // before any state is touched. The guard restores Idle on every return path.
-    let _activity = ActivityGuard::begin(&state.activity, Activity::Syncing)?;
+    //
+    // D-059: and this is the ONE caller that takes the slot off a background prewarm. The
+    // user pressing Sync outranks work the app started on its own guess; every other
+    // claimant still loses to it honestly.
+    let _activity = ActivityGuard::begin_preempting_prewarm(&state)?;
 
     // Resolved before the token is installed: a missing ffmpeg should not leave a cancel
     // handle pointing at a run that never started.
@@ -487,6 +651,9 @@ fn run_sync(
             .filter(|v| v.is_finite() && *v > 0.0)
             .unwrap_or(DEFAULT_MIN_PSR),
         device_overrides: args.device_overrides.unwrap_or_default(),
+        // D-060: enforced inside the engine, right after its own scan — the shell cannot
+        // do it by filtering `inputs`, because `sync` re-walks every folder it is given.
+        exclude_files: args.exclude_files.unwrap_or_default(),
         segment_count: args.segment_count.unwrap_or(defaults.segment_count),
         correct_drift: args.correct_drift.unwrap_or(defaults.correct_drift),
         sidecar: Some(sidecar),
@@ -498,6 +665,7 @@ fn run_sync(
         &request.inputs,
         &request.device_overrides,
         request.reference_override.as_deref(),
+        &request.exclude_files,
     );
 
     let correct_drift = request.correct_drift;
@@ -989,6 +1157,121 @@ fn evict_pyramid(state: &AppState, key: &str) {
     }
 }
 
+// ---- Background pre-analysis (V04-U2, docs/DECISIONS.md D-059) ---------------------
+//
+// The scan is probe-only: it knows what the files are, but nothing has been decoded, so
+// the moment a sync finishes there is a stretch where the timeline has results and no
+// waveforms. Prewarming fills the analysis cache for the scanned files *while the user is
+// still looking at the sources list*, which costs nothing they were waiting for and makes
+// the extraction step of the sync itself a run of cache hits.
+//
+// Two rules make it safe to run speculative work in an app whose one job is a long,
+// serial, ffmpeg-heavy pipeline:
+//
+// 1. It takes the D-046 activity slot like any other cache writer, so it can never
+//    overlap a sync or a maintenance sweep.
+// 2. It is the ONLY activity that can be taken away from — and only by `run_sync`
+//    (`ActivityGuard::begin_preempting_prewarm`). Work the app started on a guess must
+//    never make the user wait for the thing they actually asked for.
+//
+// Its events live on their own channels (`prewarm:progress`, `prewarm:file`). Reusing
+// `sync:progress` would make the results view flicker with a job the user never started,
+// and reusing `analysis:progress` would make a rebuilding waveform and a prewarm
+// indistinguishable.
+
+/// One file finished pre-analysing: `{ file, ok }` on the `prewarm:file` channel.
+///
+/// `ok` is false for a file that would not decode. That is not an error for the pass as a
+/// whole (§7.2 — a bad file is a value, not a failure) but it is worth telling the UI, so a
+/// clip that will never draw a waveform can say so instead of waiting forever.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrewarmFileEvent {
+    file: PathBuf,
+    ok: bool,
+}
+
+/// Pre-decodes `files` into the analysis cache in the background.
+///
+/// Refuses with the usual `busy: …` string when anything else holds the D-046 slot — the
+/// caller is expected to shrug that off, because prewarming is an optimisation: a sync
+/// started meanwhile does the very same extraction itself.
+///
+/// A second call supersedes the first (the sources list changes as the user drops folders),
+/// exactly as `scan_inputs` does, and the superseded call returns `cancelled` — the same
+/// convention, so the frontend's existing "ignore a cancelled supersession" handling
+/// applies unchanged. A `run_sync` that preempts this pass produces the identical outcome.
+#[tauri::command(async)]
+fn prewarm_analysis<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    files: Vec<PathBuf>,
+    cache_dir: Option<PathBuf>,
+) -> Result<(), String> {
+    // Claimed before the sidecar is resolved, so a busy refusal costs nothing and needs no
+    // ffmpeg — the same ordering `regenerate_analysis` relies on.
+    let _activity = ActivityGuard::begin(&state.activity, Activity::Prewarming)?;
+    if files.is_empty() {
+        return Ok(());
+    }
+    let sidecar = state.sidecar()?;
+
+    let sink = EventSink::new(app.clone(), "prewarm:progress");
+    prewarm_with(&app, &state, cache_dir, move |dir, cancel, on_file| {
+        sundaysync_core::Extractor::new(sidecar, sundaysync_core::Cache::new(dir))
+            .extract_all_notify(&files, &sink, cancel, on_file)
+            // Per-file outcomes went out on `prewarm:file` as they happened; the aggregate
+            // vector says nothing more, and a file that would not decode is not a failure
+            // of the pass (§7.2).
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    })
+}
+
+/// The token and cache-dir bookkeeping around a prewarm, with the extraction injected.
+///
+/// Split out for the same reason `regenerate_with` is: the real extractor needs ffmpeg, and
+/// these tests have to pass on the D-025 runners that deliberately have none. It also puts
+/// the **cache-directory resolution in one place**, which is load-bearing rather than tidy —
+/// a prewarm that resolved a different directory from the sync would fill a cache nothing
+/// ever reads, and the symptom would be "prewarming does nothing", with no error anywhere.
+fn prewarm_with<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    cache_dir: Option<PathBuf>,
+    extract: impl FnOnce(PathBuf, &CancelToken, &(dyn Fn(&Path, bool) + Sync)) -> Result<(), String>,
+) -> Result<(), String> {
+    // The same helper every other command uses. See this function's header for why that
+    // matters more here than it looks.
+    let dir = resolve_cache_dir(cache_dir)?;
+
+    let cancel = state.install_prewarm_cancel();
+    let on_file = |file: &Path, ok: bool| {
+        let _ = app.emit(
+            "prewarm:file",
+            PrewarmFileEvent {
+                file: file.to_path_buf(),
+                ok,
+            },
+        );
+    };
+
+    let outcome = extract(dir, &cancel, &on_file);
+
+    // F3's identity guard: a newer pass may already hold the slot, and clearing that would
+    // leave it uncancellable — i.e. unpreemptable by the next `run_sync`.
+    state.clear_prewarm_cancel_if_ours(&cancel);
+
+    outcome
+}
+
+/// Stops the background pre-analysis, if one is running. Fire-and-forget, like
+/// [`cancel_sync`]: the engine kills its in-flight ffmpeg children and the pass unwinds.
+#[tauri::command]
+fn cancel_prewarm(state: State<'_, AppState>) {
+    state.request_prewarm_cancel();
+}
+
 // ---- Playback PCM windows (V03-S5, docs/DECISIONS.md D-055) -----------------------
 //
 // The playback engine's one shell command. Everything else about playback lives in the
@@ -1135,8 +1418,14 @@ fn validate_export_path(path: &Path, required_ext: Option<&str>) -> Result<(), S
 /// F6: the frontend already hides export behind `phase.stale`, but that is a UI convention,
 /// not a guard — a hostile or buggy `invoke` could export a previous run's timeline after
 /// the sources changed. The caller passes its *current* sources; we refuse if they no longer
-/// fingerprint to the run that is stored. `inputs`/`reference`/`overrides` mirror the same
-/// three staleness triggers the frontend tracks (`state.ts`).
+/// fingerprint to the run that is stored. `inputs`/`reference`/`overrides`/`excludeFiles`
+/// mirror the same staleness triggers the frontend tracks (`state.ts`).
+///
+/// `excludeFiles` is here for parity with `run_sync` and not as a formality (D-060): without
+/// it, changing which clips are excluded would leave the fingerprint identical, and the
+/// export would happily write a timeline containing a file the user had just removed from
+/// the run. `#[serde(default)]` on the argument keeps a caller that omits it identical to
+/// one that passes an empty list.
 #[tauri::command]
 fn export_timeline(
     state: State<'_, AppState>,
@@ -1145,6 +1434,7 @@ fn export_timeline(
     inputs: Vec<PathBuf>,
     reference: Option<PathBuf>,
     device_overrides: Option<BTreeMap<PathBuf, String>>,
+    exclude_files: Option<Vec<PathBuf>>,
 ) -> Result<usize, String> {
     // S-5: the path is untrusted IPC input — validate before writing.
     validate_export_path(&path, Some("fcpxml"))?;
@@ -1153,6 +1443,7 @@ fn export_timeline(
         &inputs,
         &device_overrides.unwrap_or_default(),
         reference.as_deref(),
+        &exclude_files.unwrap_or_default(),
     );
     let (result, durations, correct_drift) = state.export_snapshot(fingerprint)?;
 
@@ -1604,6 +1895,8 @@ pub fn run() {
             waveform_meta,
             waveform_level,
             regenerate_analysis,
+            prewarm_analysis,
+            cancel_prewarm,
             read_audio_window,
             export_timeline,
             export_diagnostics,
@@ -1824,7 +2117,7 @@ mod tests {
         let state = AppState::default();
         let inputs = vec![PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")];
         let overrides = BTreeMap::new();
-        let hash = inputs_fingerprint(&inputs, &overrides, None);
+        let hash = inputs_fingerprint(&inputs, &overrides, None, &[]);
         state.store_last(last_run(hash));
 
         assert!(
@@ -1832,7 +2125,7 @@ mod tests {
             "matching inputs export"
         );
 
-        let changed = inputs_fingerprint(&[PathBuf::from("/a/1.mp4")], &overrides, None);
+        let changed = inputs_fingerprint(&[PathBuf::from("/a/1.mp4")], &overrides, None, &[]);
         assert_ne!(hash, changed);
         let err = state.export_snapshot(changed).unwrap_err();
         assert!(err.contains("sources changed"), "unexpected error: {err}");
@@ -1847,6 +2140,7 @@ mod tests {
             &[PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")],
             &overrides,
             None,
+            &[],
         );
         let b = inputs_fingerprint(
             &[
@@ -1856,6 +2150,7 @@ mod tests {
             ],
             &overrides,
             None,
+            &[],
         );
         assert_eq!(a, b);
 
@@ -1868,6 +2163,7 @@ mod tests {
                 &[PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")],
                 &overrides2,
                 None,
+                &[],
             )
         );
         assert_ne!(
@@ -1876,8 +2172,213 @@ mod tests {
                 &[PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")],
                 &overrides,
                 Some(Path::new("/a/1.mp4")),
+                &[],
             )
         );
+    }
+
+    #[test]
+    fn the_fingerprint_folds_in_the_exclusions() {
+        // D-060, and the highest-risk half of it: if excluding a clip left the fingerprint
+        // alone, `export_timeline` would keep handing out the PREVIOUS run's timeline —
+        // the one that still contains the file the user just removed.
+        let inputs = vec![PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")];
+        let overrides = BTreeMap::new();
+        let none = inputs_fingerprint(&inputs, &overrides, None, &[]);
+        let excluded = inputs_fingerprint(&inputs, &overrides, None, &[PathBuf::from("/a/2.mp4")]);
+        assert_ne!(none, excluded, "an exclusion must make a stored run stale");
+
+        // Order-independent and duplicate-independent, exactly like `inputs`: the frontend
+        // keeps a Set, so a reshuffle must not read as a change.
+        let two_a = inputs_fingerprint(
+            &inputs,
+            &overrides,
+            None,
+            &[PathBuf::from("/a/1.mp4"), PathBuf::from("/a/2.mp4")],
+        );
+        let two_b = inputs_fingerprint(
+            &inputs,
+            &overrides,
+            None,
+            &[
+                PathBuf::from("/a/2.mp4"),
+                PathBuf::from("/a/1.mp4"),
+                PathBuf::from("/a/2.mp4"),
+            ],
+        );
+        assert_eq!(two_a, two_b, "order and duplicates must not matter");
+        assert_ne!(two_a, excluded, "but WHICH files are excluded must");
+
+        // "No exclusions" and "the field was omitted" are the same run. `run_sync` and
+        // `export_timeline` both turn a missing argument into an empty slice, so this is
+        // what keeps a pre-V04 frontend's export working unchanged.
+        assert_eq!(none, inputs_fingerprint(&inputs, &overrides, None, &[]));
+    }
+
+    // ---- D-059: the prewarm slot, and who may take it -------------------------------
+
+    #[test]
+    fn prewarm_cancel_clear_respects_token_identity() {
+        // Mirrors `scan_cancel_clear_respects_token_identity`, because the failure is worse
+        // here: a prewarm whose token was cleared by an older pass is one `run_sync` can no
+        // longer cancel, so the Sync button would sit through the whole preempt budget and
+        // then refuse.
+        let state = AppState::default();
+        let old = state.install_prewarm_cancel();
+        let new = state.install_prewarm_cancel();
+
+        assert!(old.is_cancelled(), "the superseded pass must be cancelled");
+        assert!(!new.is_cancelled(), "the newest pass must not be");
+
+        state.clear_prewarm_cancel_if_ours(&old);
+        {
+            let slot = state.prewarm_cancel.lock().unwrap();
+            let current = slot.as_ref().expect("the newer token must survive");
+            assert!(
+                Arc::ptr_eq(current, &new),
+                "the newer pass's token was wrongly cleared — it is now unpreemptable"
+            );
+        }
+
+        state.clear_prewarm_cancel_if_ours(&new);
+        assert!(state.prewarm_cancel.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn busy_messages_keep_the_prefix_the_frontend_classifies_on() {
+        // D-030/D-046: `waveformStore.ts` branches on the `busy:` PREFIX, not on the whole
+        // string, which is exactly what lets a new activity land without a frontend change.
+        // Pinned here so a reworded refusal cannot quietly fall through to "something went
+        // wrong" in the UI.
+        for activity in [
+            Activity::Syncing,
+            Activity::Maintaining,
+            Activity::Prewarming,
+        ] {
+            assert!(
+                busy_message(activity).starts_with("busy:"),
+                "{activity:?} lost the prefix"
+            );
+        }
+        assert_eq!(
+            busy_message(Activity::Prewarming),
+            "busy: analysis in progress"
+        );
+    }
+
+    /// Holds `Prewarming` until the prewarm token is fired, then lets go — what a real
+    /// pre-analysis pass does when the engine's cancel reaches it. Returns a handle to
+    /// join, so the test never outlives its own thread.
+    fn prewarm_holding_until_cancelled(state: &AppState) -> std::thread::JoinHandle<()> {
+        let token = state.install_prewarm_cancel();
+        let guard = ActivityGuard::begin(&state.activity, Activity::Prewarming)
+            .expect("the slot must be free");
+        std::thread::spawn(move || {
+            while !token.is_cancelled() {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            drop(guard);
+        })
+    }
+
+    #[test]
+    fn run_sync_preempts_a_running_prewarm() {
+        // D-059's headline: the user pressing Sync wins over speculative work. The prewarm
+        // is genuinely cancelled (not merely waited out) and the sync claims the slot.
+        let state = AppState::default();
+        let pass = prewarm_holding_until_cancelled(&state);
+        let token = state.prewarm_cancel.lock().unwrap().clone().unwrap();
+
+        let guard = ActivityGuard::begin_preempting_prewarm(&state)
+            .expect("a sync must be able to take the slot from a prewarm");
+
+        assert!(token.is_cancelled(), "the prewarm was never cancelled");
+        assert_eq!(
+            *state.activity.lock().unwrap(),
+            Activity::Syncing,
+            "the sync must hold the slot afterwards"
+        );
+        pass.join().unwrap();
+        drop(guard);
+        assert_eq!(*state.activity.lock().unwrap(), Activity::Idle);
+    }
+
+    #[test]
+    fn preemption_gives_up_honestly_when_the_prewarm_will_not_let_go() {
+        // The dead-NAS case: a read wedged in an unkillable ffmpeg can outlast any budget.
+        // The Sync button must then say why it refused rather than hang forever — and the
+        // message is the ordinary one, not a special "preemption failed" the UI cannot map.
+        // Milliseconds instead of the shipped five seconds; the constant itself is pinned
+        // separately below.
+        let state = AppState::default();
+        let _token = state.install_prewarm_cancel();
+        let _stuck = ActivityGuard::begin(&state.activity, Activity::Prewarming).unwrap();
+
+        let err = ActivityGuard::begin_preempting_prewarm_within(
+            &state,
+            std::time::Duration::from_millis(120),
+        )
+        .expect_err("a prewarm that never lets go must not be waited on forever");
+        assert_eq!(err, "busy: analysis in progress");
+    }
+
+    #[test]
+    fn the_preempt_budget_is_generous_against_the_cancel_guarantee() {
+        // §7.4 promises cancellation within 2 s. The wait has to exceed that with room, or
+        // a perfectly healthy cancel would sometimes lose the race and refuse the sync.
+        assert!(PREWARM_PREEMPT_WAIT >= std::time::Duration::from_secs(4));
+        assert!(PREWARM_PREEMPT_POLL <= std::time::Duration::from_millis(100));
+    }
+
+    #[test]
+    fn only_a_sync_preempts_a_prewarm() {
+        // The other half of the rule. Maintenance is not the user's headline action, so it
+        // takes the refusal — and a prewarm it had interrupted would only be restarted
+        // moments later anyway.
+        let state = AppState::default();
+        let _token = state.install_prewarm_cancel();
+        let _pass = ActivityGuard::begin(&state.activity, Activity::Prewarming).unwrap();
+
+        let err = ActivityGuard::begin(&state.activity, Activity::Maintaining)
+            .expect_err("maintenance must lose to a prewarm");
+        assert_eq!(err, "busy: analysis in progress");
+        assert!(
+            !state
+                .prewarm_cancel
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .is_cancelled(),
+            "a losing claimant must not have cancelled the prewarm"
+        );
+    }
+
+    #[test]
+    fn a_sync_still_loses_to_maintenance_without_waiting_for_it() {
+        // Preemption is scoped to `Prewarming`. Against a sweep the sync gets the existing
+        // D-046 refusal immediately — no five-second wait for something that is not
+        // speculative and will not be cancelled.
+        let state = AppState::default();
+        let _sweep = ActivityGuard::begin(&state.activity, Activity::Maintaining).unwrap();
+
+        let started = std::time::Instant::now();
+        let err = ActivityGuard::begin_preempting_prewarm(&state)
+            .expect_err("maintenance must still win");
+        assert_eq!(err, "busy: cache maintenance in progress");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "it waited on an activity it never preempts"
+        );
+    }
+
+    #[test]
+    fn a_prewarm_cannot_start_while_a_sync_runs() {
+        let state = AppState::default();
+        let _running = ActivityGuard::begin(&state.activity, Activity::Syncing).unwrap();
+        let err = ActivityGuard::begin(&state.activity, Activity::Prewarming)
+            .expect_err("prewarming must never overlap a run");
+        assert_eq!(err, "busy: sync in progress");
     }
 
     #[test]
@@ -1946,6 +2447,8 @@ mod waveform_tests {
                 waveform_meta,
                 waveform_level,
                 regenerate_analysis,
+                prewarm_analysis,
+                cancel_prewarm,
                 read_audio_window
             ])
             .build(mock_context(noop_assets()))
@@ -2363,6 +2866,175 @@ mod waveform_tests {
         .expect_err("regeneration must be refused during a sync");
 
         assert_eq!(err, serde_json::json!("busy: sync in progress"), "{err}");
+    }
+
+    #[test]
+    fn regenerate_analysis_is_refused_while_a_prewarm_is_running() {
+        // D-059: the prewarm holds the D-046 slot like any other cache writer, and only
+        // `run_sync` may take it away. Everything else gets the honest refusal — through
+        // the real IPC dispatch, with the exact string the frontend will classify.
+        let state = AppState::default();
+        let activity = Arc::clone(&state.activity);
+        let app = app_with(state);
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let _prewarming = ActivityGuard::begin(&activity, Activity::Prewarming).unwrap();
+
+        let err = get_ipc_response(
+            &webview,
+            request(
+                "regenerate_analysis",
+                serde_json::json!({ "file": "/nonexistent/clip.mov" }),
+            ),
+        )
+        .expect_err("regeneration must be refused during a prewarm");
+
+        assert_eq!(
+            err,
+            serde_json::json!("busy: analysis in progress"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn prewarm_is_refused_while_a_sync_is_running() {
+        // The reverse, through the same dispatch: a prewarm that started mid-sync would be
+        // exactly the cache-writer overlap D-046 exists to prevent. Refused before the
+        // sidecar is resolved, so this needs no ffmpeg (D-025).
+        let state = AppState::default();
+        let activity = Arc::clone(&state.activity);
+        let app = app_with(state);
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        let _running = ActivityGuard::begin(&activity, Activity::Syncing).unwrap();
+
+        let err = get_ipc_response(
+            &webview,
+            request(
+                "prewarm_analysis",
+                serde_json::json!({ "files": ["/nonexistent/clip.mov"] }),
+            ),
+        )
+        .expect_err("prewarming must be refused during a sync");
+
+        assert_eq!(err, serde_json::json!("busy: sync in progress"), "{err}");
+    }
+
+    #[test]
+    fn prewarm_emits_one_file_event_per_completion_with_its_ok_flag() {
+        // The `prewarm:file` channel is what lets a waveform appear the moment its own
+        // cache entry lands, rather than when the whole pass ends. Driven with a stand-in
+        // extractor: the real one needs ffmpeg, and these tests must pass on the D-025
+        // runners that have none.
+        use tauri::Listener;
+
+        let state = AppState::default();
+        let app = app_with(AppState::default());
+        let seen: Arc<Mutex<Vec<(String, bool)>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        app.listen("prewarm:file", move |event| {
+            let v: serde_json::Value = serde_json::from_str(event.payload()).unwrap();
+            sink.lock().unwrap().push((
+                v["file"].as_str().unwrap_or_default().to_string(),
+                v["ok"].as_bool().unwrap_or(false),
+            ));
+        });
+
+        let dir = std::env::temp_dir().join("sundaysync-prewarm-events");
+        prewarm_with(
+            &app.handle().clone(),
+            &state,
+            Some(dir.clone()),
+            |_dir, _cancel, on_file| {
+                on_file(Path::new("/x/C0001.MP4"), true);
+                on_file(Path::new("/x/broken.mp4"), false);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "one event per completed file: {seen:?}");
+        assert!(seen.iter().any(|(f, ok)| f.contains("C0001.MP4") && *ok));
+        assert!(
+            seen.iter().any(|(f, ok)| f.contains("broken.mp4") && !*ok),
+            "a file that will not decode must be reported, not omitted: {seen:?}"
+        );
+
+        // The pass cleaned up after itself — the next `run_sync` finds no stale token to
+        // fire, and a superseding pass installs cleanly.
+        assert!(state.prewarm_cancel.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn prewarm_resolves_its_cache_dir_through_the_shared_helper() {
+        // Load-bearing, not tidiness (D-059): a prewarm that filled a DIFFERENT directory
+        // from the one the sync reads would look like it did nothing at all, with no error
+        // anywhere to explain why. Both the explicit and the default path are pinned.
+        let state = AppState::default();
+        let app = app_with(AppState::default());
+        let handle = app.handle().clone();
+
+        let chosen = std::env::temp_dir().join("sundaysync-prewarm-cachedir");
+        let got: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
+        let sink = Arc::clone(&got);
+        prewarm_with(&handle, &state, Some(chosen.clone()), move |dir, _, _| {
+            *sink.lock().unwrap() = Some(dir);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(got.lock().unwrap().clone(), Some(chosen));
+
+        let sink = Arc::clone(&got);
+        prewarm_with(&handle, &state, None, move |dir, _, _| {
+            *sink.lock().unwrap() = Some(dir);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            got.lock().unwrap().clone(),
+            Some(resolve_cache_dir(None).unwrap()),
+            "the default must be the engine's cache, byte for byte"
+        );
+    }
+
+    #[test]
+    fn a_superseding_prewarm_cancels_the_one_it_replaces() {
+        // The scan pattern (F3), through the real bookkeeping: the token handed to the
+        // running extraction is fired the moment a newer pass installs its own.
+        let state = AppState::default();
+        let app = app_with(AppState::default());
+        let handle = app.handle().clone();
+
+        let observed: Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
+        let sink = Arc::clone(&observed);
+        prewarm_with(
+            &handle,
+            &state,
+            Some(std::env::temp_dir()),
+            |_, cancel, _| {
+                // A newer pass lands while this one is still "extracting".
+                let _newer = state.install_prewarm_cancel();
+                *sink.lock().unwrap() = Some(cancel.is_cancelled());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            observed.lock().unwrap().clone(),
+            Some(true),
+            "the superseded pass must see its own token cancelled"
+        );
+        // …and it must NOT have cleared the newer pass's slot on the way out (F3).
+        assert!(
+            state.prewarm_cancel.lock().unwrap().is_some(),
+            "the newer pass's token was wrongly cleared"
+        );
     }
 
     #[test]

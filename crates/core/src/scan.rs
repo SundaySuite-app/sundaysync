@@ -205,6 +205,40 @@ fn scan_detailed_workers(
     ))
 }
 
+/// V04-U2 (D-060): removes files the user took out of the run from a scanned manifest.
+///
+/// A pure manifest rewrite, like [`apply_device_overrides`] beside it — no filesystem
+/// access, no re-probe — so the UI can preview the result instantly and the pipeline can
+/// apply it deterministically.
+///
+/// Semantics, deliberately the same contract as [`apply_device_overrides`]:
+/// - **Exact-path match, no canonicalisation.** The UI echoes scan output straight back,
+///   so the path the scan reported is the path that matches.
+/// - A path matching nothing is **ignored** — a stale exclusion left after the user
+///   removed an input must not abort a run (D-028's rule).
+/// - Both buckets are cleared: an excluded file leaves `files` *and* `unsynced`. Excluding
+///   is "this is not part of the run", not "this failed" — leaving it on the unsynced
+///   shelf would report a problem the user just resolved.
+/// - A device left with no files is dropped, so an emptied camera stops occupying a lane.
+///
+/// The §7.3 accounting invariant in [`crate::sync_with_durations`] is computed *after*
+/// this runs, over the reduced manifest, so an excluded file is not "lost" — it was never
+/// an input to the run.
+pub fn apply_exclusions(manifest: &mut ScanManifest, exclude: &[PathBuf]) {
+    if exclude.is_empty() {
+        return;
+    }
+
+    let excluded: std::collections::BTreeSet<&PathBuf> = exclude.iter().collect();
+
+    manifest.files.retain(|f| !excluded.contains(&f.file));
+    manifest.unsynced.retain(|u| !excluded.contains(&u.file));
+    for device in &mut manifest.devices {
+        device.files.retain(|f| !excluded.contains(f));
+    }
+    manifest.devices.retain(|d| !d.files.is_empty());
+}
+
 /// §9 advanced re-grouping: moves files between devices in a scanned manifest.
 ///
 /// A pure manifest rewrite — no filesystem access, no re-probe — so the UI can preview
@@ -1176,6 +1210,93 @@ mod tests {
         // And the empty map is the untouched fast path.
         apply_device_overrides(&mut m, &std::collections::BTreeMap::new());
         assert_eq!(m, before);
+    }
+
+    // ---- D-060: per-file exclusion --------------------------------------------------
+
+    /// The override fixture plus a file on the unsynced shelf, which is the second bucket
+    /// an exclusion has to empty.
+    fn manifest_for_exclusions() -> ScanManifest {
+        let mut m = manifest_for_overrides();
+        m.unsynced.push(Unsynced {
+            file: PathBuf::from("/x/broken.mp4"),
+            reason: UnsyncedReason::DecodeError,
+        });
+        m
+    }
+
+    #[test]
+    fn exclusion_removes_the_file_from_files_and_from_its_device() {
+        let mut m = manifest_for_exclusions();
+        apply_exclusions(&mut m, &[PathBuf::from("/x/C0001.MP4")]);
+
+        assert!(
+            !m.files.iter().any(|f| f.file.ends_with("C0001.MP4")),
+            "an excluded file must not remain syncable"
+        );
+        let cam = m.devices.iter().find(|d| d.id == "cam-a").unwrap();
+        assert_eq!(
+            cam.files,
+            vec![PathBuf::from("/x/C0002.MP4")],
+            "and must not remain listed on its device"
+        );
+        // Everything else is untouched.
+        assert_eq!(m.files.len(), 2);
+        assert_eq!(m.unsynced.len(), 1);
+    }
+
+    #[test]
+    fn exclusion_also_clears_the_unsynced_shelf() {
+        // Excluding is "not part of this run", not "this failed": a file the user took out
+        // must stop being reported as a problem, or the shelf would show a complaint about
+        // material the run no longer contains.
+        let mut m = manifest_for_exclusions();
+        apply_exclusions(&mut m, &[PathBuf::from("/x/broken.mp4")]);
+
+        assert!(m.unsynced.is_empty(), "the excluded failure must be gone");
+        assert_eq!(m.files.len(), 3, "syncable files are untouched");
+    }
+
+    #[test]
+    fn excluding_a_device_completely_drops_the_device() {
+        let mut m = manifest_for_exclusions();
+        apply_exclusions(&mut m, &[PathBuf::from("/x/ZOOM0001.WAV")]);
+
+        assert!(
+            !m.devices.iter().any(|d| d.id == "rec"),
+            "a device left with no files must not keep a lane in the UI"
+        );
+        assert!(m.devices.iter().any(|d| d.id == "cam-a"));
+    }
+
+    #[test]
+    fn a_stale_exclusion_is_ignored_and_an_empty_list_is_a_no_op() {
+        // Same contract as `apply_device_overrides` (D-028): a path the scan never produced
+        // — the user removed the input, or the folder moved — must not abort the run.
+        let mut m = manifest_for_exclusions();
+        let before = m.clone();
+
+        apply_exclusions(&mut m, &[PathBuf::from("/gone/removed.mp4")]);
+        assert_eq!(m, before, "a stale exclusion must change nothing");
+
+        apply_exclusions(&mut m, &[]);
+        assert_eq!(m, before, "the empty list is the untouched fast path");
+    }
+
+    #[test]
+    fn exclusions_and_overrides_compose_in_pipeline_order() {
+        // The pipeline excludes first, then re-groups (see `sync_with_durations`): an
+        // override naming an excluded file is thereby a stale key, and ignored — which is
+        // the honest outcome, since the file is not in the run to move.
+        let mut m = manifest_for_exclusions();
+        apply_exclusions(&mut m, &[PathBuf::from("/x/C0001.MP4")]);
+        let mut ov = std::collections::BTreeMap::new();
+        ov.insert(PathBuf::from("/x/C0001.MP4"), "rec".to_string());
+        apply_device_overrides(&mut m, &ov);
+
+        assert!(!m.files.iter().any(|f| f.file.ends_with("C0001.MP4")));
+        let rec = m.devices.iter().find(|d| d.id == "rec").unwrap();
+        assert_eq!(rec.files, vec![PathBuf::from("/x/ZOOM0001.WAV")]);
     }
 
     #[test]

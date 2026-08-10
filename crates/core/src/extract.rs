@@ -228,6 +228,35 @@ impl Extractor {
         progress: &dyn ProgressSink,
         cancel: &CancelToken,
     ) -> Result<Vec<std::result::Result<CachedAudio, ExtractError>>> {
+        // The no-op closure is the whole difference: one implementation, so the
+        // notifying path can never drift from the one the pipeline runs.
+        self.extract_all_notify(paths, progress, cancel, &|_, _| {})
+    }
+
+    /// As [`extract_all`](Self::extract_all), but calls `on_file` the moment each file's
+    /// outcome is known.
+    ///
+    /// `on_file(path, ok)` fires **exactly once per input path**, from whichever worker
+    /// finished it, with `ok = true` when that file produced a [`CachedAudio`]. A cache
+    /// hit is a completion like any other and notifies too — from the caller's point of
+    /// view "this file now has analysis audio" is the same fact however it got there.
+    ///
+    /// This exists for the background pre-analysis pass (V04-U2, D-059), which needs to
+    /// tell the UI *which* clip just became drawable rather than only how many are done:
+    /// the aggregate [`ProgressSink`] cannot name a file, and a per-file event is what
+    /// lets a waveform appear as soon as its own cache entry lands.
+    ///
+    /// `on_file` runs on a worker thread while the pool is still going, so it must be
+    /// `Sync` and should be cheap — the shell's implementation is one `emit`. It is
+    /// **not** called for the files that are skipped when cancellation trips mid-pool:
+    /// those never ran, and reporting them would be a lie.
+    pub fn extract_all_notify(
+        &self,
+        paths: &[PathBuf],
+        progress: &dyn ProgressSink,
+        cancel: &CancelToken,
+        on_file: &(dyn Fn(&Path, bool) + Sync),
+    ) -> Result<Vec<std::result::Result<CachedAudio, ExtractError>>> {
         self.cache.ensure_dir()?;
         let total = paths.len();
 
@@ -252,9 +281,14 @@ impl Extractor {
                         break;
                     }
                     let outcome = self.extract_one(&paths[i], cancel);
+                    // Notified from the outcome BEFORE it is moved into its slot, so the
+                    // flag the listener sees is the very value that was recorded — there
+                    // is no window in which the two could disagree.
+                    let ok = outcome.is_ok();
                     if let Ok(mut slots) = slots.lock() {
                         slots[i] = Some(outcome);
                     }
+                    on_file(&paths[i], ok);
                     progress.report(Progress {
                         stage: Stage::Extracting,
                         completed: done.fetch_add(1, Ordering::Relaxed) + 1,
@@ -498,6 +532,7 @@ mod tests {
     use super::*;
     use crate::progress::NoProgress;
     use std::fs;
+    use std::sync::Mutex;
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join("sundaysync-tests").join(name);
@@ -825,6 +860,107 @@ mod tests {
         assert!(
             left.is_empty(),
             "no entry or scratch may survive a failed decode, found {left:?}"
+        );
+    }
+
+    // ---- D-059: the per-file notify seam --------------------------------------------
+
+    #[test]
+    fn notify_fires_exactly_once_per_path_with_the_right_flag() {
+        // The prewarm pass (D-059) reports per FILE, not per count, and it must do so
+        // whatever order the pool happens to finish in — a clip notified twice would draw
+        // twice, a clip never notified would stay blank forever.
+        let Some(sidecar) = require_ffmpeg() else {
+            return;
+        };
+        let dir = scratch("extract-notify");
+
+        let mut paths = Vec::new();
+        for n in 0..6 {
+            let p = dir.join(format!("n{n}.wav"));
+            // Descending lengths, so the workers finish out of input order.
+            write_wav(&p, 1.2 - f64::from(n) * 0.15, 200.0 + f64::from(n) * 50.0);
+            paths.push(p);
+        }
+        // One file ffmpeg cannot decode: `ok` has to be able to be false.
+        let bad = dir.join("bad.mp4");
+        fs::write(&bad, vec![0xAB; 2048]).unwrap();
+        paths.push(bad.clone());
+
+        let seen: Mutex<Vec<(PathBuf, bool)>> = Mutex::new(Vec::new());
+        let ex = extractor(&dir, sidecar.clone());
+        let out = ex
+            .extract_all_notify(&paths, &NoProgress, &CancelToken::new(), &|p, ok| {
+                seen.lock().unwrap().push((p.to_path_buf(), ok));
+            })
+            .unwrap();
+
+        let mut seen = seen.into_inner().unwrap();
+        assert_eq!(
+            seen.len(),
+            paths.len(),
+            "one notification per input, no more and no fewer: {seen:?}"
+        );
+        seen.sort();
+        let mut unique = seen.clone();
+        unique.dedup_by(|a, b| a.0 == b.0);
+        assert_eq!(unique.len(), paths.len(), "a path was notified twice");
+
+        // The flag must agree with the slot the same worker recorded, file by file.
+        for (path, outcome) in paths.iter().zip(&out) {
+            let (_, ok) = seen
+                .iter()
+                .find(|(p, _)| p == path)
+                .unwrap_or_else(|| panic!("{} was never notified", path.display()));
+            assert_eq!(
+                *ok,
+                outcome.is_ok(),
+                "{} notified ok={ok} but its result disagrees",
+                path.display()
+            );
+        }
+        assert!(
+            seen.iter().any(|(p, ok)| p == &bad && !ok),
+            "the undecodable file must be notified as a failure, not omitted"
+        );
+
+        // A second pass is pure cache hits — and still notifies every file, because
+        // "this clip has analysis audio now" is the same fact however it got there.
+        let ex2 = extractor(&dir, sidecar);
+        let hits: Mutex<usize> = Mutex::new(0);
+        ex2.extract_all_notify(&paths[..6], &NoProgress, &CancelToken::new(), &|_, ok| {
+            assert!(ok, "a cache hit is a success");
+            *hits.lock().unwrap() += 1;
+        })
+        .unwrap();
+        assert_eq!(ex2.decode_count(), 0, "the second pass must be cache hits");
+        assert_eq!(hits.into_inner().unwrap(), 6);
+    }
+
+    #[test]
+    fn extract_all_is_the_notifying_path_with_a_no_op_listener() {
+        // The two must not be able to drift: `extract_all` is a wrapper, so anything
+        // proved about one holds for the other. Asserted on the results being identical
+        // for the same inputs rather than on the source shape.
+        let Some(sidecar) = require_ffmpeg() else {
+            return;
+        };
+        let dir = scratch("extract-notify-parity");
+        let src = dir.join("a.wav");
+        write_wav(&src, 0.4, 330.0);
+        let one = std::slice::from_ref(&src);
+
+        let plain = extractor(&dir, sidecar.clone())
+            .extract_all(one, &NoProgress, &CancelToken::new())
+            .unwrap();
+        let notified = extractor(&dir, sidecar)
+            .extract_all_notify(one, &NoProgress, &CancelToken::new(), &|_, _| {})
+            .unwrap();
+
+        assert_eq!(plain.len(), notified.len());
+        assert_eq!(
+            plain[0].as_ref().unwrap().samples,
+            notified[0].as_ref().unwrap().samples
         );
     }
 

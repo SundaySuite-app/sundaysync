@@ -2037,6 +2037,145 @@ is the one that keeps recurring in this repo: a rasteriser that drops what it do
 understand, silently and with a zero exit code, is indistinguishable from one that worked —
 so the output gets *looked at*, at 1024, 128 and 32 px, every time.
 
+## D-059 — V04-U2: background pre-analysis is an activity, and only a sync may take the slot from it
+
+**V04-U2, backend half.** The scan is probe-only: it learns what the files are without
+decoding a sample. So on a fresh shoot every second of the extraction stage is paid *after*
+the user presses Sync, and every waveform on the timeline is blank until then — while the
+machine sat idle through however long the user spent looking at the sources list.
+
+Prewarming spends that idle time: `prewarm_analysis` runs the same
+`Extractor::extract_all` the pipeline runs, over the scanned files, into the same cache the
+pipeline reads. Nothing about the sync changes — it simply finds cache hits where it would
+have decoded. That is the whole reason this is safe to add to an app whose promise is
+"honest failure over silent wrongness": prewarming cannot make a run *different*, only
+faster, because the cache is keyed on content identity (§4.2) and a stale entry is
+impossible by construction.
+
+### It takes the D-046 activity slot, like every other cache writer
+
+A background pass that spawns ffmpeg and writes the cache is exactly the class of work
+D-046 serialises against a run: the sweep-versus-sync bug that decision exists for
+(a committed entry evicted out from under a running `place`) does not care whether the
+other writer was a user action or a guess. So `Prewarming` is a real `Activity`, claimed
+through the same `ActivityGuard`, and `regenerate_analysis`, `clear_cache`, `sweep_cache`
+and `enforce_cache_cap` all lose to it with the ordinary refusal.
+
+The refusal string is `busy: analysis in progress`. The `busy:` prefix is load-bearing:
+`waveformStore.ts` classifies on the prefix, not the whole string, so a new activity gets
+the right UI — an inline, retryable "already busy" control rather than a red banner —
+without a single frontend change. Pinned by a test rather than left to convention.
+
+### …but it is the one activity that can be taken away
+
+`run_sync` claims through `ActivityGuard::begin_preempting_prewarm`, which cancels the
+prewarm's token and waits for the slot. Nobody else does. The asymmetry is the decision:
+
+- **A sync preempts** because it is what the user actually asked for. Making them wait out
+  speculative work the app started on its own guess would be the feature actively making
+  the product worse.
+- **Maintenance does not preempt** because it is not a headline action, and because a
+  prewarm it interrupted would simply be restarted moments later. It gets the honest
+  refusal instead.
+
+Three details make the wait defensible rather than a hang:
+
+1. **It is bounded** — `PREWARM_PREEMPT_WAIT`, five seconds, polled every 50 ms. §7.4 puts
+   cancellation at ≤2 s (the engine kills in-flight ffmpeg children), so five is generous,
+   not tight.
+2. **The timeout is honest.** On expiry the caller gets the same `busy: …` string any other
+   loser would have got, naming whatever actually holds the slot. There is no special
+   "preemption failed" state for the UI to fail to map.
+3. **The dead-NAS caveat is real and accepted.** A prewarm wedged in an unkillable read on
+   a vanished network volume can outlast any budget. The user then sees a busy refusal on
+   the Sync button. That is worse than preemption and better than a button that hangs
+   forever, and it is the same class of outcome the app already has for a dead volume
+   anywhere else in the pipeline.
+
+Locks are never nested: the activity mutex is released before the prewarm-cancel slot is
+touched, and nothing sleeps while holding either.
+
+### Its own channels, and its own cancel slot
+
+Events go on `prewarm:progress` (aggregate) and `prewarm:file` (`{ file, ok }` per
+completion). Never `sync:progress` — the results view is bound to it and must not flicker
+because of a job the user never started — and never `analysis:progress`, which would make a
+rebuilding waveform and a prewarm indistinguishable.
+
+`prewarm:file` is why `Extractor::extract_all_notify` exists. The aggregate `ProgressSink`
+can say "4 of 11" but cannot name a file, and naming the file is the entire point: a
+waveform can appear the moment *its own* cache entry lands rather than when the slowest clip
+in the pass finishes. `extract_all` is now a thin wrapper passing a no-op closure, so the
+notifying path and the path the pipeline runs cannot drift. A cache hit notifies too — "this
+clip has analysis audio now" is the same fact however it got there — and a file that will not
+decode notifies with `ok: false` rather than being omitted, so a clip that will never draw
+can say so instead of waiting forever.
+
+The cancel token lives in its own `AppState` slot, on the `scan_cancel` pattern including
+the `Arc::ptr_eq` identity guard (F3). That guard matters more here than it does for scans:
+a prewarm whose token was cleared by an older pass is one `run_sync` can no longer cancel,
+so the Sync button would sit through the whole preempt budget and then refuse.
+
+### What is deliberately not here
+
+The command is registered and inert. Nothing in the frontend calls it yet (V04-U4 wires it),
+which is why every existing spec passes unchanged — and is the check that the backend really
+is additive rather than quietly rerouting something.
+
+## D-060 — V04-U2: per-file exclusion is request-side, enforced in the engine, and folded into the F6 fingerprint
+
+**V04-U2.** "Leave this clip out of the run" — the second camera that recorded ten seconds
+of lens cap, the board dump that duplicates a device, the file that decodes but is not part
+of this service.
+
+### Why the request, not the result
+
+§0 freezes the §5 `SyncResult` schema; `SCHEMA_VERSION` covers the *result* only, and
+`SyncRequest` says so in its own doc comment (D-028): it is deliberately outside the freeze
+so it can grow as the UI needs it to. `exclude_files: Vec<PathBuf>` is a request-side
+addition, default empty, and every existing caller constructs through
+`SyncRequest::new(..)` or `..SyncRequest::new(..)`. The result contract is untouched: an
+excluded file simply is not in the run, so there is nothing new to report about it.
+
+Matching is the same contract as `device_overrides`, deliberately: the **exact path the
+scan reported**, no canonicalisation (the UI echoes scan output straight back), and a path
+matching nothing is **ignored** rather than an error — a stale exclusion left after the user
+removed an input must not abort a run.
+
+### Why the engine enforces it, not the shell
+
+The obvious implementation is to filter the shell's `inputs` list. It does not work:
+`sync` re-walks every folder it is given, so the walk would put the excluded file straight
+back. `scan::apply_exclusions` therefore runs inside `sync_with_durations`, immediately
+after `scan_detailed` and **before** `apply_device_overrides`. That is the only honest
+enforcement point — an excluded file is never probed into a candidate, never decoded, never
+placed.
+
+It clears **both** buckets, `files` and `unsynced`. Excluding is "this is not part of the
+run", not "this failed": leaving the file on the red unsynced shelf would report a problem
+about material the run no longer contains. Devices left with no files are dropped, so an
+emptied camera stops occupying a lane. The §7.3 accounting invariant is computed after this
+runs, over the reduced manifest, so an excluded file is not "lost" — it was never an input.
+
+Ordering has a consequence worth naming: an override that names an excluded file is
+thereafter a stale key, and ignored. That is the honest outcome — the file is not in the run
+to move.
+
+### The F6 fingerprint is the risky half
+
+`inputs_fingerprint` gains the sorted, deduplicated exclusion list as a fourth component.
+Without it, changing which clips are excluded would leave the fingerprint identical, and
+`export_timeline` would keep serving the *previous* run's stored timeline — the one that
+still contains the file the user just removed. An FCPXML containing a clip the user
+excluded, written without a word of complaint, is precisely the silent wrongness F6 exists
+to refuse.
+
+`export_timeline` therefore takes `excludeFiles` for parity with `run_sync`, and both turn
+a missing argument into an empty list, so a caller that omits the field is byte-identical to
+one that passes `[]`. Sorted and deduplicated for the same reason `inputs` is: the frontend
+keeps a `Set` and promises no order, so a mere reshuffle must never read as "the sources
+changed".
+
 ## D-061 — V04-U3: the timeline is the main view, and it never unmounts
 
 **Decision.** The timeline stops being the result screen and becomes the app's main view.
