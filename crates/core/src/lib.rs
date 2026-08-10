@@ -57,8 +57,8 @@ pub use progress::{CancelToken, NoProgress, Progress, ProgressSink, Stage};
 pub use rational::Rational;
 pub use request::{SyncRequest, ANALYSIS_RATE, DEFAULT_MIN_PSR};
 pub use result::{
-    Device, DeviceKind, Parameters, Placement, Reference, Sequence, SyncResult, Unsynced,
-    UnsyncedReason, Warning, SCHEMA_VERSION,
+    Device, DeviceKind, Parameters, Placement, Reference, Sequence, SkipReason, SkippedFile,
+    SyncResult, Unsynced, UnsyncedReason, Warning, SCHEMA_VERSION,
 };
 pub use scan::{scan, FileEntry, ScanManifest};
 pub use sidecar::{Sidecar, SidecarSource};

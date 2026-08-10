@@ -44,6 +44,25 @@
   them at all — the WAVs, the stills — come back as "no picture" rather than as an error,
   because on a normal card that is about one file in twelve and it is not a fault.
 
+## Unreleased
+
+### Fixed
+
+- **The scanner no longer mistakes a drone's preview files for footage, and tells you what
+  it left out (D-066).** DJI writes a small `.LRF` alongside every clip — the same
+  low-resolution proxy as the `.LRV` the app already knew to ignore, just spelled
+  differently — so a drone folder was being read as twice as many recordings as it held,
+  with the previews competing against the real clips for a place on the timeline. Orphaned
+  previews, whose originals are not in the folder at all, had nothing to lose that fight to.
+  Photographs are skipped too, and now *before* the app opens them: a `.HEIC` or a raw next
+  to your video used to be read, found to have no audio, and reported on the red "could not
+  sync" shelf — an error message about a photograph.
+- **Nothing disappears quietly any more.** Whatever the scan walked past is counted in one
+  quiet line under the sources list — «11 følgefiler og 1 stillbilde ble hoppet over» — with
+  the file names one click away. Skipping a preview file was safe to do in silence while its
+  original sat right there in the list; a photograph has no such neighbour, and a file that
+  vanishes with nothing on screen to say why is the app asking to be distrusted.
+
 ## v0.4.0-beta.1
 
 **v0.4 — the picture comes first, and it moves.** v0.3 made the *result* something you could

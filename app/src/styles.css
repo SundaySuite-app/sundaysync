@@ -319,6 +319,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .filerow--removable { grid-template-columns: 1fr auto auto auto auto; }
 .filerow--removed { color: var(--text2); }
 .filerow--removed .filerow__name { text-decoration: line-through; text-decoration-color: var(--text4); }
+/* D-066: a skipped file is a footnote, not a complaint. Muted like the removed rows, but
+   with no strike-through — nothing was taken out of the run, it was never in it. */
+.filerow--skipped { color: var(--text2); }
 
 /* Quiet by design: removing a file is undoable and not destructive, so the control does
    not announce itself until the row is under the pointer. */

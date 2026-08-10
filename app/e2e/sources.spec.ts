@@ -112,6 +112,56 @@ test.describe("drop, scan, sources", () => {
     await expect(group.getByText("broken.mp4")).toBeVisible();
   });
 
+  test("files the scan walked past are counted, not vanished (D-066)", async ({ page }) => {
+    // The drone folder from the owner's wedding, in miniature: a `.LRF` proxy beside its
+    // original, an orphaned one, and the `IMG_4164.HEIC` that used to reach the red shelf
+    // as an "error" about a photograph.
+    const withSkips = scanManifest({
+      skipped: [
+        { file: "/Users/e2e/shoot/DRONE/DJI_0075.LRF", reason: "sidecar" },
+        { file: "/Users/e2e/shoot/DRONE/DJI_0080.LRF", reason: "sidecar" },
+        { file: "/Users/e2e/shoot/STEINAR/IMG_4164.HEIC", reason: "still_image" },
+      ],
+    });
+    await boot(page, {
+      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: withSkips },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+
+    const sources = page.getByRole("region", { name: en.sourcesTitle });
+    const group = sources.locator(".device-group--skipped");
+    // The line is visible while the list is folded — that is the whole point of it.
+    await expect(group.getByText(en.skippedSummary(2, 1))).toBeVisible();
+    await expect(group.getByText("IMG_4164.HEIC")).toBeHidden();
+    // And it is NOT the red shelf: nothing failed, so no problem chip appears.
+    await expect(sources.locator(".chip.badge--problem")).toHaveCount(0);
+
+    await group.locator("summary").click();
+
+    await expect(group.getByText("DJI_0075.LRF")).toBeVisible();
+    await expect(group.getByText("IMG_4164.HEIC")).toBeVisible();
+    // The badges specifically: "still image" is also a substring of the summary line
+    // above, so a bare text match inside the group is ambiguous by construction.
+    const badges = group.locator(".filerow--skipped .badge");
+    await expect(badges.filter({ hasText: en.skippedReason("still_image") })).toHaveCount(1);
+    await expect(badges.filter({ hasText: en.skippedReason("sidecar") })).toHaveCount(2);
+  });
+
+  test("nothing skipped means no skipped line at all (D-066)", async ({ page }) => {
+    await boot(page, {
+      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: scanManifest() },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+
+    const sources = page.getByRole("region", { name: en.sourcesTitle });
+    await expect(sources).toBeVisible();
+    // An empty (or absent) list must say nothing — a permanent "0 files were skipped"
+    // would be a line the operator has to read past on every clean drop.
+    await expect(sources.locator(".device-group--skipped")).toHaveCount(0);
+  });
+
   test("removing the only root returns to the empty state", async ({ page }) => {
     await boot(page, {
       fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: scanManifest() },

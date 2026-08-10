@@ -115,6 +115,13 @@ export function SourcesPanel({
     }));
   }, [manifest, excluded]);
 
+  // D-066: files the walk never probed. A `.lrv`'s original sits right there in the list
+  // above, so skipping it silently was defensible; a `.HEIC` has no sibling, so a silent
+  // skip is just files disappearing. Counted here, listed one disclosure away.
+  const skipped = manifest.skipped ?? [];
+  const skippedSidecars = skipped.filter((s) => s.reason === "sidecar").length;
+  const skippedStills = skipped.length - skippedSidecars;
+
   const reasonText: Record<UnsyncedReason, string> = {
     low_confidence: t.reasonLowConfidence,
     no_audio: t.reasonNoAudio,
@@ -261,6 +268,32 @@ export function SourcesPanel({
               >
                 {t.restoreFile}
               </button>
+            </div>
+          ))}
+        </details>
+      )}
+
+      {skipped.length > 0 && (
+        // One quiet line, with the files one click away. Deliberately NOT the unsynced
+        // shelf — nothing here failed — and deliberately not the timeline note, which is
+        // about time. The `<details>` is the same pattern as the two groups above, so the
+        // operator learns one disclosure, not three.
+        <details className="device-group device-group--problems device-group--skipped">
+          <summary className="device-group__head">
+            <span className="device-group__name">
+              {t.skippedSummary(skippedSidecars, skippedStills)}
+            </span>
+          </summary>
+          {skipped.map((s) => (
+            <div key={s.file} className="filerow filerow--skipped">
+              <span className="filerow__name" title={s.file}>
+                {basename(s.file)}
+              </span>
+              <span className="filerow__badges">
+                <span className="badge">{t.skippedReason(s.reason)}</span>
+              </span>
+              <span />
+              <span />
             </div>
           ))}
         </details>

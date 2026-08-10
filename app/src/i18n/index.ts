@@ -308,6 +308,18 @@ export const nb = {
   updateError: (message: string) => `Kunne ikke oppdatere: ${message}`,
   updateBannerAvailable: (version: string) =>
     `Ny versjon ${version} er tilgjengelig. Åpne Innstillinger → System for å installere.`,
+
+  // Hoppet over (V05-W2, D-066). Én stille linje, ikke en feilmelding: dette er filer
+  // ingenting er galt med. Men de MÅ nevnes — et stillbilde har ingen søskenfil ved siden
+  // av seg i lista, så et lydløst hopp ville se ut som at filer forsvant.
+  skippedSummary: (sidecars: number, stills: number) => {
+    const parts: string[] = [];
+    if (sidecars > 0) parts.push(sidecars === 1 ? "1 følgefil" : `${sidecars} følgefiler`);
+    if (stills > 0) parts.push(stills === 1 ? "1 stillbilde" : `${stills} stillbilder`);
+    return `${parts.join(" og ")} ble hoppet over`;
+  },
+  skippedReason: (reason: "sidecar" | "still_image"): string =>
+    reason === "sidecar" ? "følgefil" : "stillbilde",
 };
 
 export type Strings = typeof nb;
@@ -577,6 +589,16 @@ export const en: Strings = {
   updateError: (message: string) => `Could not update: ${message}`,
   updateBannerAvailable: (version: string) =>
     `Version ${version} is available. Open Settings → System to install it.`,
+
+  // Skipped files (V05-W2, D-066) — see the nb comment above.
+  skippedSummary: (sidecars: number, stills: number) => {
+    const parts: string[] = [];
+    if (sidecars > 0) parts.push(sidecars === 1 ? "1 sidecar file" : `${sidecars} sidecar files`);
+    if (stills > 0) parts.push(stills === 1 ? "1 still image" : `${stills} still images`);
+    return `${parts.join(" and ")} ${sidecars + stills === 1 ? "was" : "were"} skipped`;
+  },
+  skippedReason: (reason: "sidecar" | "still_image"): string =>
+    reason === "sidecar" ? "sidecar file" : "still image",
 };
 
 export const dictionaries = { nb, en };

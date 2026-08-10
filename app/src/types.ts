@@ -88,11 +88,34 @@ export interface FileEntry {
   creation_time: string | null;
 }
 
+/**
+ * Why the scan walked past a file without probing it (D-066). Mirrors `SkipReason` in
+ * `crates/core/src/result.rs`; the two strings are pinned there by
+ * `skip_reasons_serialise_as_the_ui_spells_them`.
+ */
+export type SkipReason = "sidecar" | "still_image";
+
+/**
+ * A file the scan never tried — NOT an {@link Unsynced}. An `Unsynced` file was probed
+ * and could not be used, so it belongs on the red shelf; a `SkippedFile` was never a
+ * candidate, and nothing is wrong with it.
+ */
+export interface SkippedFile {
+  file: string;
+  reason: SkipReason;
+}
+
 export interface ScanManifest {
   schema: number;
   devices: Device[];
   files: FileEntry[];
   unsynced: Unsynced[];
+  /**
+   * D-066. Optional here for the same reason it is `#[serde(default)]` in Rust: the
+   * field is additive, so a manifest produced before D-066 is still a valid v1 manifest
+   * and simply has no list. The engine always writes it; readers must not assume so.
+   */
+  skipped?: SkippedFile[];
 }
 
 // ---- Shell command payloads (app/src-tauri/src/lib.rs) ----------------------------
