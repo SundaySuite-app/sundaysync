@@ -26,6 +26,22 @@ The core promise is **honest failure over silent wrongness**. A clip the engine 
 confident about is reported as unsynced, with a plain-language reason — never placed
 hopefully. A wrong sync costs an editor far more than an admitted one.
 
+## Checking the result before you export
+
+The result is an interactive **timeline**, not a report you have to take on trust. One
+track per device against a real time axis: zoom from the whole day down to a single
+millisecond, pan, scrub, and click any clip for the exact numbers behind its placement.
+Every clip draws its own **waveform**, built from the analysis audio the sync already
+cached — no second decode of your media, and a picture of the very signal the offsets were
+computed from.
+
+Then **press play**. Every clip sounds at once at the offsets the engine chose, with mute
+and solo per device. Correctly aligned recordings of the same room sound *phasey* — a
+hollow doubling; a distinct echo means something is wrong. That is a ten-second check
+instead of an export and a round trip through Resolve. What you hear is the 12 kHz mono
+analysis audio, deliberately — it proves alignment, it is not a mix (see
+[`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)).
+
 ## Layout
 
 ```
@@ -62,6 +78,7 @@ pipeline is exercisable headlessly — which is what makes the accuracy gates in
 
 ## Roadmap
 
-v1 measures and reports audio drift; **correction ships in v2** using exactly the drift
-data v1 already records. Premiere/FCP7 export, AAF, and drift correction are all parked
-in PLAN.md §12 — deliberately out of scope until v1 is solid.
+Clock-drift **correction shipped in v0.2** (D-042), using exactly the drift data v1 already
+recorded, and v0.3 added the interactive timeline, per-clip waveforms and playback. Premiere/
+FCP7 export and AAF remain parked in PLAN.md §12 — deliberately out of scope until the
+Resolve path is solid.

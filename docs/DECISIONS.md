@@ -1819,3 +1819,128 @@ change.
   reproduction. Canvas ignores non-finite arguments, so it degraded silently: luck, not
   design. The read is now a bounds-checked pure function (`barAmplitudes`) and the guards
   are `!(h > 0)`.
+
+## D-057 — V03-S6: the deferred review findings, and what the timeline owes a keyboard
+
+The other half of the v0.3 review (D-056 took the eight that were fixed on the spot), plus
+the stage's own polish. Most of it is small; three entries are decisions rather than fixes.
+
+### `waveform_meta` no longer builds the ladder it is describing (finding 12)
+
+`pyramid_for` streams the whole `.f32` and folds thirteen levels. `waveform_meta` needs
+none of that: it reports how many bins each level holds, which is a pure function of the
+sample count. Every mounted `WaveformCanvas` fires `waveform_meta` on mount — including the
+ones the timeline's virtualization holds just off-screen in its overscan — so on an
+eight-device one-hour shoot the first frame of results kicked off ~1.3 GB of
+near-simultaneous disk reads (~169 MB per audio-hour, per clip) to answer a few dozen
+integers.
+
+The sample count is the cache entry's byte length over four, which `Cache::entry_len`
+already returns from one `metadata` call, and the ladder from there is `div_ceil` twice
+over: `bins[0] = ceil(samples / BASE_BIN_SAMPLES)`, `bins[i] = ceil(bins[i-1] / 2)`, exactly
+mirroring `base_level`'s trailing-partial-bin rule and `merge_pairs`'s childless-parent
+rule. That is `peaks::meta_from_sample_count`, and
+`the_arithmetic_meta_matches_the_folded_ladder_exactly` holds it to the fold **bin for
+bin** across empty, one-sample, partial-bin, odd-tail and multi-level inputs — the fold is
+the definition, and if the two ever disagree the arithmetic is what is wrong.
+
+The alternative considered was deferring the mount fetch behind an `IntersectionObserver`.
+Rejected: it makes the off-screen case cheaper without making the on-screen case correct,
+and eight visible clips still cost 1.3 GB. Arithmetic makes the question free for everyone.
+
+Two deliberate differences from the fold, both documented on the command:
+
+- A **resident** pyramid still answers from memory, which keeps a clip describable after a
+  maintenance sweep has deleted the entry underneath it.
+- A **zero-length** entry reports as `cache_missing:` rather than as an empty ladder.
+  `Cache::entry_len` already refuses to serve one (it cannot come from a completed
+  write-then-rename), and "rebuild this one" is the honest affordance for it.
+
+### The regenerate LRU eviction had its causality backwards (finding 4)
+
+`regenerate_analysis` evicted the memoized pyramid *before* deleting the cache file, with a
+comment claiming this prevented a concurrent read from repopulating it. It achieves the
+opposite. `waveform_meta`/`waveform_level` deliberately do not take the D-046 activity slot
+and are `async`, so one can land between the eviction and the `remove_file`, miss the
+now-empty LRU, read the **old file still on disk**, and `put()` the stale pyramid straight
+back — under the same key, because the key is path+size+mtime of the *source media*, which
+regeneration does not touch. The file is then replaced and nothing consults the LRU for
+that key again: the stale waveform is served for the rest of the session, in exactly the
+present-but-corrupt case the button exists for.
+
+The fix is a second eviction after the re-extract returns. To make the *order* testable
+rather than merely asserted, the bookkeeping moved into `regenerate_with`, which takes the
+extraction as a closure; the test passes a closure that plays the concurrent reader at the
+one moment it can do damage, so the assertion is about the outcome of the race and not
+about timing. It fails on the pre-fix code.
+
+Recorded rather than changed: because the entry is deleted first, a **failed** re-extract
+turns a present-but-corrupt entry into a missing one. That is the right trade (a corrupt
+entry is not worth preserving and the error names the real problem), but it is now stated
+in the command's doc comment instead of being a surprise.
+
+### A grabbed scrollbar thumb stays under the finger (finding 5)
+
+`scrollbarMetrics.offsetFrac` is the thumb's **left edge** (R2 reshaped it to a fraction of
+the thumb's travel), but `pointerdown` anywhere on the bar ran one handler that treated the
+pressed point as the **centre** of the wanted window. Pressing the thumb's left edge threw
+the view half a visible window backwards before the drag had moved a pixel; the right edge,
+half a window forwards.
+
+`thumbOffsetFracToScrollMs` is now the exact inverse of `scrollbarMetrics` — through the
+thumb's travel, which is what keeps the round trip exact at deep zoom where `MIN_THUMB_FRAC`
+has inflated the thumb past its natural width. A press on the thumb records where inside it
+the pointer landed and maps from `frac − grabΔ`; a press on empty trough keeps the
+centre-seeking jump (that is what makes click-to-jump land where the eye expects) and then
+continues as if the thumb had been grabbed by its middle, which is where it now is.
+
+### The wheel only claims the gestures it handles (finding 13)
+
+The native `wheel` binding (`passive: false`, which is load-bearing — React's synthetic
+wheel is passive and cannot `preventDefault`) called `preventDefault()` before looking at
+anything, then panned on `deltaX || deltaY`. So a plain downward wheel over the timeline
+did not scroll the page — it silently panned the timeline sideways instead — and the export
+bar and unsynced shelf below could not be reached by scrolling over the thing that fills
+the screen. Now: ctrl/meta zooms (prevented), a real `deltaX` or a held shift pans
+(prevented), and a plain vertical wheel is left alone to bubble.
+
+### Keyboard and the scrollbar's ARIA (finding 14 + stage scope)
+
+`role="scrollbar"` with no tab stop and no key handling is a control that announces itself
+to a screen reader and then cannot be reached or used by one; `aria-valuenow` reported the
+thumb's offset as a fraction of the whole **trough**, so it maxed out at
+`(1 − thumbFrac)·100` — 75 on a quarter-width thumb — and 100 was unreachable. It is now
+focusable, handles arrows/PageUp/PageDown/Home/End through the same `clampScroll` a pointer
+goes through, reports position within the thumb's travel, and `stopPropagation`s the keys it
+handles so they do not also drive the playhead.
+
+The section's own keys gained `←`/`→` playhead nudge (±1 s, ±10 s with shift), `Home`/`End`,
+and `F` alongside `0` for fit. All of them stay behind the existing
+`INPUT`/`SELECT`/`TEXTAREA` guard — the volume slider lives inside the timeline section, so
+without it adjusting the volume with the arrow keys would drag the playhead too.
+
+`usePlayheadInsideSpan` finally has the caller it was written for: the clip the playhead
+stands in carries `aria-current="time"`, the one value in the enumeration that means a
+temporal position. Subscribing to the derived boolean rather than the raw milliseconds is
+what keeps that from re-rendering every visible clip sixty times a second.
+
+### Judgement calls (finding 15)
+
+- **`trackAtY` deleted.** Exported and tested, never called: S3 gives every clip a real DOM
+  node so hit-testing is the browser's job, and S5's playback addresses clips by file. Dead
+  code with tests reads as load-bearing to the next person.
+- **A missing `durations` entry is now a visible state.** `durations[p.file] ?? 0` drew a
+  3 px sliver that is indistinguishable from a camera that recorded a fraction of a second.
+  The clip now carries `clip--nodur` (hollow, dashed), and says "length unknown" in its
+  accessible name and tooltip. The **width is deliberately not invented** — drawing a
+  duration the app does not have is the failure this is fixing.
+- **DPR is read once.** `WaveformCanvas` read `devicePixelRatio` for `barGeometry` and again
+  inside `drawWaveform`, with a level fetch resolving in between; it is a parameter now.
+
+### The nested-control trade-off is documented, not silently ignored
+
+The regenerate affordance inside a clip is a `role="button"` span inside a real `<button>`
+(D-054/D-055: `Clip.tsx`'s root has to stay a `<button>` for the pan-vs-click test, and the
+HTML parser un-nests a real nested `<button>`). axe's `nested-interactive` rule flags it,
+correctly, and the trade is deliberate — so it is now written down in
+KNOWN_LIMITATIONS.md's UI section rather than living only in a source comment.

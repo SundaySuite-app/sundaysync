@@ -64,6 +64,26 @@ specify one. See DECISIONS.md D-013.
 real congregations are not in that sample. Phase 6's corpus is what would make this claim
 trustworthy; until then, treat the threshold as provisional.
 
+## Playback is the analysis audio, not the mix (v0.3)
+
+The transport plays the **12 kHz mono audio the correlator itself listened to**, read
+straight out of the analysis cache — not the media files, and not anything resembling
+export quality. That is the point rather than a shortcut: what you are checking is whether
+two recordings of the same room line up, and the honest thing to play is the signal the
+offsets were computed from. It also means playback needs no second decode, no `asset://`
+protocol and no copy of your media (D-055).
+
+Consequences worth knowing before you press play:
+
+- It sounds **dull and lo-fi**. Nothing above ~6 kHz exists in it at all.
+- Correct sync sounds **phasey** — a hollow, chorus-like doubling, which is what two copies
+  of one sound a few samples apart do to each other. That is the pass condition. A distinct
+  *echo* is the failure.
+- It is mono and unmixed; levels are raw. Do not judge balance, tone or noise from it.
+- A clip whose cache entry has been swept is skipped and says so; the rest keeps playing.
+
+Judging the final audio still means exporting and listening in Resolve.
+
 ## UI
 
 - **Dark theme only** (D-026). The light look was dropped along with its contrast bugs;
@@ -71,8 +91,16 @@ trustworthy; until then, treat the threshold as provisional.
 - **Device re-assignment targets existing devices** from the UI. Creating a brand-new
   device by name is reachable only via the CLI/JSON path (D-028).
 - **The app has no visual regression tests.** The engine is exhaustively tested; the UI
-  is verified by launch and by hand. vitest covers the reducer, error mapping and
-  settings logic.
+  is verified by launch, by hand, and — since v0.2 E10 — by Playwright journeys in CI.
+  vitest covers the reducer, error mapping, settings logic and every pure timeline module.
+- **One known accessibility violation, accepted deliberately.** The "Rebuild waveform"
+  affordance inside a clip is a `role="button"` span nested inside the clip's own real
+  `<button>`, which axe flags as `nested-interactive`. Both halves are forced: the clip
+  root must stay a `<button>` (the timeline tells a clip click from a background-pan
+  gesture by `target.closest("button, …")`), and a genuinely nested `<button>` is
+  *un-nested by the HTML parser*, which would break the DOM rather than merely fail a
+  validator. The span is keyboard-operable (`tabIndex`, Enter/Space, `aria-disabled`), so
+  the practical cost is the flagged rule, not a lost control. See D-054/D-055/D-057.
 
 ## A produced or edited mix is not a valid sync reference
 

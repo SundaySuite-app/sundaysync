@@ -203,6 +203,31 @@ test("drift correction turned off puts every source back at rate 1", async ({ pa
   expect(clipOriginSec(h, CAM) - clipOriginSec(h, REC)).toBeCloseTo(4.2, 6);
 });
 
+test("the Settings toggle re-rates a RUNNING playback, without a restart (V03-S6)", async ({
+  page,
+}) => {
+  // S5 shipped the setting and `PlaybackEngine.setDriftCorrected`; S6 gave it a control.
+  // The thing worth a browser is the seam between them: flipping the checkbox while audio
+  // is playing must rebuild the schedule, not wait for the next launch. A comparison you
+  // have to relaunch the app to make is not a comparison anyone makes.
+  await reachResult(page, twoDeviceOutcome({ drift_ppm: 300, projected_end_error_ms: 1065 }));
+  await startPlaying(page);
+  expect(firstChunk(await hook(page), CAM).rate).toBeCloseTo(1 / 1.0003, 9);
+
+  await page.getByRole("button", { name: en.settings }).click();
+  await page.getByRole("checkbox", { name: en.playbackDriftCorrect }).uncheck();
+
+  // The rates changed, so everything scheduled against them was wrong: it is rebuilt.
+  await page.waitForFunction(
+    () =>
+      (window.__SUNDAYSYNC_AUDIO__?.scheduled ?? []).length > 0 &&
+      window.__SUNDAYSYNC_AUDIO__!.scheduled.every((e) => e.rate === 1),
+  );
+  // Uncorrected, the camera sits at its raw §5 offset again.
+  const h = await hook(page);
+  expect(clipOriginSec(h, CAM) - clipOriginSec(h, REC)).toBeCloseTo(4.2, 6);
+});
+
 test("seeking during playback bumps the generation and rebuilds from the new position", async ({
   page,
 }) => {

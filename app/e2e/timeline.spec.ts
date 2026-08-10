@@ -60,6 +60,42 @@ function clipBox(page: Page, name = "C0001.MP4") {
   return page.locator(".clip", { hasText: name });
 }
 
+/** Zoom in `steps` notches with the cursor parked over the middle of the timeline —
+ *  the precondition for anything about panning or the scrollbar, since neither has
+ *  anywhere to go while the whole result fits on screen. */
+async function zoomIn(page: Page, steps: number) {
+  await hoverTimeline(page);
+  await page.keyboard.down("Control");
+  for (let i = 0; i < steps; i++) await page.mouse.wheel(0, -120);
+  await page.keyboard.up("Control");
+}
+
+/** Park the pointer over the middle of the timeline — wheel gestures go to whatever is
+ *  under the cursor, and the page itself scrolls, so this is re-done rather than assumed. */
+async function hoverTimeline(page: Page) {
+  const body = page.locator(".timeline__body");
+  await body.scrollIntoViewIfNeeded();
+  const box = (await body.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 120));
+}
+
+/**
+ * The scrollbar's trough and thumb boxes, with the scrollbar scrolled into view first.
+ *
+ * At the 1280×720 the config runs, a result view is taller than the viewport and the
+ * scrollbar row sits below the fold — `page.mouse` takes raw viewport coordinates and does
+ * not scroll for you, so reading a boundingBox without this gives coordinates no click can
+ * ever reach, and every assertion about "nothing moved" passes for the wrong reason.
+ */
+async function scrollbarBoxes(page: Page) {
+  const trough = page.locator(".timeline__scrollbar");
+  await trough.scrollIntoViewIfNeeded();
+  return {
+    trough: (await trough.boundingBox())!,
+    thumb: (await page.locator(".timeline__thumb").boundingBox())!,
+  };
+}
+
 test.describe("timeline tracks", () => {
   test("every device gets a track, including one with nothing placed (§7.5)", async ({
     page,
@@ -162,26 +198,82 @@ test.describe("zoom and pan", () => {
       .toBeGreaterThan(before!.width * 1.5);
   });
 
-  test("a plain wheel pans, moving the clip without resizing it", async ({ page }) => {
+  test("a horizontal wheel pans, moving the clip without resizing it", async ({ page }) => {
     await reachResult(page);
     const clip = clipBox(page);
-    const body = await page.locator(".timeline__body").boundingBox();
-    await page.mouse.move(body!.x + body!.width / 2, body!.y + body!.height / 2);
-
-    // Panning only has room once we are zoomed past fit.
-    await page.keyboard.down("Control");
-    for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -120);
-    await page.keyboard.up("Control");
+    await zoomIn(page, 6);
 
     const before = await clip.boundingBox();
-    await page.mouse.wheel(0, 400);
+    // A trackpad's sideways flick — a real `deltaX`, no modifier.
+    await page.mouse.wheel(400, 0);
 
     await expect.poll(async () => (await clip.boundingBox())!.x).toBeLessThan(before!.x);
     // Panning is not zooming: the clip keeps its width.
     expect((await clip.boundingBox())!.width).toBeCloseTo(before!.width, 0);
   });
 
-  test("keyboard: + zooms in, 0 fits the whole result back on screen", async ({ page }) => {
+  test("shift+wheel pans too — the mouse-with-one-wheel convention", async ({ page }) => {
+    await reachResult(page);
+    const clip = clipBox(page);
+    await zoomIn(page, 6);
+
+    const before = await clip.boundingBox();
+    await page.keyboard.down("Shift");
+    await page.mouse.wheel(0, 400);
+    await page.keyboard.up("Shift");
+
+    await expect.poll(async () => (await clip.boundingBox())!.x).toBeLessThan(before!.x);
+  });
+
+  test("a plain vertical wheel is left to the page, not swallowed (finding 13)", async ({
+    page,
+  }) => {
+    // The timeline is tall, and the export bar and unsynced shelf sit below it, so a plain
+    // wheel over the timeline is how an operator reaches them. It used to `preventDefault()`
+    // every wheel event before even looking at the modifiers, and then pan on `deltaY` —
+    // so the page could not be scrolled from over the timeline at all, and an innocent
+    // scroll silently moved the timeline sideways instead.
+    await reachResult(page);
+    await zoomIn(page, 6); // give panning somewhere to go, so a regression would show
+
+    // Records whether the timeline's own (bubble-phase) listener consumed the event.
+    await page.evaluate(() => {
+      const w = window as unknown as Record<string, unknown>;
+      w.__WHEEL_PREVENTED__ = null;
+      window.addEventListener(
+        "wheel",
+        (e) => {
+          (window as unknown as Record<string, unknown>).__WHEEL_PREVENTED__ = e.defaultPrevented;
+        },
+        { passive: true },
+      );
+    });
+    const prevented = () =>
+      page.evaluate(() => (window as unknown as Record<string, unknown>).__WHEEL_PREVENTED__);
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await hoverTimeline(page);
+    const clip = clipBox(page);
+    const beforeX = (await clip.boundingBox())!.x;
+
+    await page.mouse.wheel(0, 400);
+
+    await expect.poll(prevented).toBe(false);
+    // The page moved, which is the whole point — the export bar lives down there.
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    // …and the timeline did not pan. The page scrolled vertically, so `x` is unaffected —
+    // any change here would be the swallowed wheel turning into a horizontal pan again.
+    expect((await clip.boundingBox())!.x).toBeCloseTo(beforeX, 0);
+
+    // The gesture the timeline DOES own is still prevented.
+    await hoverTimeline(page);
+    await page.keyboard.down("Shift");
+    await page.mouse.wheel(0, 120);
+    await page.keyboard.up("Shift");
+    await expect.poll(prevented).toBe(true);
+  });
+
+  test("keyboard: + zooms in, 0 and F fit the whole result back on screen", async ({ page }) => {
     await reachResult(page);
     const clip = clipBox(page);
     const fitted = (await clip.boundingBox())!.width;
@@ -193,6 +285,13 @@ test.describe("zoom and pan", () => {
 
     await page.keyboard.press("0");
     await expect.poll(async () => (await clip.boundingBox())!.width).toBeCloseTo(fitted, 0);
+
+    // `F` is the same action under the name the Fit button carries (V03-S6).
+    await page.keyboard.press("+");
+    await page.keyboard.press("+");
+    await expect.poll(async () => (await clip.boundingBox())!.width).toBeGreaterThan(fitted);
+    await page.keyboard.press("f");
+    await expect.poll(async () => (await clip.boundingBox())!.width).toBeCloseTo(fitted, 0);
   });
 
   test("the scrollbar thumb shrinks as the visible window does", async ({ page }) => {
@@ -200,14 +299,183 @@ test.describe("zoom and pan", () => {
     const thumb = page.locator(".timeline__thumb");
     const full = (await thumb.boundingBox())!.width;
 
-    const body = await page.locator(".timeline__body").boundingBox();
-    await page.mouse.move(body!.x + body!.width / 2, body!.y + body!.height / 2);
-    await page.keyboard.down("Control");
-    for (let i = 0; i < 8; i++) await page.mouse.wheel(0, -120);
-    await page.keyboard.up("Control");
+    await zoomIn(page, 8);
 
     await expect.poll(async () => (await thumb.boundingBox())!.width).toBeLessThan(full * 0.6);
     await expect(page.getByRole("scrollbar", { name: en.scrollbarAria })).toBeVisible();
+  });
+});
+
+test.describe("the scrollbar (findings 5 and 14)", () => {
+  test("grabbing the thumb by its left edge does not jump the timeline", async ({ page }) => {
+    // Finding 5: `offsetFrac` is the thumb's LEFT edge, but the pointer fraction was fed
+    // to the CENTRE-seeking mapping, and the same handler ran whether the press landed on
+    // the thumb or on empty trough. Pressing the thumb's left edge therefore threw the
+    // view half a visible window backwards before the drag had moved a pixel — measured
+    // as roughly a third of the trough at this zoom.
+    await reachResult(page);
+    await zoomIn(page, 8);
+
+    const { thumb: before } = await scrollbarBoxes(page);
+    const thumb = page.locator(".timeline__thumb");
+
+    await page.mouse.move(before.x + 1, before.y + before.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+
+    expect((await thumb.boundingBox())!.x).toBeCloseTo(before.x, 0);
+
+    // …and by its right edge, which used to throw the view half a window the other way.
+    const right = (await thumb.boundingBox())!;
+    await page.mouse.move(right.x + right.width - 1, right.y + right.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+    expect((await thumb.boundingBox())!.x).toBeCloseTo(right.x, 0);
+  });
+
+  test("dragging the thumb keeps it under the pointer", async ({ page }) => {
+    await reachResult(page);
+    await zoomIn(page, 8);
+
+    const { thumb: before } = await scrollbarBoxes(page);
+    const thumb = page.locator(".timeline__thumb");
+
+    // Grab near the left edge and drag right by a known distance: the thumb must move by
+    // that same distance, not by "wherever centring puts it".
+    const grabX = before.x + 2;
+    const y = before.y + before.height / 2;
+    await page.mouse.move(grabX, y);
+    await page.mouse.down();
+    await page.mouse.move(grabX + 60, y, { steps: 6 });
+    await page.mouse.up();
+
+    await expect.poll(async () => (await thumb.boundingBox())!.x).toBeCloseTo(before.x + 60, 0);
+  });
+
+  test("pressing empty trough still jumps the view there", async ({ page }) => {
+    // The other half of the fix: click-to-jump must survive. Only a press ON the thumb
+    // becomes a grab.
+    await reachResult(page);
+    await zoomIn(page, 8);
+
+    const { trough, thumb: before } = await scrollbarBoxes(page);
+    const thumb = page.locator(".timeline__thumb");
+
+    await page.mouse.click(trough.x + trough.width * 0.9, trough.y + trough.height / 2);
+    await expect.poll(async () => (await thumb.boundingBox())!.x).toBeGreaterThan(before.x + 20);
+  });
+
+  test("it is focusable, keyboard-operable, and reports a value that reaches 100", async ({
+    page,
+  }) => {
+    // Finding 14: `role="scrollbar"` with no tab stop, no key handling and an
+    // `aria-valuenow` capped at (1 − thumbFrac)·100 announced itself to a screen reader
+    // and then could neither be reached nor read correctly.
+    await reachResult(page);
+    await zoomIn(page, 8);
+
+    const bar = page.getByRole("scrollbar", { name: en.scrollbarAria });
+    await bar.focus();
+    await expect(bar).toBeFocused();
+    // Zooming anchors on the cursor, so the view starts mid-timeline; Home is the
+    // keyboard's own way back and the baseline for what follows.
+    await bar.press("Home");
+    await expect(bar).toHaveAttribute("aria-valuenow", "0");
+
+    await bar.press("ArrowRight");
+    await expect.poll(async () => Number(await bar.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+
+    await bar.press("End");
+    await expect(bar).toHaveAttribute("aria-valuenow", "100");
+
+    await bar.press("Home");
+    await expect(bar).toHaveAttribute("aria-valuenow", "0");
+
+    // The keys the scrollbar handles must not ALSO drive the section's playhead — that is
+    // what `stopPropagation` is for. Asserted on the CLOCK, not on the line's pixel
+    // position: scrolling moves the line across the screen without moving it in time,
+    // which is the correct behaviour and would make a pixel assertion fail for the right
+    // reason and pass for the wrong one.
+    const time = page.getByTestId("transport-time");
+    await expect(time).toHaveText("00:00.000");
+    await bar.press("ArrowRight");
+    await bar.press("End");
+    await bar.press("Home");
+    await expect(time).toHaveText("00:00.000");
+  });
+});
+
+test.describe("playhead keyboard (V03-S6)", () => {
+  test("arrows nudge the playhead a second at a time, Home returns to the start", async ({
+    page,
+  }) => {
+    await reachResult(page);
+    const time = page.getByTestId("transport-time");
+    await expect(time).toHaveText("00:00.000");
+
+    await page.locator(".timeline").focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(time).toHaveText("00:01.000");
+    await page.keyboard.press("ArrowRight");
+    await expect(time).toHaveText("00:02.000");
+
+    // Shift is the ten-second stride.
+    await page.keyboard.press("Shift+ArrowRight");
+    await expect(time).toHaveText("00:12.000");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await expect(time).toHaveText("00:02.000");
+
+    // Never before the start, however hard you lean on it.
+    await page.keyboard.press("Shift+ArrowLeft");
+    await expect(time).toHaveText("00:00.000");
+
+    await page.keyboard.press("Shift+ArrowRight");
+    await page.keyboard.press("Home");
+    await expect(time).toHaveText("00:00.000");
+  });
+
+  test("the clip under the playhead is marked aria-current", async ({ page }) => {
+    // `usePlayheadInsideSpan` existed for exactly this and had no caller until S6.
+    await reachResult(page);
+    const clip = clipBox(page);
+    await expect(clip).not.toHaveAttribute("aria-current", /.*/);
+
+    // The fixture's clip runs 4.2 s → 3554.2 s; a minute in is comfortably inside it.
+    await page.locator(".timeline").focus();
+    await page.keyboard.press("Shift+ArrowRight");
+    await expect(clip).toHaveAttribute("aria-current", "time");
+
+    await page.keyboard.press("Home");
+    await expect(clip).not.toHaveAttribute("aria-current", /.*/);
+  });
+
+  test("the keys do not fire while a control owns them", async ({ page }) => {
+    // The volume slider lives inside the timeline section, so its arrow keys bubble
+    // straight into the playhead handler unless the tag guard catches them.
+    await reachResult(page);
+    const time = page.getByTestId("transport-time");
+    await page.getByLabel(en.volumeAria).focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(time).toHaveText("00:00.000");
+  });
+});
+
+test.describe("a clip whose duration the outcome does not carry (finding 15)", () => {
+  test("says so instead of drawing a silent zero-length sliver", async ({ page }) => {
+    const base = syncOutcome();
+    await reachResult(page, {
+      ...base,
+      // The placement is there; its `durations` entry is not — the hole this is about.
+      durations: { "/Users/e2e/shoot/ZOOM0001.WAV": 3600 },
+    });
+
+    const clip = clipBox(page);
+    await expect(clip).toHaveClass(/clip--nodur/);
+    await expect(clip).toHaveAttribute("aria-label", new RegExp(en.clipDurationUnknown));
+    await expect(clip).toHaveAttribute("title", new RegExp(en.clipDurationUnknown));
+    // Still a clip: clicking it still opens its details.
+    await clip.click();
+    await expect(page.getByRole("dialog", { name: "C0001.MP4" })).toBeVisible();
   });
 });
 

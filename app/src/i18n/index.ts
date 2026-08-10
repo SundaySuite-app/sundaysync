@@ -83,6 +83,9 @@ export const nb = {
   zoomFit: "Tilpass",
   zoomFitAria: "Tilpass tidslinjen til vinduet",
   scrollbarAria: "Bla i tidslinjen",
+  // V03-S6 (finding 15): outcome-en har ingen varighet for dette klippet, så boksen
+  // tegnes som en strek. Sies rett ut i stedet for å se ut som et null-langt opptak.
+  clipDurationUnknown: "Ukjent lengde",
 
   // Per-clip waveforms (v0.3 S4, D-052)
   waveformRegenerate: "Bygg bølgeform på nytt",
@@ -165,6 +168,11 @@ export const nb = {
   driftCorrect: "Korriger klokkedrift",
   driftCorrectHint:
     "Retter langsom klokkedrift så klipp holder synk helt til slutten. Skriver en skånsom retiming i FCPXML-en (rører ingen filer) kun for klipp som driver mer enn en halv frame. På som standard.",
+  // V03-S6: S5 la til innstillingen, denne økta gir den en bryter. Egen fra eksport-
+  // korreksjonen med vilje (D-055) — å høre forskjellen er hele poenget.
+  playbackDriftCorrect: "Driftkorreksjon ved avspilling",
+  playbackDriftCorrectHint:
+    "Bruker samme driftkorreksjon på avspillingen som på eksporten. Skru av for å høre hvordan klippene ville ligget uten. Endringen gjelder umiddelbart, også midt i avspilling. På som standard.",
   cacheDir: "Mappe for analyse-buffer",
   cacheHint:
     "Bufferen gjør ny synkronisering nesten øyeblikkelig. Den bruker ca. 170 MB per time lyd. Oppføringer som ikke er brukt på 90 dager ryddes automatisk ved oppstart.",
@@ -343,6 +351,8 @@ export const en: Strings = {
   zoomFit: "Fit",
   zoomFitAria: "Fit the timeline to the window",
   scrollbarAria: "Scroll the timeline",
+  // V03-S6 (finding 15) — see the nb comment above.
+  clipDurationUnknown: "Length unknown",
 
   // Per-clip waveforms (v0.3 S4, D-052)
   waveformRegenerate: "Rebuild waveform",
@@ -416,6 +426,10 @@ export const en: Strings = {
   driftCorrect: "Correct clock drift",
   driftCorrectHint:
     "Fixes slow clock drift so clips stay in sync all the way to the end. Writes a gentle retime into the FCPXML (touches no files), only for clips that drift more than half a frame. On by default.",
+  // V03-S6 — see the nb comment above.
+  playbackDriftCorrect: "Drift correction during playback",
+  playbackDriftCorrectHint:
+    "Applies the same drift correction to playback as to the export. Turn it off to hear how the clips would sit without it. The change takes effect immediately, even mid-playback. On by default.",
   cacheDir: "Analysis cache folder",
   cacheHint:
     "The cache makes re-syncing nearly instant. It uses about 170 MB per hour of audio. Entries untouched for 90 days are cleared automatically at startup.",

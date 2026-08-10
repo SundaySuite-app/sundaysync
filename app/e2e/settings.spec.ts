@@ -68,6 +68,33 @@ test.describe("settings persistence", () => {
     await expect.poll(() => readSettings(page).then((s) => s.correctDrift)).toBe(false);
   });
 
+  test("the playback drift toggle persists and reaches the running engine (V03-S6)", async ({
+    page,
+  }) => {
+    // S5 added the setting and the engine method; S6 added the control. Two separate
+    // switches on purpose (D-055): correcting the export while listening uncorrected — or
+    // the other way round — is a legitimate comparison to want, so unchecking this must
+    // not touch `correctDrift`.
+    await boot(page, { fixtures: BOOT_FIXTURES, settings: SETTLED_SETTINGS });
+    await openSettings(page);
+
+    const toggle = page.getByRole("checkbox", { name: en.playbackDriftCorrect });
+    await expect(toggle).toBeChecked();
+
+    await toggle.uncheck();
+    await expect
+      .poll(() => readSettings(page).then((s) => s.playbackDriftCorrected))
+      .toBe(false);
+    // The export's own switch is untouched.
+    await expect(page.getByRole("checkbox", { name: en.driftCorrect })).toBeChecked();
+
+    // (That the RUNNING engine picks the change up without a restart is proved in
+    // playback.spec.ts, where there is a schedule to look at.)
+
+    await toggle.check();
+    await expect.poll(() => readSettings(page).then((s) => s.playbackDriftCorrected)).toBe(true);
+  });
+
   test("the cache size cap enforces immediately and persists; clearing it turns the cap off", async ({
     page,
   }) => {

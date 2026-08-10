@@ -10,6 +10,25 @@ is prepared; the release is owner-gated on the signing secret + tag (see
 [BETA-CHECKLIST-v0.2.md](BETA-CHECKLIST-v0.2.md)). The E8 Worker side and its deploy are
 owner-gated in the shared sunday-telemetry repo.** The v1 record below stands as history.
 
+**v0.3 (unreleased) is at S0–S6 complete.** The §9.4 result view is now an interactive
+timeline (D-051): zoom/pan/ruler/playhead, one track per device with sub-track stacking,
+per-clip waveforms from a streamed peak+RMS pyramid over the analysis cache (D-052, D-054),
+and sample-accurate multi-source playback so the sync can be *heard* before export (D-055).
+Two review rounds have landed — D-056 (eight findings, mostly waveform time-anchoring and
+DPR) and D-057 (the seven deferred ones, plus keyboard operation, the scrollbar's ARIA, the
+playback-drift setting UI and this docs pass). Everything runs against the cache the sync
+already wrote: **no extra ffmpeg spawns, no second decode, no copy of the media.**
+
+| v0.3 stage | State | What it added |
+| --- | --- | --- |
+| S1 — timeline math | ✅ | `app/src/timeline/` pure modules, adapted from SundayEdit (D-051). |
+| S2 — peaks pyramid | ✅ | `crates/core/src/peaks.rs` + three shell commands (D-052, D-053). |
+| S3 — TimelineView | ✅ | Tracks, sub-track stacking, zoom/pan, ruler, playhead (D-051). |
+| S4 — waveforms on screen | ✅ | `WaveformCanvas`, level selection, regenerate affordance (D-054). |
+| S5 — playback | ✅ | `app/src/audio/`, Web Audio scheduler, mute/solo, drift-corrected (D-055). |
+| R2 — review round | ✅ | 8 findings: time anchoring, DPR bars, RMS tail, scrollbar travel (D-056). |
+| S6 — polish + deferred | ✅ | Findings 4/5/12/13/14/15, keyboard + a11y, settings UI, docs (D-057). |
+
 The UX overhaul (branch `feat/ui-overhaul`) fixed two launch-blocking bugs found in
 review — the missing Tauri 2 capabilities file (dialogs/events/opener were ACL-denied)
 and drag-drop written against the Tauri 1 API (drops did nothing) — and rebuilt the app
