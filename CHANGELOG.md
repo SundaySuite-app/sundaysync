@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.0-beta.1
 
 **v0.4 — the picture comes first, and it moves.** v0.3 made the *result* something you could
 look at. v0.4 makes everything before the result something you can look at too: drop a
