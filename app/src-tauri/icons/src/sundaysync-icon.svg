@@ -1,9 +1,34 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    ══════════════════════════════════════════════════════════════════════════
+    SundaySync app icon — THE source of truth for every raster in ../ .
+    Edit this file, then regenerate the whole icon set (two commands, from the
+    repo's `app/` directory):
+
+      1) rasterize this SVG to a 1024² PNG
+         rsvg-convert -w 1024 -h 1024 src-tauri/icons/src/sundaysync-icon.svg \
+           -o src-tauri/icons/src/sundaysync-icon-1024.png
+
+         (no rsvg-convert? macOS fallback — Quick Look, then rename:
+          qlmanage -t -s 1024 -o src-tauri/icons/src src-tauri/icons/src/sundaysync-icon.svg
+          mv src-tauri/icons/src/sundaysync-icon.svg.png \
+             src-tauri/icons/src/sundaysync-icon-1024.png)
+
+      2) fan it out to every platform size / .icns / .ico
+         npx tauri icon src-tauri/icons/src/sundaysync-icon-1024.png -o src-tauri/icons
+
+    Commit the regenerated set together with this file.
+
+    ⚠️ Renderer trap: `<line>` elements are silently dropped by parts of this
+    pipeline (qlmanage draws nothing for them). Everything here must stay a
+    filled shape or a stroked `<path>` — both of which do render.
+    ══════════════════════════════════════════════════════════════════════════
+  -->
   <defs>
+    <!-- Gold: the family gradient, identical to SundayRec's two stops. -->
     <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#F6D488"/>
-      <stop offset="0.55" stop-color="#EBB84B"/>
-      <stop offset="1" stop-color="#D89B2E"/>
+      <stop offset="0" stop-color="#F2D58A"/>
+      <stop offset="1" stop-color="#EBB84B"/>
     </linearGradient>
     <radialGradient id="bg" cx="0.5" cy="0.4" r="0.8">
       <stop offset="0" stop-color="#3A3168"/>
@@ -21,23 +46,30 @@
 
     <!-- ══ SundaySync: the family mark. SundayRec is (( ✝ )) — sound around the
          cross. SundaySync is ≈≈ ✝ ≈≈ — two waveforms either side, stacked pairs
-         in PERFECT phase: recordings brought into sync. ══ -->
+         in PERFECT phase: recordings brought into sync.
+
+         Wave weight is 20, against Rec's 15. Rec's rings are closed arcs; these
+         are open serpentine strokes, which read optically thinner at equal
+         weight — 20 is what matches the family, not what measures the same.
+         The pairs sit at y-centres 475 / 591, flanking the crossbar and
+         centred on the cross's own centre of mass (~y 533). ══ -->
 
     <!-- Left pair: two identical sine strokes, in step -->
-    <path d="M 100 452 C 138 394, 190 394, 220 452 C 250 510, 302 510, 340 452"
-          fill="none" stroke="url(#gold)" stroke-width="46" stroke-linecap="round"/>
-    <path d="M 100 584 C 138 526, 190 526, 220 584 C 250 642, 302 642, 340 584"
-          fill="none" stroke="url(#gold)" stroke-width="46" stroke-linecap="round"/>
+    <path d="M 100 475 C 138 417, 190 417, 220 475 C 250 533, 302 533, 340 475"
+          fill="none" stroke="url(#gold)" stroke-width="20" stroke-linecap="round"/>
+    <path d="M 100 591 C 138 533, 190 533, 220 591 C 250 649, 302 649, 340 591"
+          fill="none" stroke="url(#gold)" stroke-width="20" stroke-linecap="round"/>
 
     <!-- Right pair: identical, equally in step -->
-    <path d="M 684 452 C 722 394, 774 394, 804 452 C 834 510, 886 510, 924 452"
-          fill="none" stroke="url(#gold)" stroke-width="46" stroke-linecap="round"/>
-    <path d="M 684 584 C 722 526, 774 526, 804 584 C 834 642, 886 642, 924 584"
-          fill="none" stroke="url(#gold)" stroke-width="46" stroke-linecap="round"/>
+    <path d="M 684 475 C 722 417, 774 417, 804 475 C 834 533, 886 533, 924 475"
+          fill="none" stroke="url(#gold)" stroke-width="20" stroke-linecap="round"/>
+    <path d="M 684 591 C 722 533, 774 533, 804 591 C 834 649, 886 649, 924 591"
+          fill="none" stroke="url(#gold)" stroke-width="20" stroke-linecap="round"/>
 
-    <!-- The cross on the alignment axis — filled rounded rects (the one primitive
-         every renderer in the pipeline draws reliably). Proportioned like Rec's. -->
-    <rect x="479" y="300" width="66" height="400" rx="33" fill="url(#gold)"/>
-    <rect x="382" y="407" width="260" height="66" rx="33" fill="url(#gold)"/>
+    <!-- The cross — SundayRec's exact geometry, so the two marks read as one
+         family at any size. Filled rounded rects: the one primitive every
+         renderer in the pipeline draws reliably. -->
+    <rect x="479.5" y="320.0" width="65.0" height="425.8" rx="6.2" fill="url(#gold)"/>
+    <rect x="376.8" y="437.6" width="270.4" height="65.0" rx="6.2" fill="url(#gold)"/>
   </g>
 </svg>

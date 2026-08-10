@@ -1,0 +1,3 @@
+# Build intermediate: regenerate with the two commands in sundaysync-icon.svg.
+# The SVG is the source of truth; the committed rasters live one level up.
+sundaysync-icon-1024.png

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Vinduet sier ikke lenger navnet sitt to ganger (D-058).** Den innebygde macOS-tittellinja
+  skrev «SundaySync» rett over appens eget ordmerke. Tittelteksten er nå skjult i vinduet;
+  navnet står fortsatt i Mission Control, i Dock og i ⌘-tab, der systemet trenger det. Selve
+  tittellinja er urørt — knappene sitter der de alltid har sittet, ingenting er flyttet.
+- **Ikonet hører hjemme i familien (D-058).** Korset i SundaySync-ikonet har nå nøyaktig samme
+  form som i SundayRec, bølgene er tegnet tynnere, og gullet er den samme to-trinns
+  gradienten som resten av suiten bruker. Lilla bakgrunn og den hårfine hvite ringen er som
+  før. Hele ikonsettet er generert på nytt fra kilde-SVG-en, og de to kommandoene som gjør
+  det står nå dokumentert i SVG-en selv.
+
 ## v0.3.0-beta.1
 
 **v0.3 — see it, and hear it, before you export.** The result screen stops being a report

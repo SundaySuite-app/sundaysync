@@ -1944,3 +1944,95 @@ The regenerate affordance inside a clip is a `role="button"` span inside a real 
 HTML parser un-nests a real nested `<button>`). axe's `nested-interactive` rule flags it,
 correctly, and the trade is deliberate — so it is now written down in
 KNOWN_LIMITATIONS.md's UI section rather than living only in a source comment.
+
+## D-058 — V04-U1: the native title bar goes quiet, and the icon joins the family
+
+Two pieces of owner design feedback from the v0.3-beta round, both about the app saying the
+same thing twice.
+
+### `hiddenTitle`, not a transparent title bar
+
+The macOS window drew **SundaySync** in its title bar, directly above the in-app wordmark
+that says the same word in the app's own type. One of them had to go, and it was not going
+to be the one the app controls.
+
+`app.windows[0]` gains `"hiddenTitle": true` and nothing else. Specifically **not**
+`titleBarStyle: "Transparent"` (or `"Overlay"`): that would pull the traffic lights down
+into the content and hand the app a header-inset problem — every top-level view would owe
+the window buttons a ~78 px keep-out region on the left, at two different heights depending
+on whether the window is full-screen, and the app has a horizontally scrolling timeline
+directly under that band. `hiddenTitle` suppresses *only the text*. The bar keeps its
+height, its material and its buttons; nothing in `app/src` moves, and the in-app `<h1>`
+wordmark is left exactly as it was.
+
+`"title": "SundaySync"` **stays**. It is not redundant — it is what Mission Control, the
+Dock's window menu, ⌘-tab and the Window menu read. Deleting it would trade one visible
+duplicate for four places that say "Untitled".
+
+The flag is macOS-only in effect; on Windows and Linux it is inert, and the title keeps
+being drawn there, which is the platform convention on both.
+
+### The icon: SundayRec's cross, verbatim
+
+The two marks are meant to read as siblings — SundayRec is `(( ✝ ))`, sound *around* the
+cross; SundaySync is `≈≈ ✝ ≈≈`, two waveforms brought into phase either side of it. They did
+not look like siblings, because the crosses were different objects: Rec's is a sharp,
+architectural cross (`rx="6.2"`), Sync's was a pair of pill-ended bars (`rx="33"`) that read
+as a soft plus sign.
+
+Sync's cross is now Rec's geometry, copied number for number rather than approximated:
+
+    upright   x=479.5  y=320.0  w=65.0  h=425.8  rx=6.2
+    crossbar  x=376.8  y=437.6  w=270.4 h=65.0   rx=6.2
+
+The gold gradient is aligned to Rec's two stops (`#F2D58A → #EBB84B`); the third, darker
+stop (`#D89B2E`) that Sync had at the bottom is dropped, because it made the lower half of
+Sync's cross visibly heavier than Rec's at the same size. The purple radial background and
+the inner white hairline ring are deliberately unchanged — the *colour* is what tells the
+two apps apart, the *shape* is what says they ship together.
+
+**Wave weight is 20, against Rec's 15 — on purpose.** Rec's four arcs are closed, concentric
+curves that enclose area; the eye reads them as heavier than their stroke width. Sync's waves
+are open serpentine strokes with nothing enclosed, which read optically *thinner* at equal
+weight. Rendered side by side, 20 is what matches; 15 would have made Sync's mark look
+like a lighter-weight variant rather than the same family. Previously 46, which read as a
+different logo altogether next to Rec.
+
+**Wave position was judged from the render, not calculated.** Rec's cross has its mass
+centred near y 533 (upright 320 → 745.8), noticeably lower than the old pill cross, so the
+waves had to come down with it. Both candidates were rasterised and looked at: the arithmetic
++15 px shift (pair y-centres 467 / 599) left a band of background between the two strokes of
+each pair roughly as wide as the wave amplitude, and each pair fell apart into two unrelated
+squiggles. Tightening to **475 / 591** nests them back into one `≈≈` unit while keeping the
+pair centred on the crossbar. That is what shipped.
+
+At 32 px the cross is fully legible and the waves reduce to faint hints — the intended
+degradation, verified on the generated raster rather than assumed.
+
+### The regeneration commands are written down now
+
+They never were, which is why the set had drifted from its source. They live in a header
+comment in `app/src-tauri/icons/src/sundaysync-icon.svg`, run from `app/`:
+
+    rsvg-convert -w 1024 -h 1024 src-tauri/icons/src/sundaysync-icon.svg \
+      -o src-tauri/icons/src/sundaysync-icon-1024.png
+    npx tauri icon src-tauri/icons/src/sundaysync-icon-1024.png -o src-tauri/icons
+
+The 1024 intermediate is a build artifact and is `.gitignore`d; the SVG is the source of
+truth and the rasters one level up are the committed output.
+
+**Renderer trap, now confirmed twice.** The known one is that `<line>` elements are silently
+dropped by this pipeline (see the SundaySync logo work in the v0.2 round) — everything in the
+file has to be a filled shape or a stroked `<path>`. The new one, found while looking for an
+`rsvg-convert` substitute: **ImageMagick is not one.** `magick icon.svg -resize 1024x1024`
+on this exact file produces a black squircle — background only, every gradient, path and
+`clipPath`-clipped child gone — and exits 0. The documented macOS fallback is Quick Look:
+
+    qlmanage -t -s 1024 -o src-tauri/icons/src src-tauri/icons/src/sundaysync-icon.svg
+    mv src-tauri/icons/src/sundaysync-icon.svg.png \
+       src-tauri/icons/src/sundaysync-icon-1024.png
+
+which renders the file correctly and is what this set was generated from. The general lesson
+is the one that keeps recurring in this repo: a rasteriser that drops what it does not
+understand, silently and with a zero exit code, is indistinguishable from one that worked —
+so the output gets *looked at*, at 1024, 128 and 32 px, every time.
