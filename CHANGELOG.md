@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- **Groundwork: the app can now pull a single video frame out of a clip (D-069).** The first
+  half of being able to *see* the clip you are marking, and there is nothing to look at yet —
+  the panel that shows the picture comes next. What landed is the part that had to be right
+  first: one frame, decoded on demand at whatever second you point at, handed to the screen as
+  a picture and never written to disk. It needed no new permission of any kind — the app is
+  exactly as locked down as it was yesterday, which is the reason this shape was chosen over
+  the obvious ones. Getting a frame out of a 45-minute AVCHD file on a NAS in two-thirds of a
+  second rather than nine took a seek arrangement that looks odd and is not: the numbers
+  behind it, and the way the fast-looking version quietly fails on all 136 of the owner's
+  `.MTS` files, are written down in D-069 so nobody tidies it away. Files with no picture in
+  them at all — the WAVs, the stills — come back as "no picture" rather than as an error,
+  because on a normal card that is about one file in twelve and it is not a fault.
+
 ## v0.4.0-beta.1
 
 **v0.4 — the picture comes first, and it moves.** v0.3 made the *result* something you could
