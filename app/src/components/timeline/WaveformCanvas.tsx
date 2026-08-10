@@ -15,6 +15,7 @@ import {
   regenerateAnalysis,
   type WaveformError,
 } from "../../timeline/waveformStore";
+import type { PrewarmStatus } from "../../state";
 import type { WaveformMeta } from "../../types";
 
 /** Peak drawn as a faint outline behind a solid RMS body — D-053's "planned (S4)" note on
@@ -47,17 +48,28 @@ const HEADROOM = 0.92;
  * clip against the viewport first, so a 60-minute clip at a tight zoom never asks for a
  * 100 000px-wide backing store. Pan/zoom redraw through one rAF per `view` change, so a
  * wheel-driven drag (many `view` updates a second) never queues more than one draw.
+ *
+ * **v0.4 (D-062): `analysisStatus` is a fourth, temporary state.** While the background
+ * pre-analysis (D-059) has this file in flight, a cache miss is not a condition to offer a
+ * fix for — it is a wait of a few seconds. The regenerate control would be actively wrong
+ * there: `regenerate_analysis` does not preempt a prewarm, so pressing it can only earn
+ * the D-046 busy refusal, and the bytes it would rebuild are already being written.
+ * `pending → ready` is what makes the waveforms appear one by one instead of all at once
+ * after a sync; `pending → failed` simply hands the regenerate control back.
  */
 export function WaveformCanvas({
   t,
   file,
   span,
   view,
+  analysisStatus = null,
 }: {
   t: Strings;
   file: string;
   span: ClipExtent;
   view: TimelineView;
+  /** Where the background pass is with this file (D-062); null when it is not tracking it. */
+  analysisStatus?: PrewarmStatus | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [meta, setMeta] = useState<WaveformMeta | null>(null);
@@ -99,6 +111,23 @@ export function WaveformCanvas({
 
   // Unmount: whatever load is outstanding, whoever started it.
   useEffect(() => () => cancelMetaRef.current?.(), []);
+
+  // The progressive half of D-062: the background pass has just WRITTEN this file's
+  // analysis. `App.tsx` dropped the store's memo for it (`waveformStore.invalidate`) on
+  // the same event, so a plain re-read is all that is needed — and it is needed, because
+  // nothing else in this component would ever look again: `loadMeta` re-runs on a file
+  // change, and the only answer this clip has is the `cache_missing` rejection from
+  // before the pass got to it.
+  //
+  // Narrow on purpose: only `pending → ready`. A pass that ended without reaching this
+  // file (`failed`) wrote nothing, so re-reading could only produce the same rejection —
+  // it just stops being a wait, and the render below hands back the regenerate control.
+  const lastStatus = useRef(analysisStatus);
+  useEffect(() => {
+    const arrived = lastStatus.current === "pending" && analysisStatus === "ready";
+    lastStatus.current = analysisStatus;
+    if (arrived) loadMeta();
+  }, [analysisStatus, loadMeta]);
 
   // Draw: rAF-throttled against `view` (pan/zoom), `span` (a placement override moving
   // this clip), and `meta`. Level bytes are fetched lazily, only once meta is in and only
@@ -208,6 +237,13 @@ export function WaveformCanvas({
     },
     [onRegenerate],
   );
+
+  if (analysisStatus === "pending" && (error?.kind === "cacheMissing" || error?.kind === "busy")) {
+    // D-062: not an offer, a status. Deliberately not a control — see the component note
+    // above for why the regenerate button would be the wrong thing to show here, and
+    // `.waveform__analysing` in styles.css for why it must stay click-through.
+    return <span className="waveform__analysing">{t.waveformAnalysing}</span>;
+  }
 
   if (error?.kind === "cacheMissing" || error?.kind === "busy") {
     // Both are answered by the same action — rebuild this one clip's analysis — so both

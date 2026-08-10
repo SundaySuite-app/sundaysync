@@ -21,6 +21,7 @@ import {
   scrollbarValueNow,
   thumbOffsetFracToScrollMs,
 } from "../../timeline/viewport";
+import type { PrewarmStatus } from "../../state";
 import type { Device, Placement, ScanManifest, SyncOutcome } from "../../types";
 import { ClipDetail } from "./ClipDetail";
 import { PlayheadLine } from "./PlayheadLine";
@@ -118,10 +119,13 @@ export function TimelineView({
   manifest,
   overrides,
   reference,
+  excluded,
+  prewarm,
   outcome,
   stale,
   deviceIds,
   onOverride,
+  onExclude,
 }: {
   t: Strings;
   phase: TimelinePhase;
@@ -131,11 +135,18 @@ export function TimelineView({
   overrides: Record<string, string>;
   /** The operator's chosen reference file, pre-sync — null means "let the engine pick". */
   reference: string | null;
+  /** Files taken out of the run (v0.4, D-062). Filtered out of the drawn spans in BOTH
+   *  phases: the panel and the timeline are two views of one decision, and a clip still
+   *  on screen for a file the next run will skip is the loudest possible way to disagree. */
+  excluded: ReadonlySet<string>;
+  /** file -> background pre-analysis status (v0.4, D-062), passed through to the clips. */
+  prewarm: Record<string, PrewarmStatus>;
   /** Null until a sync has produced one. */
   outcome: SyncOutcome | null;
   stale: boolean;
   deviceIds: string[];
   onOverride: (file: string, device: string) => void;
+  onExclude: (file: string) => void;
 }) {
   const [selected, setSelected] = useState<Placement | null>(null);
   const result = outcome?.result ?? null;
@@ -158,8 +169,15 @@ export function TimelineView({
   const outcomeContent: TimelineContent | null = useMemo(() => {
     if (!outcome) return null;
     const { result, durations } = outcome;
+    // D-062: a file removed AFTER a sync leaves the picture at once. The result is marked
+    // stale by the same action, so what is on screen is a run that no longer matches the
+    // sources — but it must at least match the sources the operator can see. `excluded` is
+    // therefore a real dependency of this memo, unlike `overrides` (see the note above):
+    // a removed clip has to leave `audioClips` too, or playback would keep sounding a file
+    // that is no longer on the timeline.
+    const placed = result.placements.filter((p) => !excluded.has(p.file));
     const placements = new Map<string, Placement>();
-    for (const p of result.placements) placements.set(p.file, p);
+    for (const p of placed) placements.set(p.file, p);
 
     // A placement with no `durations` entry is a hole in the outcome, not a zero-length
     // clip — the probe failed to report a duration, or the two halves of the outcome
@@ -167,10 +185,10 @@ export function TimelineView({
     // reads as "this camera recorded nothing", which is a lie the operator would act on
     // (finding 15). So the set is carried down to the clips, which say so.
     const unknownDurations = new Set<string>(
-      result.placements.filter((p) => durations[p.file] === undefined).map((p) => p.file),
+      placed.filter((p) => durations[p.file] === undefined).map((p) => p.file),
     );
 
-    const spans: ClipSpan[] = result.placements.map((p) => {
+    const spans: ClipSpan[] = placed.map((p) => {
       const startMs = p.offset_seconds * 1000;
       return { file: p.file, startMs, endMs: startMs + (durations[p.file] ?? 0) * 1000 };
     });
@@ -197,7 +215,7 @@ export function TimelineView({
     // clip while the ears heard another, and every judgement made here would be wrong.
     // Drift correction is applied downstream, in `clipTransport`, so this stays the raw
     // §5 placement — the thing the timeline draws.
-    const audioClips: PlacedClip[] = result.placements.map((p) => ({
+    const audioClips: PlacedClip[] = placed.map((p) => ({
       file: p.file,
       device: p.device,
       startSec: (p.offset_seconds * 1000 - originMs) / 1000,
@@ -215,12 +233,20 @@ export function TimelineView({
       unknownStart: NO_FILES,
       referenceDevice: result.reference?.device ?? null,
     };
-  }, [outcome]);
+  }, [outcome, excluded]);
 
   const sourceContent: TimelineContent | null = useMemo(() => {
     // Only the phase that has no outcome pays for this.
     if (outcome || !manifest) return null;
-    const layout = sourceSpans(manifest, overrides);
+    const layout = sourceSpans(
+      // D-062: the removed files never reach the layout, so they cannot influence the
+      // origin either — a lens-cap take with the earliest timestamp used to anchor t=0 for
+      // the whole drop, and removing it should move the picture, not just delete a box.
+      excluded.size === 0
+        ? manifest
+        : { ...manifest, files: manifest.files.filter((f) => !excluded.has(f.file)) },
+      overrides,
+    );
     const { originMs, spanMs } = contentBounds(layout.tracks.flatMap((s) => s.spans));
     const tracks = layout.tracks.map(({ device, spans }) => ({
       device,
@@ -245,7 +271,7 @@ export function TimelineView({
       unknownStart: layout.unknownStart,
       referenceDevice,
     };
-  }, [outcome, manifest, overrides, reference]);
+  }, [outcome, manifest, overrides, reference, excluded]);
 
   const {
     tracks,
@@ -318,6 +344,14 @@ export function TimelineView({
     const [num, den] = result.sequence.fps.split("/").map(Number);
     return Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : undefined;
   }, [result]);
+
+  // D-062: the shelf is where a file that would not sync gets its ✕. It is the row the
+  // operator is most likely to want gone — "this one never works, stop telling me" — and
+  // before this stage the only way to act on it was to re-drop the folder without it.
+  const shelved = useMemo(
+    () => (result ? result.unsynced.filter((u) => !excluded.has(u.file)) : []),
+    [result, excluded],
+  );
 
   const toggleMute = useCallback((id: string) => engine.toggleMute(id), [engine]);
   const toggleSolo = useCallback((id: string) => engine.toggleSolo(id), [engine]);
@@ -634,6 +668,7 @@ export function TimelineView({
               isReference={referenceDevice === device.id}
               unknownDurations={unknownDurations}
               unknownStart={unknownStart}
+              prewarm={prewarm}
               laneHeight={LANE_H}
               onSelect={setSelected}
               muted={playback.muted.includes(device.id)}
@@ -689,12 +724,13 @@ export function TimelineView({
 
       {result && <Transport t={t} clips={audioClips} fps={fps} />}
 
-      {result && result.unsynced.length > 0 && (
+      {result && shelved.length > 0 && (
         <UnsyncedShelf
           t={t}
-          unsynced={result.unsynced}
+          unsynced={shelved}
           deviceIds={deviceIds}
           onOverride={onOverride}
+          onExclude={onExclude}
         />
       )}
 

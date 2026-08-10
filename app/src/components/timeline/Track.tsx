@@ -2,6 +2,7 @@ import { memo } from "react";
 import type { Strings } from "../../i18n";
 import { visibleClips, type TimelineView } from "../../timeline/geometry";
 import type { ClipSpan } from "../../timeline/laneLayout";
+import type { PrewarmStatus } from "../../state";
 import type { Device, Placement } from "../../types";
 import { CameraIcon, MicIcon } from "../icons";
 import { Clip } from "./Clip";
@@ -45,6 +46,7 @@ export const Track = memo(function Track({
   isReference,
   unknownDurations,
   unknownStart,
+  prewarm,
   laneHeight,
   onSelect,
   muted,
@@ -68,6 +70,9 @@ export const Track = memo(function Track({
   unknownDurations: ReadonlySet<string>;
   /** Pre-sync: files with no creation timestamp, sitting at zero (v0.4, D-061). */
   unknownStart: ReadonlySet<string>;
+  /** file -> background pre-analysis status (v0.4, D-062); a file the pass is not
+   *  tracking is simply absent. */
+  prewarm: Record<string, PrewarmStatus>;
   laneHeight: number;
   onSelect: (placement: Placement) => void;
   muted: boolean;
@@ -144,6 +149,7 @@ export const Track = memo(function Track({
                     view={view}
                     durationUnknown={unknownDurations.has(item.file)}
                     startUnknown={unknownStart.has(item.file)}
+                    analysisStatus={prewarm[item.file] ?? null}
                     onSelect={onSelect}
                   />
                 );

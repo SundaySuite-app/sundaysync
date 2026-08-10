@@ -134,3 +134,175 @@ describe("phase machine", () => {
     expect(s.banner).toBeNull();
   });
 });
+
+
+// ---- Per-file removal + background pre-analysis (V04-U4, D-062) ---------------------
+
+const CAM = "/x/C0001.MP4";
+const WAV = "/x/Z.WAV";
+const BROKEN = "/x/broken.mp4";
+
+/** The same manifest with one unreadable file the scan reported but could not use. */
+const manifestWithProblem: ScanManifest = {
+  ...manifest,
+  unsynced: [{ file: BROKEN, reason: "decode_error" }],
+};
+
+function toSourcesWith(m: ScanManifest): AppState {
+  let s = reducer(initialState, { type: "inputs/add", paths: ["/x"] });
+  s = reducer(s, { type: "scan/done", seq: s.scanSeq, manifest: m });
+  return s;
+}
+
+describe("removing files from the run (D-062)", () => {
+  it("an excluded file joins the excluded list", () => {
+    const s = reducer(toSources(), { type: "files/exclude", file: CAM });
+    expect(s.excluded).toEqual([CAM]);
+  });
+
+  it("excluding twice is idempotent — the same state object comes back", () => {
+    const once = reducer(toSources(), { type: "files/exclude", file: CAM });
+    const twice = reducer(once, { type: "files/exclude", file: CAM });
+    expect(twice).toBe(once);
+    expect(twice.excluded).toEqual([CAM]);
+  });
+
+  it("restoring a file that was never excluded changes nothing", () => {
+    const s = toSources();
+    expect(reducer(s, { type: "files/restore", file: CAM })).toBe(s);
+  });
+
+  it("the file's override goes with it, and does not come back on restore", () => {
+    // A device assignment for a file nobody is syncing is a claim about a run that will
+    // not happen — and one that would silently reappear when the file did.
+    let s = reducer(toSources(), { type: "override/set", file: CAM, device: "rec" });
+    s = reducer(s, { type: "files/exclude", file: CAM });
+    expect(s.overrides[CAM]).toBeUndefined();
+    s = reducer(s, { type: "files/restore", file: CAM });
+    expect(s.overrides[CAM]).toBeUndefined();
+    expect(s.excluded).toEqual([]);
+  });
+
+  it("removing the reference file clears the star", () => {
+    // Otherwise the run would name a reference the engine was told to skip, and would
+    // quietly pick its own instead — a decision the operator never saw being taken.
+    let s = reducer(toSources(), { type: "reference/set", file: WAV });
+    s = reducer(s, { type: "files/exclude", file: WAV });
+    expect(s.reference).toBeNull();
+  });
+
+  it("removing a DIFFERENT file leaves the star alone", () => {
+    let s = reducer(toSources(), { type: "reference/set", file: WAV });
+    s = reducer(s, { type: "files/exclude", file: CAM });
+    expect(s.reference).toBe(WAV);
+  });
+
+  it("excluding and restoring both mark a shown result stale", () => {
+    let s = reducer(toResult(), { type: "files/exclude", file: CAM });
+    expect(s.phase.name === "result" && s.phase.stale).toBe(true);
+
+    // And again on the way back: the run stored is one this file was not part of.
+    s = reducer(toResult(), { type: "files/exclude", file: CAM });
+    s = { ...s, phase: { ...(s.phase as Extract<AppState["phase"], { name: "result" }>), stale: false } };
+    s = reducer(s, { type: "files/restore", file: CAM });
+    expect(s.phase.name === "result" && s.phase.stale).toBe(true);
+  });
+
+  it("a removal before any sync has nothing to mark stale", () => {
+    const s = reducer(toSources(), { type: "files/exclude", file: CAM });
+    expect(s.phase.name).toBe("sources");
+  });
+
+  it("a re-scan keeps exclusions the scan still knows about — including problem files", () => {
+    let s = toSourcesWith(manifestWithProblem);
+    s = reducer(s, { type: "files/exclude", file: BROKEN });
+    s = reducer(s, { type: "files/exclude", file: CAM });
+    s = reducer(s, { type: "inputs/add", paths: ["/more"] });
+    s = reducer(s, { type: "scan/done", seq: s.scanSeq, manifest: manifestWithProblem });
+    // Both survive: one is a scanned file, the other a reported problem file. The panel
+    // shows a row for each, so an exclusion for each must still be actionable.
+    expect(s.excluded.sort()).toEqual([BROKEN, CAM].sort());
+  });
+
+  it("a re-scan prunes an exclusion for a path the scan no longer reports at all", () => {
+    let s = toSourcesWith(manifestWithProblem);
+    s = reducer(s, { type: "files/exclude", file: BROKEN });
+    s = reducer(s, { type: "inputs/add", paths: ["/more"] });
+    // This scan found neither the file nor the problem — the card is gone.
+    s = reducer(s, { type: "scan/done", seq: s.scanSeq, manifest });
+    expect(s.excluded).toEqual([]);
+  });
+
+  it("clearing the inputs forgets the exclusions", () => {
+    // An `excluded` list surviving "clear all" would silently filter the NEXT drop.
+    let s = reducer(toSources(), { type: "files/exclude", file: CAM });
+    s = reducer(s, { type: "inputs/clear" });
+    expect(s.excluded).toEqual([]);
+    expect(s.prewarm).toEqual({});
+  });
+
+  it("removing the last root forgets them too", () => {
+    let s = reducer(toSources(), { type: "files/exclude", file: CAM });
+    s = reducer(s, { type: "inputs/removeRoot", path: "/x" });
+    expect(s.phase.name).toBe("empty");
+    expect(s.excluded).toEqual([]);
+  });
+});
+
+describe("background pre-analysis bookkeeping (D-062)", () => {
+  it("a scan starts every file pending", () => {
+    expect(toSources().prewarm).toEqual({ [CAM]: "pending", [WAV]: "pending" });
+  });
+
+  it("an excluded file is not prewarmed across a re-scan", () => {
+    // It is not part of the run, so decoding it is work nobody asked for — and a clip
+    // that is not drawn cannot be waiting for anything.
+    let s = reducer(toSources(), { type: "files/exclude", file: CAM });
+    s = reducer(s, { type: "inputs/add", paths: ["/more"] });
+    s = reducer(s, { type: "scan/done", seq: s.scanSeq, manifest });
+    expect(s.prewarm).toEqual({ [WAV]: "pending" });
+  });
+
+  it("excluding a file drops it from the prewarm map immediately", () => {
+    const s = reducer(toSources(), { type: "files/exclude", file: CAM });
+    expect(CAM in s.prewarm).toBe(false);
+    expect(s.prewarm[WAV]).toBe("pending");
+  });
+
+  it("prewarm:file records ready and failed per file", () => {
+    let s = reducer(toSources(), { type: "prewarm/file", file: CAM, ok: true });
+    s = reducer(s, { type: "prewarm/file", file: WAV, ok: false });
+    expect(s.prewarm).toEqual({ [CAM]: "ready", [WAV]: "failed" });
+  });
+
+  it("an event for a file this scan does not know about is ignored", () => {
+    // A late event from a superseded pass. Inventing an entry would leave a status
+    // behind for a clip that does not exist.
+    const s = toSources();
+    expect(reducer(s, { type: "prewarm/file", file: "/x/GONE.MP4", ok: true })).toBe(s);
+  });
+
+  it("prewarm/progress carries the aggregate tick and settling clears it", () => {
+    let s = reducer(toSources(), { type: "prewarm/progress", completed: 1, total: 2 });
+    expect(s.prewarmProgress).toEqual({ completed: 1, total: 2 });
+    s = reducer(s, { type: "prewarm/settled" });
+    expect(s.prewarmProgress).toBeNull();
+  });
+
+  it("settling turns what is still pending into failed and leaves ready alone", () => {
+    // React batches updates within one task, so the LAST file's `prewarm:file` can land
+    // in the same batch as the promise resolving. Wiping the map here would erase that
+    // file's `ready` before any component saw it — and the waveform it had just written
+    // would never be read.
+    let s = reducer(toSources(), { type: "prewarm/file", file: CAM, ok: true });
+    s = reducer(s, { type: "prewarm/settled" });
+    expect(s.prewarm).toEqual({ [CAM]: "ready", [WAV]: "failed" });
+  });
+
+  it("settling an already-settled pass is a no-op", () => {
+    const s = reducer(reducer(toSources(), { type: "prewarm/settled" }), {
+      type: "prewarm/settled",
+    });
+    expect(reducer(s, { type: "prewarm/settled" })).toBe(s);
+  });
+});

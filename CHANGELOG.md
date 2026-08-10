@@ -18,7 +18,23 @@
   not part of the run. Excluding a clip makes an existing result stale exactly as changing
   the sources does, so an export can never quietly contain a file you took out.
 
-*Backend only in this entry — the buttons that drive it land with the rest of v0.4.*
+- **Du kan fjerne enkeltfiler, enten de kan leses eller ikke (D-062).** Hver fil i
+  kildelista har fått en ✕ — også filene appen ikke fikk lest, og de som ikke lot seg
+  synkronisere. Fila forsvinner med det samme fra tidslinja, fra enhetsgruppa og fra
+  tellingene, og den blir ikke tatt med i neste synkronisering eller eksport. Ingenting er
+  slettet: nederst i panelet ligger «Fjernet (N)» med «Angre» på hver rad, så ett feilklikk
+  koster ett nytt klikk — ikke å slippe inn hele mappa på nytt. Stjerna følger med om du
+  fjerner referansefila, slik at appen velger referanse på nytt i stedet for å peke på noe
+  som ikke er med.
+- **Bakgrunnsanalysen er koblet på — bølgeformene dukker opp én og én (D-062).** Analysen
+  D-059 la inn starter nå av seg selv så snart appen har lest kildene, mens du fortsatt
+  ser over lista. Hvert klipp tegner bølgeformen sin i det øyeblikket akkurat den fila er
+  ferdig, i stedet for at alt kommer samtidig etter synken. Klipp som venter sier
+  «Analyserer …» framfor å tilby «Bygg bølgeform på nytt» — knappen ville bare fått et
+  «opptatt»-svar, og bølgeformen er på vei uansett. Trykker du Synkroniser midt i det hele,
+  starter synken med én gang; bakgrunnsjobben trekker seg stille tilbake. Framdriften vises
+  som én rolig linje i panelet, ikke som en framdriftsindikator — dette er ikke noe du
+  venter på.
 
 ### Changed
 

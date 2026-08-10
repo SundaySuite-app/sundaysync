@@ -2266,3 +2266,119 @@ for the same reason: the timeline now mounts a waveform for every dropped file, 
 `timeline-scale.spec.ts`'s 302-file scenario gained real `creation_time` stamps — a card
 dump reporting none would pile all 302 clips at t=0 before the sync, which is correct
 behaviour but not the virtualization case that file exists to prove.
+
+
+## D-062 — V04-U4: removal is a frontend set the engine enforces, and the prewarm is fire-and-forget
+
+**V04-U4.** U2 built the two backend capabilities and nothing called them; U3 made the
+timeline the main view. This stage joins them up. Two owner asks, verbatim:
+
+> «det må være mulig å fjerne filer som er lagt til på en enkel måte, om de kan leses
+> eller ikke»
+
+> «programmet kan også begynne å analysere audio med en gang filene blir lagt inn slik at
+> det ikke tar så lang tid i selve syncen»
+
+U5 takes D-063.
+
+### Removal: one set in the reducer, enforced in the engine
+
+`AppState.excluded` is a plain `string[]` of paths, and it is the *only* place a removal
+lives. Everything else derives from it: the timeline's spans (both phases), the panel's
+device groups, the summary chips, the problem group, the unsynced shelf — and the
+`excludeFiles` argument on `run_sync` and `export_timeline`.
+
+That last part is the whole point, and it is why this could not be done by filtering
+`inputs`: `sync` re-walks every folder it is handed (D-060), so a shell that trimmed the
+input list would hand the engine a folder and then be surprised when the engine found the
+file in it. The filter has to travel with the request, and it is folded into the F6
+fingerprint on the way, so an exclusion change makes a stored run stale exactly as an
+override or a new reference does. Null is sent when nothing is excluded — `#[serde(default)]`
+makes that identical to an empty list, so a frontend that never sends the field behaves
+precisely as it did before D-060.
+
+Excluding a file takes three things with it, each of which would be a lie if it stayed:
+
+- **its override**, which would otherwise name a device for a file nobody is syncing — and
+  would silently reappear the moment the file was restored;
+- **the reference star**, if it pointed there. A run naming a reference the engine was told
+  to skip would have the engine quietly pick its own instead — a decision the operator
+  never saw being taken;
+- **the freshness of a shown result**, via `markStale`, in both directions: restoring a
+  file changes the set of sources just as removing one does.
+
+`scan/done` prunes `excluded` the same way it has always pruned `overrides` and
+`reference`, but against a **wider** set — `manifest.files ∪ manifest.unsynced` — because a
+problem file is removable too and its path is only ever in the second list.
+
+### The ✕ is everywhere a file is listed, and there is a way back
+
+Readable rows, problem rows and the result view's unsynced shelf all carry the same
+control with the same accessible-name pattern. The operator does not sort a drop into
+removable and non-removable: the lens-cap take and the file that would not decode are one
+wish («om de kan leses eller ikke»). The one place it is deliberately absent is the root
+chips at the top, which already have their own remove button — a second `<button>` inside
+`.roots .root` would make "remove this root" ambiguous to a screen reader and to the
+browser tier that clicks it.
+
+A collapsed **«Fjernet (N)»** group at the foot of the panel lists what was removed, each
+row with an «Angre». Removal is cheap and reversible or it is not a simple way to do
+anything: without the undo, one misclick costs re-dropping the whole card.
+
+### Prewarm wiring: started by a scan, abandoned without a word
+
+`scan/done` hands `manifest.files` (minus exclusions) to `prewarm_analysis` exactly once
+per scan sequence. Every rejection is swallowed: a `busy:` refusal (D-046) is the expected
+answer when a sweep or a sync already holds the slot, and `cancelled` is what a `run_sync`
+that preempted the pass produces (D-059) — both are the system working. Prewarming is an
+optimisation; the sync does the same extraction itself, so there is nothing to report and
+nothing to apologise for.
+
+Deliberately **not** re-invoked when the exclusion set changes. The extra files an in-flight
+pass decodes are harmless cache entries, whereas restarting on every ✕ would throw away
+the work in progress each time. A new scan does re-invoke — that is a genuinely different
+set of files. `inputs/clear` (and any other route back to the empty phase) calls
+`cancel_prewarm`: speculative work on a drop that no longer exists.
+
+The aggregate `prewarm:progress` tick gets its **own** element and class (`.prewarm`),
+never `.progress__label` or the `ProgressBar`. Those belong to the scan and the sync, which
+are things the operator is waiting for; this is work the app started on its own and will
+drop the moment Sync is pressed. Dressing it as progress would say the app is busy when it
+is not — and it would collide with the specs that pin those selectors.
+
+### Progressive waveforms, and why `pending` hides the rebuild button
+
+`prewarm:file` does two things per event, in this order: `waveformStore.invalidate(file)`,
+then a state update. The order is load-bearing — the memo has to be gone before the clip
+re-renders, or the re-read replays the `cache_missing` rejection cached from before the
+pass got there.
+
+`PrewarmStatus` is per file, threaded down as **one file's status**, not the map: `Clip` is
+`memo`ised, and a map prop would hand every clip a fresh value on every single decoded
+file, re-rendering the whole timeline once per event.
+
+While a file is `pending`, its waveform slot shows «Analyserer …» **instead of** the
+D-052 rebuild control. That is not cosmetic: `regenerate_analysis` does not preempt a
+prewarm, so pressing the button could only earn a busy refusal — and the bytes it would
+rebuild are being written at that moment. `failed` (a file that would not decode, §7.2, or
+a pass that ended before reaching it) hands the ordinary affordance straight back, because
+then a rebuild *is* the right offer.
+
+Only the `pending → ready` transition triggers a re-read. `pending → failed` wrote nothing,
+so re-reading could only produce the same rejection.
+
+`prewarm/settled` rewrites the still-`pending` entries to `failed` rather than clearing the
+map. React batches updates within one task, and the last file's `prewarm:file` can land in
+the same batch as the promise resolving; a wholesale clear would erase that file's `ready`
+before any component saw it, and the waveform it had just written would never be read. The
+rewrite is order-insensitive, which is the property that matters.
+
+### Spec notes
+
+`prewarm_analysis`/`cancel_prewarm` are answered in `BOOT_FIXTURES` so that every spec
+that is not about pre-analysis sees the pass end immediately and the waveform affordances
+behave exactly as they did before this stage. `removal.spec.ts` asserts the recorded
+`run_sync`/`export_timeline` args rather than the screen — the screen cannot show whether
+the engine was told. `prewarm.spec.ts` covers the frontend half of D-059's preemption:
+`run_sync` is in flight while the prewarm's promise is still open, i.e. the UI never waits
+for the pass to let go.
