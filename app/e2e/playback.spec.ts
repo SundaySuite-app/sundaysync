@@ -15,6 +15,7 @@ import {
   scanManifest,
   SETTLED_SETTINGS,
   syncOutcome,
+  waitForResult,
 } from "./harness";
 
 // Playback (V03-S5, D-055) — hearing that the sync is right, before exporting.
@@ -90,7 +91,10 @@ async function reachResult(page: Page, outcome: Record<string, unknown>, extra =
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
   await page.getByRole("button", { name: en.syncButton }).click();
-  await expect(page.locator(".timeline__body")).toBeVisible();
+  // The timeline itself is mounted from the sources phase on (V04-U3, D-061), so waiting
+  // for it no longer means the sync has finished — `waitForResult` gates on the
+  // result-only export bar instead.
+  await waitForResult(page);
 }
 
 const playButton = (page: Page) => page.getByRole("button", { name: en.play });
@@ -195,7 +199,10 @@ test("drift correction turned off puts every source back at rate 1", async ({ pa
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
   await page.getByRole("button", { name: en.syncButton }).click();
-  await expect(page.locator(".timeline__body")).toBeVisible();
+  // The timeline itself is mounted from the sources phase on (V04-U3, D-061), so waiting
+  // for it no longer means the sync has finished — `waitForResult` gates on the
+  // result-only export bar instead.
+  await waitForResult(page);
   await startPlaying(page);
 
   const h = await hook(page);

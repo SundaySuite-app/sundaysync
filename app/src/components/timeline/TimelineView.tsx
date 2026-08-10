@@ -11,6 +11,7 @@ import {
 } from "../../timeline/geometry";
 import { stackClips, type ClipSpan } from "../../timeline/laneLayout";
 import { getPlayheadMs, publishPlayheadMs } from "../../timeline/playhead";
+import { sourceSpans } from "../../timeline/sourceLayout";
 import {
   clampScroll,
   contentBounds,
@@ -20,7 +21,7 @@ import {
   scrollbarValueNow,
   thumbOffsetFracToScrollMs,
 } from "../../timeline/viewport";
-import type { Placement, SyncOutcome } from "../../types";
+import type { Device, Placement, ScanManifest, SyncOutcome } from "../../types";
 import { ClipDetail } from "./ClipDetail";
 import { PlayheadLine } from "./PlayheadLine";
 import { Ruler } from "./Ruler";
@@ -30,7 +31,20 @@ import { UnsyncedShelf } from "./UnsyncedShelf";
 import { warningText } from "./warnings";
 
 /**
- * §9.4's result view, rebuilt as a real timeline (v0.3, D-051).
+ * The timeline — the main view (v0.4, D-061), not just §9.4's result view (v0.3, D-051).
+ *
+ * One component, mounted from the moment there is a manifest and never torn down again:
+ * `sources` draws the dropped files where their own creation timestamps say they belong,
+ * `syncing` keeps exactly those boxes on screen (dimmed, inert) while the engine works,
+ * and `result` swaps in the solved placements. Same component, same DOM nodes, same clip
+ * identities (`data-file`) throughout — which is the structural precondition for the later
+ * stage that animates each clip HOPPING from its metadata guess to where the audio says it
+ * actually was. A view that unmounted between phases could only cut.
+ *
+ * What is result-only is what genuinely does not exist before a sync: the transport and
+ * the playhead (there is no schedule to play), the sequence meta, the unsynced shelf, the
+ * clip-detail dialog, the per-device mute/solo. What works in every phase is everything
+ * about *looking*: ruler, zoom, pan, scrollbar, virtualization.
  *
  * The old view laid clips out in percent of the widest span, which meant a
  * 4-second offset inside a 90-minute service was a sub-pixel sliver nobody could
@@ -69,27 +83,81 @@ const SCROLL_STEP_FRACTION = 0.1;
 
 const VIEWPORT_ID = "timeline-viewport";
 
+const NO_FILES: ReadonlySet<string> = new Set();
+
+/** Which of the app's phases this timeline is drawing. */
+export type TimelinePhase = "sources" | "syncing" | "result";
+
+/** Everything the tracks are drawn from, whichever phase produced it. */
+interface TimelineContent {
+  tracks: { device: Device; rows: ClipSpan[][] }[];
+  contentSpanMs: number;
+  /** Null before a sync: there are spans, but no engine placements behind them. */
+  placements: Map<string, Placement> | null;
+  audioClips: PlacedClip[];
+  unknownDurations: ReadonlySet<string>;
+  unknownStart: ReadonlySet<string>;
+  /** Device carrying the reference badge — the engine's pick, or the operator's. */
+  referenceDevice: string | null;
+}
+
+/** Nothing to draw — no manifest yet. Frozen so it is never a fresh identity per render. */
+const EMPTY_CONTENT: TimelineContent = {
+  tracks: [],
+  contentSpanMs: 1,
+  placements: null,
+  audioClips: [],
+  unknownDurations: NO_FILES,
+  unknownStart: NO_FILES,
+  referenceDevice: null,
+};
+
 export function TimelineView({
   t,
+  phase,
+  manifest,
+  overrides,
+  reference,
   outcome,
   stale,
   deviceIds,
   onOverride,
 }: {
   t: Strings;
-  outcome: SyncOutcome;
+  phase: TimelinePhase;
+  /** The scan — what the pre-sync layout is drawn from. */
+  manifest: ScanManifest | null;
+  /** file → device, the same overlay the sources panel groups by (D-027/D-028). */
+  overrides: Record<string, string>;
+  /** The operator's chosen reference file, pre-sync — null means "let the engine pick". */
+  reference: string | null;
+  /** Null until a sync has produced one. */
+  outcome: SyncOutcome | null;
   stale: boolean;
   deviceIds: string[];
   onOverride: (file: string, device: string) => void;
 }) {
   const [selected, setSelected] = useState<Placement | null>(null);
-  const { result, durations } = outcome;
+  const result = outcome?.result ?? null;
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
 
   // ---- Content: seconds → ms, grouped per device, stacked into sub-tracks ----
-  const { tracks, contentSpanMs, placements, audioClips, unknownDurations } = useMemo(() => {
+  //
+  // Two sources, one shape. With an outcome, the §5 contract's `offset_seconds` are the
+  // truth. Without one, `sourceSpans` positions the same files by their own creation
+  // timestamps — provisional, and marked as such downstream. Everything below these memos
+  // (zoom, pan, virtualization, the ruler) works on the shape, not on where it came from.
+  //
+  // Deliberately TWO memos, not one with the union of their dependencies. The outcome's
+  // content must not be rebuilt because `overrides` changed: an override on a result marks
+  // it stale, and rebuilding `audioClips` there would hand `Transport` a fresh array,
+  // which re-enters `engine.setClips` and rebuilds the audio schedule underneath whatever
+  // is currently playing.
+  const outcomeContent: TimelineContent | null = useMemo(() => {
+    if (!outcome) return null;
+    const { result, durations } = outcome;
     const placements = new Map<string, Placement>();
     for (const p of result.placements) placements.set(p.file, p);
 
@@ -138,8 +206,56 @@ export function TimelineView({
       projectedEndErrorMs: p.projected_end_error_ms,
     }));
 
-    return { tracks, contentSpanMs: spanMs, placements, audioClips, unknownDurations };
-  }, [result, durations]);
+    return {
+      tracks,
+      contentSpanMs: spanMs,
+      placements,
+      audioClips,
+      unknownDurations,
+      unknownStart: NO_FILES,
+      referenceDevice: result.reference?.device ?? null,
+    };
+  }, [outcome]);
+
+  const sourceContent: TimelineContent | null = useMemo(() => {
+    // Only the phase that has no outcome pays for this.
+    if (outcome || !manifest) return null;
+    const layout = sourceSpans(manifest, overrides);
+    const { originMs, spanMs } = contentBounds(layout.tracks.flatMap((s) => s.spans));
+    const tracks = layout.tracks.map(({ device, spans }) => ({
+      device,
+      rows: stackClips(
+        spans.map((s) => ({ ...s, startMs: s.startMs - originMs, endMs: s.endMs - originMs })),
+      ),
+    }));
+    // Pre-sync the reference is whatever the operator starred, under the same override
+    // overlay the grouping uses — so the badge follows a file that has been moved.
+    const referenceDevice =
+      reference === null
+        ? null
+        : (overrides[reference] ??
+          manifest.files.find((f) => f.file === reference)?.device ??
+          null);
+    return {
+      tracks,
+      contentSpanMs: spanMs,
+      placements: null,
+      audioClips: [],
+      unknownDurations: NO_FILES,
+      unknownStart: layout.unknownStart,
+      referenceDevice,
+    };
+  }, [outcome, manifest, overrides, reference]);
+
+  const {
+    tracks,
+    contentSpanMs,
+    placements,
+    audioClips,
+    unknownDurations,
+    unknownStart,
+    referenceDevice,
+  }: TimelineContent = outcomeContent ?? sourceContent ?? EMPTY_CONTENT;
 
   // ---- View state: zoom + pan, measured against the lane column's width ----
   const [view, setView] = useState<View>(() => ({
@@ -184,6 +300,13 @@ export function TimelineView({
     publishPlayheadMs(0);
   }, [result]);
 
+  // A pre-sync clip has no detail to show; if one was open when a re-scan pulled the
+  // outcome out from under it, close it rather than leaving a dialog describing a
+  // placement that no longer exists.
+  useEffect(() => {
+    if (!result) setSelected(null);
+  }, [result]);
+
   // ---- Playback (v0.3, D-055) ----
   const engine = getPlaybackEngine();
   const playback = useSyncExternalStore(engine.subscribe, engine.getSnapshot);
@@ -191,13 +314,14 @@ export function TimelineView({
   // `"25/1"` → 25. The exporter's half-frame gate needs it so playback corrects exactly
   // the clips the export will; an unparseable or mixed rate simply skips that gate.
   const fps = useMemo(() => {
+    if (!result) return undefined;
     const [num, den] = result.sequence.fps.split("/").map(Number);
     return Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : undefined;
-  }, [result.sequence.fps]);
+  }, [result]);
 
   const toggleMute = useCallback((id: string) => engine.toggleMute(id), [engine]);
   const toggleSolo = useCallback((id: string) => engine.toggleSolo(id), [engine]);
-  const showSolo = result.devices.length > 1;
+  const showSolo = (result?.devices.length ?? 0) > 1;
 
   const zoomBy = useCallback(
     (factor: number, anchorX?: number) =>
@@ -433,14 +557,27 @@ export function TimelineView({
 
   return (
     <section
-      className={`result timeline${stale ? " result--stale" : ""}`}
+      className={[
+        "result timeline",
+        stale ? "result--stale" : "",
+        // Dimmed and inert while the engine runs: the boxes stay on screen (that is the
+        // point) but nothing here is a decision the operator can still change mid-run.
+        phase === "syncing" ? "timeline--busy" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       aria-label={t.timelineAria}
       tabIndex={0}
       onKeyDown={onKeyDown}
     >
       <div className="result__meta">
         <span>
-          {t.sequenceMeta(result.sequence.fps, formatDuration(result.sequence.duration_seconds))}
+          {result
+            ? t.sequenceMeta(
+                result.sequence.fps,
+                formatDuration(result.sequence.duration_seconds),
+              )
+            : t.presyncMeta}
         </span>
         <div className="timeline__zoom">
           <button type="button" className="ghost" onClick={() => zoomBy(1 / BUTTON_FACTOR)} aria-label={t.zoomOut}>
@@ -455,11 +592,18 @@ export function TimelineView({
         </div>
       </div>
 
-      {result.warnings.map((w, i) => (
+      {result?.warnings.map((w, i) => (
         <p key={i} className="banner banner--warn">
           <span>{warningText(t, w)}</span>
         </p>
       ))}
+
+      {/* A recorder that wrote no timestamp has told us nothing about when it started, so
+          its clips sit at the very start of the timeline. Without this line that reads as
+          "the app thinks these all began together", which is a claim nobody made. */}
+      {unknownStart.size > 0 && (
+        <p className="timeline__note">{t.presyncUnknownStart(unknownStart.size)}</p>
+      )}
 
       <div className="timeline__frame">
         <div
@@ -487,21 +631,27 @@ export function TimelineView({
               view={view}
               visStart={visStart}
               visEnd={visEnd}
-              isReference={result.reference?.device === device.id}
+              isReference={referenceDevice === device.id}
               unknownDurations={unknownDurations}
+              unknownStart={unknownStart}
               laneHeight={LANE_H}
               onSelect={setSelected}
               muted={playback.muted.includes(device.id)}
               soloed={playback.soloed.includes(device.id)}
               showSolo={showSolo}
+              showMix={result !== null}
               onToggleMute={toggleMute}
               onToggleSolo={toggleSolo}
             />
           ))}
 
-          <div className="timeline__overlay">
-            <PlayheadLine view={view} />
-          </div>
+          {/* The playhead is the transport's marker; before a sync there is nothing to
+              play and no schedule for it to point into. */}
+          {result && (
+            <div className="timeline__overlay">
+              <PlayheadLine view={view} />
+            </div>
+          )}
         </div>
 
         <div className="track track--scrollbar">
@@ -537,9 +687,9 @@ export function TimelineView({
         </div>
       </div>
 
-      <Transport t={t} clips={audioClips} fps={fps} />
+      {result && <Transport t={t} clips={audioClips} fps={fps} />}
 
-      {result.unsynced.length > 0 && (
+      {result && result.unsynced.length > 0 && (
         <UnsyncedShelf
           t={t}
           unsynced={result.unsynced}
@@ -548,7 +698,7 @@ export function TimelineView({
         />
       )}
 
-      {selected && (
+      {selected && result && (
         <ClipDetail
           t={t}
           clip={selected}

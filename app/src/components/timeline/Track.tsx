@@ -27,7 +27,12 @@ import { Clip } from "./Clip";
  * that's late?" is a per-device question, and answering it means soloing a
  * device while looking at its lane. Solo is hidden when there is only one
  * device: soloing the only thing playing is a control with no effect, and a
- * control with no effect is worse than no control.
+ * control with no effect is worse than no control. By the same rule the whole
+ * mix block is hidden before a sync (`showMix`, v0.4 D-061): there is no
+ * schedule to play yet, so there is nothing to mute.
+ *
+ * `placements` is null before a sync — the clips are drawn from the scan's own
+ * creation timestamps and there is no engine detail behind them yet.
  */
 export const Track = memo(function Track({
   t,
@@ -39,19 +44,21 @@ export const Track = memo(function Track({
   visEnd,
   isReference,
   unknownDurations,
+  unknownStart,
   laneHeight,
   onSelect,
   muted,
   soloed,
   showSolo,
+  showMix,
   onToggleMute,
   onToggleSolo,
 }: {
   t: Strings;
   device: Device;
   rows: ClipSpan[][];
-  /** Placement per file — the engine detail behind each drawn box. */
-  placements: Map<string, Placement>;
+  /** Placement per file — the engine detail behind each drawn box. Null before a sync. */
+  placements: Map<string, Placement> | null;
   view: TimelineView;
   visStart: number;
   visEnd: number;
@@ -59,12 +66,16 @@ export const Track = memo(function Track({
   /** Files the outcome carries no duration for — drawn as a stated unknown rather than
    *  as a silent zero-length sliver (V03-S6, finding 15). */
   unknownDurations: ReadonlySet<string>;
+  /** Pre-sync: files with no creation timestamp, sitting at zero (v0.4, D-061). */
+  unknownStart: ReadonlySet<string>;
   laneHeight: number;
   onSelect: (placement: Placement) => void;
   muted: boolean;
   soloed: boolean;
   /** False when this result has a single device — see the note above. */
   showSolo: boolean;
+  /** False before a sync: nothing is playable yet. */
+  showMix: boolean;
   onToggleMute: (device: string) => void;
   onToggleSolo: (device: string) => void;
 }) {
@@ -79,28 +90,30 @@ export const Track = memo(function Track({
           {name}
         </span>
         {isReference && <span className="badge badge--ref">{t.reference}</span>}
-        <span className="track__mix">
-          <button
-            type="button"
-            className={`mixbtn${muted ? " mixbtn--on mixbtn--mute" : ""}`}
-            aria-label={muted ? t.unmuteDevice(name) : t.muteDevice(name)}
-            aria-pressed={muted}
-            onClick={() => onToggleMute(device.id)}
-          >
-            {t.muteShort}
-          </button>
-          {showSolo && (
+        {showMix && (
+          <span className="track__mix">
             <button
               type="button"
-              className={`mixbtn${soloed ? " mixbtn--on mixbtn--solo" : ""}`}
-              aria-label={soloed ? t.unsoloDevice(name) : t.soloDevice(name)}
-              aria-pressed={soloed}
-              onClick={() => onToggleSolo(device.id)}
+              className={`mixbtn${muted ? " mixbtn--on mixbtn--mute" : ""}`}
+              aria-label={muted ? t.unmuteDevice(name) : t.muteDevice(name)}
+              aria-pressed={muted}
+              onClick={() => onToggleMute(device.id)}
             >
-              {t.soloShort}
+              {t.muteShort}
             </button>
-          )}
-        </span>
+            {showSolo && (
+              <button
+                type="button"
+                className={`mixbtn${soloed ? " mixbtn--on mixbtn--solo" : ""}`}
+                aria-label={soloed ? t.unsoloDevice(name) : t.soloDevice(name)}
+                aria-pressed={soloed}
+                onClick={() => onToggleSolo(device.id)}
+              >
+                {t.soloShort}
+              </button>
+            )}
+          </span>
+        )}
       </div>
       <div className="track__lanes">
         {rows.length === 0 ? (
@@ -117,16 +130,20 @@ export const Track = memo(function Track({
               style={{ height: `${laneHeight}px` }}
             >
               {visibleClips(row, visStart, visEnd).map(({ item }) => {
-                const placement = placements.get(item.file);
-                if (!placement) return null;
+                // With an outcome in hand, a span whose file has no placement is a hole
+                // in the outcome and is not drawn. Before a sync there are no placements
+                // at all, and every span is drawn — that is the whole point (D-061).
+                const placement = placements ? placements.get(item.file) : null;
+                if (placements && !placement) return null;
                 return (
                   <Clip
                     key={item.file}
                     t={t}
                     span={item}
-                    placement={placement}
+                    placement={placement ?? null}
                     view={view}
                     durationUnknown={unknownDurations.has(item.file)}
+                    startUnknown={unknownStart.has(item.file)}
                     onSelect={onSelect}
                   />
                 );

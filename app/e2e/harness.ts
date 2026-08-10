@@ -1,4 +1,5 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { en } from "../src/i18n";
 
 // The one way a spec boots the app.
 //
@@ -123,6 +124,18 @@ export async function emit(page: Page, name: string, payload: unknown): Promise<
     ([n, p]) => (window as unknown as Record<string, any>).__SUNDAYSYNC_EMIT__(n, p),
     [name, payload] as const,
   );
+}
+
+/**
+ * Wait until the RESULT view is on screen.
+ *
+ * Since V04-U3 (D-061) the timeline is the main view: `.timeline__body`, `.clip` and the
+ * ruler are all mounted from the sources phase onwards, so none of them means "the sync
+ * has finished" any more. The export bar is result-only and is what actually distinguishes
+ * the phases — every spec that used to gate on the timeline appearing now gates on this.
+ */
+export async function waitForResult(page: Page): Promise<void> {
+  await expect(page.getByRole("button", { name: en.exportButton })).toBeVisible();
 }
 
 export interface BootOptions {
@@ -370,6 +383,64 @@ export function scanManifest(over: Partial<Record<string, unknown>> = {}): Recor
     ],
     unsynced: [],
     ...over,
+  };
+}
+
+/** The earliest recording time in `presyncScanManifest()` — the pre-sync timeline's t=0. */
+export const PRESYNC_ORIGIN_ISO = "2026-08-09T10:00:00.000Z";
+/** How much later `CamB/C0002.MP4` started, in seconds. */
+export const PRESYNC_B_OFFSET_SEC = 600;
+
+/**
+ * A drop the pre-sync timeline (V04-U3, D-061) has something to say about: two camera
+ * files whose containers carry a real `creation_time` ten minutes apart, and a recorder
+ * WAV that carries none at all.
+ *
+ * The mix is the point. Two stamps are needed for an offset to exist — with only one
+ * timestamped file, that file IS the origin and sits at zero — and the untimed WAV is what
+ * the "N files have no recording time" note is about.
+ */
+export function presyncScanManifest(): Record<string, unknown> {
+  const laterIso = new Date(
+    Date.parse(PRESYNC_ORIGIN_ISO) + PRESYNC_B_OFFSET_SEC * 1000,
+  ).toISOString();
+  return {
+    schema: 1,
+    devices: [
+      { id: "rec", label: "Zoom recorder", kind: "audio", files: ["/Users/e2e/shoot/ZOOM0001.WAV"] },
+      { id: "cam-a", label: "Camera A", kind: "video", files: ["/Users/e2e/shoot/CamA/C0001.MP4"] },
+      { id: "cam-b", label: "Camera B", kind: "video", files: ["/Users/e2e/shoot/CamB/C0002.MP4"] },
+    ],
+    files: [
+      {
+        file: "/Users/e2e/shoot/ZOOM0001.WAV",
+        device: "rec",
+        duration_seconds: 3600,
+        format_name: "wav",
+        audio: { codec: "pcm_s16le", sample_rate: 48000, channels: 2 },
+        video: null,
+        creation_time: null,
+      },
+      {
+        file: "/Users/e2e/shoot/CamA/C0001.MP4",
+        device: "cam-a",
+        duration_seconds: 1800,
+        format_name: "mov,mp4",
+        audio: { codec: "aac", sample_rate: 48000, channels: 2 },
+        video: { codec: "h264", width: 1920, height: 1080, fps: "25/1" },
+        creation_time: PRESYNC_ORIGIN_ISO,
+      },
+      {
+        file: "/Users/e2e/shoot/CamB/C0002.MP4",
+        device: "cam-b",
+        duration_seconds: 1800,
+        format_name: "mov,mp4",
+        audio: { codec: "aac", sample_rate: 48000, channels: 2 },
+        video: { codec: "h264", width: 1920, height: 1080, fps: "25/1" },
+        creation_time: laterIso,
+      },
+    ],
+    unsynced: [],
   };
 }
 

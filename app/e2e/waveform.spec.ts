@@ -1,5 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
-import { boot, BOOT_FIXTURES, fn, scanManifest, SETTLED_SETTINGS, syncOutcome, type Fixtures } from "./harness";
+import {
+  boot,
+  BOOT_FIXTURES,
+  fn,
+  scanManifest,
+  SETTLED_SETTINGS,
+  syncOutcome,
+  waitForResult,
+  type Fixtures,
+} from "./harness";
 import { en } from "../src/i18n";
 
 // Per-clip waveforms (v0.3 S4, D-052): `WaveformCanvas.tsx` draws inside `Clip.tsx`'s
@@ -31,16 +40,23 @@ function waveformMetaOk(): unknown {
   return fn(`(args) => ({ totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} })`);
 }
 
-/** Rejects the FIRST call with `cache_missing:<file>` (D-052's affordance state), then
- *  answers normally — what a real cache does once `regenerate_analysis` has repopulated
- *  it. Stateful via a closure the IIFE captures once at fixture-install time, so the
- *  counter survives across the multiple `invoke` calls one spec makes. */
+/** Rejects the FIRST call FOR EACH FILE with `cache_missing:<file>` (D-052's affordance
+ *  state), then answers that file normally — what a real cache does once
+ *  `regenerate_analysis` has repopulated it. Stateful via a closure the IIFE captures once
+ *  at fixture-install time, so the counter survives across the multiple `invoke` calls one
+ *  spec makes.
+ *
+ *  Keyed by FILE since V04-U3 (D-061): the timeline is mounted before the sync too, so
+ *  every dropped file asks for its own meta, and a single global counter would hand this
+ *  spec's "first call" to whichever clip happened to mount first. */
 function waveformMetaCacheMissingThenOk(): unknown {
   return fn(`(() => {
-    let calls = 0;
+    const seen = new Set();
     return (args) => {
-      calls += 1;
-      if (calls === 1) return Promise.reject("cache_missing:" + args.file);
+      if (!seen.has(args.file)) {
+        seen.add(args.file);
+        return Promise.reject("cache_missing:" + args.file);
+      }
       return { totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} };
     };
   })()`);
@@ -51,15 +67,18 @@ function waveformMetaAlwaysCacheMissing(): unknown {
   return fn(`(args) => Promise.reject("cache_missing:" + args.file)`);
 }
 
-/** Fails the FIRST call with something that is neither a cache miss nor a busy refusal
- *  (an IO blip, a sweep that raced the read), then answers normally — the transient the
- *  `other` branch used to turn into a permanent, unclearable dead end (finding 7). */
+/** Fails each file's FIRST call with something that is neither a cache miss nor a busy
+ *  refusal (an IO blip, a sweep that raced the read), then answers normally — the
+ *  transient the `other` branch used to turn into a permanent, unclearable dead end
+ *  (finding 7). Per-file for the same reason as the fixture above. */
 function waveformMetaTransientThenOk(): unknown {
   return fn(`(() => {
-    let calls = 0;
+    const seen = new Set();
     return (args) => {
-      calls += 1;
-      if (calls === 1) return Promise.reject("io: Resource temporarily unavailable");
+      if (!seen.has(args.file)) {
+        seen.add(args.file);
+        return Promise.reject("io: Resource temporarily unavailable");
+      }
       return { totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} };
     };
   })()`);
@@ -113,7 +132,10 @@ async function reachResult(page: Page, waveformFixtures: Fixtures) {
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
   await page.getByRole("button", { name: en.syncButton }).click();
-  await expect(page.locator(".timeline__body")).toBeVisible();
+  // The timeline itself is mounted from the sources phase on (V04-U3, D-061), so waiting
+  // for it no longer means the sync has finished — `waitForResult` gates on the
+  // result-only export bar instead.
+  await waitForResult(page);
 }
 
 /** The one placed clip's `.clip` box — scoped so `.clip__waveform`/regenerate-control

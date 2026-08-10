@@ -63,8 +63,12 @@ test.describe("drop, scan, sources", () => {
     });
 
     await expect(dropzone).not.toHaveClass(/dropzone--over/);
-    await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
-    await expect(page.getByText(en.fileCount(2))).toBeVisible();
+    const sources = page.getByRole("region", { name: en.sourcesTitle });
+    await expect(sources).toBeVisible();
+    // The summary chip specifically. Since V04-U3 (D-061) "2 files" is also a substring of
+    // the timeline's own "2 files have no recording time …" note, so a page-wide text
+    // match is ambiguous — and this assertion was always about the panel's chip.
+    await expect(sources.locator(".chips .chip", { hasText: en.fileCount(2) })).toBeVisible();
   });
 
   test("a drag-leave without a drop clears the hover state and adds nothing", async ({ page }) => {
@@ -95,9 +99,17 @@ test.describe("drop, scan, sources", () => {
     // The chip specifically: "1 problem file" also repeats verbatim in the unsynced
     // group's own meta line, so a bare text match is ambiguous.
     await expect(sources.locator(".chip.badge--problem")).toHaveText(en.problemCount(1));
-    await expect(sources.getByText(en.unsyncedTitle)).toBeVisible();
-    await expect(sources.getByText(en.reasonDecodeError)).toBeVisible();
-    await expect(sources.getByText("broken.mp4")).toBeVisible();
+    // Since V04-U3 (D-061) the group is a `<details>`, shut by default — the count is
+    // still on screen (chip + summary), the LIST is one click away. Reported, not hidden:
+    // the test asserts both halves.
+    const group = sources.locator(".device-group--problems");
+    await expect(group.getByText(en.unsyncedTitle)).toBeVisible();
+    await expect(group.getByText(en.reasonDecodeError)).toBeHidden();
+
+    await group.locator("summary").click();
+
+    await expect(group.getByText(en.reasonDecodeError)).toBeVisible();
+    await expect(group.getByText("broken.mp4")).toBeVisible();
   });
 
   test("removing the only root returns to the empty state", async ({ page }) => {
@@ -129,7 +141,7 @@ test.describe("drop, scan, sources", () => {
     await sources.getByLabel(`${en.moveToDevice}: C0001.MP4`).selectOption("rec");
 
     // The recorder group now shows 2 files; the camera group disappears (0 files left
-    // in it is not rendered, per SourcesView's grouped.filter).
+    // in it is not rendered, per SourcesPanel's grouped.filter).
     await expect(sources.getByText(en.fileCount(2)).first()).toBeVisible();
     await expect(sources.locator(".device-group__name").filter({ hasText: "Camera A" })).toBeHidden();
     // No result exists yet, so there is nothing to mark stale — no such banner appears.

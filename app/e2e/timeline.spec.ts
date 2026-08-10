@@ -1,5 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
-import { boot, BOOT_FIXTURES, scanManifest, SETTLED_SETTINGS, syncOutcome } from "./harness";
+import {
+  boot,
+  BOOT_FIXTURES,
+  scanManifest,
+  SETTLED_SETTINGS,
+  syncOutcome,
+  waitForResult,
+} from "./harness";
 import { en } from "../src/i18n";
 
 // The interactive result timeline (v0.3 S3, D-051) — §9.4's lanes rebuilt with a real
@@ -24,7 +31,10 @@ async function reachResult(page: Page, outcome: Record<string, unknown> = syncOu
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
   await page.getByRole("button", { name: en.syncButton }).click();
-  await expect(page.locator(".timeline__body")).toBeVisible();
+  // The timeline itself is mounted from the sources phase on (V04-U3, D-061), so waiting
+  // for it no longer means the sync has finished — `waitForResult` gates on the
+  // result-only export bar instead.
+  await waitForResult(page);
 }
 
 /** The base fixture with `placements` replacing the single one, plus their durations. */

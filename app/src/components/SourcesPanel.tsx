@@ -6,7 +6,7 @@ import type { Device, FileEntry, ScanManifest, UnsyncedReason } from "../types";
 import { CameraIcon, MicIcon, StarIcon } from "./icons";
 
 /**
- * §9.2 — the sources view: what the app understood from your drop, BEFORE any sync.
+ * §9.2 — the sources panel: what the app understood from your drop, BEFORE any sync.
  *
  * The first build only showed the device summary after a full sync, which made the
  * chips a post-hoc restatement instead of the confirmation §9.2 places at step 2. The
@@ -15,13 +15,27 @@ import { CameraIcon, MicIcon, StarIcon } from "./icons";
  * Device overrides are a view-layer overlay here: rows render under their overridden
  * device via `useMemo`, and the engine applies the same map for real at sync time
  * (D-027/D-028). That keeps the scan pure and the preview immediate.
+ *
+ * **v0.4 (D-061): this is a panel under the timeline, not the main view.** The timeline
+ * above now answers "what did I drop and roughly when was it recorded?"; what is left
+ * here is the per-file work the timeline cannot do — starring a reference, moving a file
+ * to another device, and reading the badges. Two consequences:
+ *
+ *   - Unreadable files collapse into ONE `<details>` group, shut by default. They are a
+ *     footnote on a good drop, and an open list of them was the loudest thing on the
+ *     screen; the count stays visible in the summary and in the chip above, so nothing is
+ *     hidden, only folded.
+ *   - `busy` dims and freezes the panel while a sync runs. The panel stays mounted (the
+ *     operator can still read it) but an override applied mid-run would silently belong to
+ *     the NEXT run, not the one they are watching.
  */
-export function SourcesView({
+export function SourcesPanel({
   t,
   manifest,
   inputs,
   overrides,
   reference,
+  busy = false,
   onRemoveRoot,
   onClearAll,
   onOverride,
@@ -32,6 +46,8 @@ export function SourcesView({
   inputs: string[];
   overrides: Record<string, string>;
   reference: string | null;
+  /** A sync is running: read-only until it finishes. */
+  busy?: boolean;
   onRemoveRoot: (path: string) => void;
   onClearAll: () => void;
   onOverride: (file: string, device: string) => void;
@@ -67,7 +83,14 @@ export function SourcesView({
   };
 
   return (
-    <section className="sources" aria-label={t.sourcesTitle}>
+    <section
+      className={`sources sources--panel${busy ? " sources--busy" : ""}`}
+      aria-label={t.sourcesTitle}
+      // Inert rather than disabled per control: the whole panel is one thing that is
+      // unavailable for the duration of the run, and 40 individually greyed selects say
+      // that far less clearly than one dimmed block does.
+      aria-busy={busy || undefined}
+    >
       <div className="roots">
         {inputs.map((root) => (
           <span key={root} className="root" title={root}>
@@ -137,11 +160,14 @@ export function SourcesView({
       })}
 
       {problems > 0 && (
-        <div className="device-group">
-          <div className="device-group__head">
+        // Shut by default (D-061). `<details>` rather than a hand-rolled toggle: the
+        // browser already gives it the right role, the right keyboard behaviour and the
+        // right announcement, and the summary keeps the count visible while collapsed.
+        <details className="device-group device-group--problems">
+          <summary className="device-group__head">
             <span className="device-group__name">{t.unsyncedTitle}</span>
             <span className="device-group__meta">{t.problemCount(problems)}</span>
-          </div>
+          </summary>
           {manifest.unsynced.map((u) => (
             <div key={u.file} className="filerow filerow--problem">
               <span className="filerow__name" title={u.file}>
@@ -152,7 +178,7 @@ export function SourcesView({
               <span />
             </div>
           ))}
-        </div>
+        </details>
       )}
     </section>
   );

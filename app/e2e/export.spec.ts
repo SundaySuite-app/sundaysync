@@ -1,5 +1,13 @@
 import { test, expect } from "@playwright/test";
-import { boot, BOOT_FIXTURES, fn, scanManifest, SETTLED_SETTINGS, syncOutcome } from "./harness";
+import {
+  boot,
+  BOOT_FIXTURES,
+  fn,
+  scanManifest,
+  SETTLED_SETTINGS,
+  syncOutcome,
+  waitForResult,
+} from "./harness";
 import { en } from "../src/i18n";
 
 // Export (§9.5) — including F6/D-036's defense-in-depth: the frontend already disables
@@ -25,10 +33,10 @@ async function reachResult(page: import("@playwright/test").Page, extra: Record<
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
   await page.getByRole("button", { name: en.syncButton }).click();
-  // Scoped to the timeline's clip boxes, not a bare accessible-name match: SourcesView
-  // keeps rendering alongside the timeline in the "result" phase, and its own "Use as
-  // reference: C0001.MP4" button also contains that filename substring.
-  await expect(page.locator(".clip", { hasText: "C0001.MP4" })).toBeVisible();
+  // Since V04-U3 (D-061) `.clip` boxes exist from the sources phase on — the pre-sync
+  // ones are `disabled` and carry `clip--pre` — so their presence no longer means the
+  // sync has finished. `waitForResult` gates on the result-only export bar.
+  await waitForResult(page);
 }
 
 test.describe("export", () => {

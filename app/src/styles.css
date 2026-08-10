@@ -236,6 +236,38 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .sources { display: flex; flex-direction: column; gap: 1rem; }
 
+/* v0.4 (D-061): the panel under the timeline. The list is no longer the main view, so it
+   is tightened — smaller rows, tighter gaps — to sit as a reference table beneath the
+   thing that now answers the first question. */
+.sources--panel { gap: 0.6rem; font-size: 0.9375rem; }
+.sources--panel .filerow { padding: 0.3rem 0.75rem; }
+.sources--panel .device-group__head { padding: 0.4rem 0.75rem; }
+/* A sync is running: readable, but not a surface you can change mid-run — an override
+   applied now would silently belong to the NEXT run. */
+.sources--busy { opacity: 0.5; pointer-events: none; }
+
+/* The one collapsed group: files the scan could not use. Shut by default — a footnote on
+   a good drop, with its count still on the summary line and in the chip above. */
+.device-group--problems > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.device-group--problems > summary::-webkit-details-marker { display: none; }
+/* Own disclosure triangle, so it reads the same in every browser and rotates on open. */
+.device-group--problems > summary::before {
+  content: "▸";
+  color: var(--text3);
+  font-size: 0.75rem;
+  transition: transform 0.15s;
+}
+.device-group--problems[open] > summary::before { transform: rotate(90deg); }
+.device-group--problems > summary:hover { background: var(--surface3); }
+.device-group--problems > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .roots { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
 .root {
   display: inline-flex;
@@ -355,6 +387,14 @@ select:hover, input:hover { border-color: var(--accent-border); }
   outline-offset: 4px;
   border-radius: var(--r);
 }
+
+/* While the engine runs, the clips stay exactly where they are — visible, dimmed, and
+   inert. Nothing here is a decision the operator can still change mid-run, and a control
+   that answers a click by doing nothing is worse than one that is plainly unavailable. */
+.timeline--busy { opacity: 0.55; pointer-events: none; }
+
+/* One quiet line above the frame — the pre-sync caveat that cannot live in a clip. */
+.timeline__note { color: var(--text3); font-size: 0.8125rem; }
 
 .timeline__zoom { margin-left: auto; display: flex; gap: 0.15rem; }
 .timeline__zoom button { padding: 0.15rem 0.55rem; font-size: 0.8125rem; line-height: 1.4; }
@@ -479,6 +519,17 @@ select:hover, input:hover { border-color: var(--accent-border); }
   background: var(--green);
 }
 .clip--warn { background: var(--orange); color: #1d1503; }
+/* Before a sync (v0.4, D-061). Deliberately NOT green: green is the §9.4 word for "the
+   engine placed this and stands behind it", and nothing here has been placed yet. A muted
+   slate box says "this is your material, roughly where its own timestamp claims" — and
+   when the sync lands, the hop to the real position happens in colour as well as in x. */
+.clip--pre {
+  background: var(--surface3);
+  color: var(--text2);
+  border: 1px solid var(--border2);
+  cursor: default;
+}
+.clip--pre:hover { filter: none; }
 /* The outcome has no duration for this file, so the box is a 3px sliver standing in for a
    length nobody knows (V03-S6, finding 15). Hollow and dashed rather than solid: the eye
    reads a dashed edge as "not a measurement", which is exactly the claim. The accessible
