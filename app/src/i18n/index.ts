@@ -87,6 +87,16 @@ export const nb = {
   // tegnes som en strek. Sies rett ut i stedet for å se ut som et null-langt opptak.
   clipDurationUnknown: "Ukjent lengde",
 
+  // Tidslinjen som hovedvisning (v0.4, D-061) — klippene vises før synkronisering,
+  // plassert etter filenes egne tidsstempler. Det er en gjetning, og teksten sier det.
+  presyncMeta: "Foreløpig plassering fra filenes tidsstempler",
+  presyncStart: "opptaksstart",
+  presyncStartUnknown: "ukjent opptakstidspunkt",
+  presyncUnknownStart: (n: number) =>
+    n === 1
+      ? "1 fil mangler opptakstidspunkt og vises fra start."
+      : `${n} filer mangler opptakstidspunkt og vises fra start.`,
+
   // Per-clip waveforms (v0.3 S4, D-052)
   waveformRegenerate: "Bygg bølgeform på nytt",
   waveformRegenerating: "Bygger på nytt …",
@@ -353,6 +363,14 @@ export const en: Strings = {
   scrollbarAria: "Scroll the timeline",
   // V03-S6 (finding 15) — see the nb comment above.
   clipDurationUnknown: "Length unknown",
+
+  presyncMeta: "Provisional positions from the files' own timestamps",
+  presyncStart: "recorded at",
+  presyncStartUnknown: "unknown recording time",
+  presyncUnknownStart: (n: number) =>
+    n === 1
+      ? "1 file has no recording time and is shown from the start."
+      : `${n} files have no recording time and are shown from the start.`,
 
   // Per-clip waveforms (v0.3 S4, D-052)
   waveformRegenerate: "Rebuild waveform",

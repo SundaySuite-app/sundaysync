@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { Strings } from "../../i18n";
-import { msToX, type TimelineView } from "../../timeline/geometry";
+import { formatTimecode, msToX, type TimelineView } from "../../timeline/geometry";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import { usePlayheadInsideSpan } from "../../timeline/playhead";
 import { basename } from "../../types";
@@ -14,14 +14,24 @@ const MIN_CLIP_PX = 3;
 const LABEL_KEEP_PX = 36;
 
 /**
- * One placed file, as a box on its sub-track. Position and width come from the
- * shared view state, so the clip's pixels are a pure function of zoom/pan — no
+ * One file, as a box on its sub-track. Position and width come from the shared
+ * view state, so the clip's pixels are a pure function of zoom/pan — no
  * percentages, no "relative to the widest clip" arithmetic like the old lanes.
  *
  * Green means placed and quiet, orange means placed with something to say; the
  * §9.4 colour language (PluralEyes', kept) survives the rewrite unchanged, as
  * does the accessible name, which still reads the REAL `offset_seconds` rather
  * than the timeline-local milliseconds the box is drawn at.
+ *
+ * **Pre-sync (v0.4, D-061): `placement` is null.** The same box is drawn where the
+ * file's own creation timestamp says it belongs, in a neutral tone that is
+ * deliberately NOT the placed green — green is a claim the engine has not made
+ * yet — and the button is `disabled`, because there is no placement to open a
+ * detail dialog on. It stays a `<button>` rather than becoming a `<div>` on
+ * purpose: the element type is what React reconciles on, and a clip that swapped
+ * tags at the sources→result boundary would tear down its own subtree (waveform
+ * state included) at exactly the moment the timeline is supposed to be showing
+ * continuity.
  */
 export const Clip = memo(function Clip({
   t,
@@ -29,20 +39,24 @@ export const Clip = memo(function Clip({
   placement,
   view,
   durationUnknown = false,
+  startUnknown = false,
   onSelect,
 }: {
   t: Strings;
   span: ClipSpan;
-  placement: Placement;
+  /** Null before a sync has placed this file — see the note above. */
+  placement: Placement | null;
   view: TimelineView;
   /** The outcome carries no duration for this file — see the `clip--nodur` note below. */
   durationUnknown?: boolean;
+  /** Pre-sync only: nothing in the file said when it started, so it sits at zero. */
+  startUnknown?: boolean;
   onSelect: (placement: Placement) => void;
 }) {
   const left = msToX(span.startMs, view);
   const width = Math.max(MIN_CLIP_PX, (span.endMs - span.startMs) * view.pxPerMs);
   const name = basename(span.file);
-  const hasWarnings = placement.warnings.length > 0;
+  const hasWarnings = placement !== null && placement.warnings.length > 0;
   // Subscribed to the DERIVED boolean, so this re-renders when the playhead crosses this
   // clip's edge and not on any of the other 59 frames a second (`playhead.ts`).
   const underPlayhead = usePlayheadInsideSpan(span.startMs, span.endMs);
@@ -66,22 +80,37 @@ export const Clip = memo(function Clip({
   // duration the app does not know.
   const className = [
     "clip",
+    placement === null ? "clip--pre" : "",
     hasWarnings ? "clip--warn" : "",
     durationUnknown ? "clip--nodur" : "",
   ]
     .filter(Boolean)
     .join(" ");
-  const offsetLabel = `${name}, ${t.offsetLabel} ${placement.offset_seconds.toFixed(1)} s`;
+  // Pre-sync the name reads the file's OWN start on this timeline (or says there isn't
+  // one) rather than an offset from a reference that has not been chosen yet.
+  const baseLabel =
+    placement !== null
+      ? `${name}, ${t.offsetLabel} ${placement.offset_seconds.toFixed(1)} s`
+      : startUnknown
+        ? `${name}, ${t.presyncStartUnknown}`
+        : `${name}, ${t.presyncStart} ${formatTimecode(span.startMs)}`;
 
   return (
     <button
       type="button"
       className={className}
       style={{ left: `${left}px`, width: `${width}px` }}
-      onClick={() => onSelect(placement)}
+      // A file the engine has not placed has no detail to open, and a control that does
+      // nothing when pressed is worse than no control. `disabled` rather than a swapped
+      // tag — see the component note.
+      disabled={placement === null}
+      onClick={placement !== null ? () => onSelect(placement) : undefined}
+      // The identity the later "hop to the solved position" animation addresses a clip by
+      // (V04-U3): the file is the one thing that is the same box before and after a sync.
+      data-file={span.file}
       // The offset pattern is the §9.4 accessible name and stays exactly as it was; the
       // unknown-duration note is appended rather than replacing it.
-      aria-label={durationUnknown ? `${offsetLabel} — ${t.clipDurationUnknown}` : offsetLabel}
+      aria-label={durationUnknown ? `${baseLabel} — ${t.clipDurationUnknown}` : baseLabel}
       // "The playhead is inside this clip" — `aria-current="time"` is the one value in the
       // enumeration that means a temporal position, which is exactly what this is.
       aria-current={underPlayhead ? "time" : undefined}

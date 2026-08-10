@@ -21,7 +21,7 @@ import { Onboarding } from "./components/Onboarding";
 import { ProgressBar } from "./components/ProgressBar";
 import { TimelineView } from "./components/timeline/TimelineView";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { SourcesView } from "./components/SourcesView";
+import { SourcesPanel } from "./components/SourcesPanel";
 import { GearIcon } from "./components/icons";
 
 import { mapEngineError } from "./errors";
@@ -267,6 +267,13 @@ export function App() {
         : null;
   const deviceIds = manifest ? manifest.devices.map((d) => d.id) : [];
   const overridesDirty = Object.keys(state.overrides).length > 0;
+  // The timeline is the main view (v0.4, D-061): it appears the moment a scan has told us
+  // what was dropped, and stays MOUNTED across sources → syncing → result. Nothing below
+  // may unmount it on a phase change — the continuity is the feature.
+  const timelinePhase =
+    phase.name === "sources" || phase.name === "syncing" || phase.name === "result"
+      ? phase.name
+      : null;
 
   return (
     <main className="app">
@@ -319,20 +326,8 @@ export function App() {
         </div>
       )}
 
-      {(phase.name === "sources" || phase.name === "result") && manifest && (
-        <SourcesView
-          t={t}
-          manifest={manifest}
-          inputs={phase.inputs}
-          overrides={state.overrides}
-          reference={state.reference}
-          onRemoveRoot={(path) => dispatch({ type: "inputs/removeRoot", path })}
-          onClearAll={() => dispatch({ type: "inputs/clear" })}
-          onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
-          onReference={(file) => dispatch({ type: "reference/set", file })}
-        />
-      )}
-
+      {/* The run bar sits ABOVE the timeline, so pressing Sync and watching the progress
+          happen never moves the material the operator is looking at. */}
       {phase.name === "syncing" ? (
         <div className="run">
           <ProgressBar t={t} progress={phase.progress} />
@@ -352,40 +347,61 @@ export function App() {
         )
       )}
 
+      {phase.name === "result" && phase.stale && (
+        <p className="banner banner--warn">
+          <span>{t.staleResult}</span>
+        </p>
+      )}
+
+      {timelinePhase && manifest && (
+        <TimelineView
+          t={t}
+          phase={timelinePhase}
+          manifest={manifest}
+          overrides={state.overrides}
+          reference={state.reference}
+          outcome={phase.name === "result" ? phase.outcome : null}
+          stale={phase.name === "result" && phase.stale}
+          deviceIds={deviceIds}
+          onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+        />
+      )}
+
       {phase.name === "result" && (
-        <>
-          {phase.stale && (
-            <p className="banner banner--warn">
-              <span>{t.staleResult}</span>
-            </p>
-          )}
-          <TimelineView
-            t={t}
-            outcome={phase.outcome}
-            stale={phase.stale}
-            deviceIds={deviceIds}
-            onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
-          />
-          <div className="exportbar">
-            <label>
-              <span className="visually-hidden">{t.projectName}</span>
-              <input
-                type="text"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                aria-label={t.projectName}
-              />
-            </label>
-            <button type="button" className="primary" onClick={exportTimeline} disabled={phase.stale}>
-              {t.exportButton}
+        <div className="exportbar">
+          <label>
+            <span className="visually-hidden">{t.projectName}</span>
+            <input
+              type="text"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              aria-label={t.projectName}
+            />
+          </label>
+          <button type="button" className="primary" onClick={exportTimeline} disabled={phase.stale}>
+            {t.exportButton}
+          </button>
+          {exportedPath && (
+            <button type="button" className="secondary" onClick={() => revealItemInDir(exportedPath)}>
+              {t.revealInFinder}
             </button>
-            {exportedPath && (
-              <button type="button" className="secondary" onClick={() => revealItemInDir(exportedPath)}>
-                {t.revealInFinder}
-              </button>
-            )}
-          </div>
-        </>
+          )}
+        </div>
+      )}
+
+      {timelinePhase && manifest && (
+        <SourcesPanel
+          t={t}
+          manifest={manifest}
+          inputs={phase.name === "empty" || phase.name === "scanning" ? [] : phase.inputs}
+          overrides={state.overrides}
+          reference={state.reference}
+          busy={phase.name === "syncing"}
+          onRemoveRoot={(path) => dispatch({ type: "inputs/removeRoot", path })}
+          onClearAll={() => dispatch({ type: "inputs/clear" })}
+          onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+          onReference={(file) => dispatch({ type: "reference/set", file })}
+        />
       )}
 
       {showSettings && (

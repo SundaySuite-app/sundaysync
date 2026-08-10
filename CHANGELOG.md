@@ -13,6 +13,25 @@
   gradienten som resten av suiten bruker. Lilla bakgrunn og den hårfine hvite ringen er som
   før. Hele ikonsettet er generert på nytt fra kilde-SVG-en, og de to kommandoene som gjør
   det står nå dokumentert i SVG-en selv.
+- **The timeline is the main view now (D-061).** Drop your files and they are on the
+  timeline immediately — one track per device, each clip where its own recording timestamp
+  says it belongs — instead of a list of filenames you have to sync before you can see
+  anything. The picture is what tells you whether the app read your card properly, so it
+  arrives first. Those pre-sync clips are drawn in a muted grey, not the placed green: they
+  are the files' own claim about when they were recorded, not the engine's. Files with no
+  timestamp at all (a field recorder's WAV usually has none) sit at the start, and the
+  timeline says in as many words how many they are, rather than quietly implying they all
+  began together.
+- **The timeline stays on screen while the sync runs.** Pressing Sync no longer replaces
+  everything with a progress bar on an empty screen: the progress and its Cancel appear
+  above the clips, which stay visible and dimmed until the result lands in their place.
+  Nothing you were looking at moves out from under you.
+- **The file list is now a compact panel under the timeline.** Everything it did before it
+  still does — starring a reference, moving a file to another device, the badges, the
+  summary chips — it just no longer has to be the main event.
+- **Unusable files fold into one collapsed group.** The count still shows (on its own chip
+  and on the group's own line); the list of them is one click away instead of being the
+  loudest block on the screen when the drop went fine.
 
 ## v0.3.0-beta.1
 

@@ -10,6 +10,7 @@ import {
   SETTLED_SETTINGS,
   syncOutcome,
   waitForPending,
+  waitForResult,
 } from "./harness";
 import { en, stageLabel } from "../src/i18n";
 
@@ -58,10 +59,15 @@ test.describe("sync progress", () => {
     await emit(page, "sync:progress", { stage: "Placing", completed: 5, total: 5 });
     await resolveControlled(page, "run_sync", syncOutcome());
 
-    // Scoped to `.clip`, not a bare accessible-name match: SourcesView keeps rendering
-    // alongside the timeline in the "result" phase, and its own "Use as reference:
-    // C0001.MP4" button also contains that filename substring.
-    await expect(page.locator(".clip", { hasText: "C0001.MP4" })).toBeVisible();
+    // The result view specifically: since V04-U3 (D-061) the timeline and its `.clip`
+    // boxes are already on screen during `syncing`, so the export bar is what actually
+    // says the phase changed. The placed clip is then asserted to be a PLACED one —
+    // enabled and no longer carrying the pre-sync class.
+    await waitForResult(page);
+    const clip = page.locator(".clip", { hasText: "C0001.MP4" });
+    await expect(clip).toBeVisible();
+    await expect(clip).not.toHaveClass(/clip--pre/);
+    await expect(clip).toBeEnabled();
     await expect(page.getByRole("button", { name: en.cancel })).toBeHidden();
   });
 });

@@ -2036,3 +2036,94 @@ which renders the file correctly and is what this set was generated from. The ge
 is the one that keeps recurring in this repo: a rasteriser that drops what it does not
 understand, silently and with a zero exit code, is indistinguishable from one that worked —
 so the output gets *looked at*, at 1024, 128 and 32 px, every time.
+
+## D-061 — V04-U3: the timeline is the main view, and it never unmounts
+
+**Decision.** The timeline stops being the result screen and becomes the app's main view.
+It appears the moment a scan says what was dropped, stays mounted through `sources →
+syncing → result`, and the file list becomes a compact panel underneath it.
+
+### Why a pre-sync timeline at all
+
+The old shape answered the user's first question ("did it read my card properly?") with a
+list of filenames and badges, and kept the picture — the thing every NLE operator actually
+reads — behind a sync they had not run yet. Worse, the two screens were different
+components: dropping files showed a list, syncing replaced it with a progress bar on an
+empty screen, and a result appeared out of nothing. Three unrelated pictures of one
+session.
+
+Now the drop draws clips. There is only one clock available before listening to anything —
+the container's `creation_time` (ISO-8601 UTC on MP4/MOV, absent on WAV/BWF) — so that is
+what positions them, and the UI is explicit that this is a guess: the boxes are
+`clip--pre` (a muted slate, deliberately NOT the §9.4 placed-green), they are `disabled`
+(there is no placement to open a detail for), and the meta line above reads "provisional
+positions from the files' own timestamps".
+
+### What is deliberately NOT invented
+
+A file with no parseable `creation_time` is placed at zero and its file goes into
+`unknownStart`, which the view turns into one line: "N files have no recording time and are
+shown from the start." Laying those out end to end instead would have drawn an *order* the
+app does not know, and a field recorder's WAV genuinely says nothing about when it started.
+The pile at t=0 is the honest picture; the sentence is what stops it reading as "the app
+thinks these all began together".
+
+`sourceSpans` (`app/src/timeline/sourceLayout.ts`) is pure and unit-tested for exactly the
+cases that are easy to get quietly wrong: which stamp becomes the origin (the earliest
+*parsed* one — an unstamped file must not drag the origin), a malformed stamp behaving
+identically to a missing one, and the device-override overlay regrouping the timeline the
+same way it regroups the panel. The panel and the timeline are two views of one decision
+(D-027/D-028); they must never disagree in front of the user.
+
+### Mounted through the sync — the structural half of a later feature
+
+During `syncing` the timeline stays exactly where it is, with `timeline--busy` (dimmed,
+`pointer-events: none`), and the progress bar + cancel render **above** it in the markup
+that D-030's specs pin. Nothing about the run moves the material the operator is looking
+at.
+
+That continuity is not decoration. The stage after this one animates each clip *hopping*
+from its metadata guess to the placement the audio proved, and an animation needs the same
+DOM node on both sides of the transition. Two consequences are load-bearing and easy to
+undo by accident:
+
+1. `Clip` stays a `<button>` in every phase (pre-sync it is `disabled`) rather than
+   becoming a `<div>`. React reconciles on element type: a swapped tag tears down the whole
+   subtree — waveform state included — at precisely the moment the app is supposed to be
+   showing that nothing changed but the position.
+2. Every clip carries `data-file`, which is the identity the hop will address it by. It is
+   also what the browser tier now uses to point at a specific clip, instead of matching on
+   label text.
+
+`presync-timeline.spec.ts` guards both by tagging the live DOM nodes (`dataset`) in the
+sources phase and asserting the tags are still on the same section and the same clip after
+the result lands.
+
+### What stayed result-only, and why
+
+Ruler, zoom, pan, scrollbar and virtualization work in every phase — they are all about
+*looking*. The transport, the playhead line, the per-device mute/solo, the sequence meta,
+the unsynced shelf, the clip-detail dialog and the export bar are result-only, because each
+of them describes something that does not exist yet: there is no schedule to play, no
+offset to detail, nothing to export. A control that answers a click by doing nothing is
+worse than no control (the same rule that hides solo on a single-device result).
+
+### The problem group is folded, not hidden
+
+Unreadable files became one `<details>`, shut by default, with the count on its summary and
+still on its own chip above. On a good drop they are a footnote that used to be the loudest
+block on the screen. `<details>` rather than a hand-rolled toggle: the role, the keyboard
+behaviour and the announcement are already correct, and the summary keeps the count visible
+while collapsed. Nothing is hidden — one click is the whole cost.
+
+### Spec migration
+
+The browser tier's "have we reached the result?" gate was `.timeline__body` (or a `.clip`)
+becoming visible, which is now true from the sources phase on — i.e. it silently stopped
+meaning anything. Every such gate moved to `waitForResult()` (harness), which waits for the
+result-only export bar. `waveform.spec.ts`'s stateful fixtures were re-keyed **per file**
+for the same reason: the timeline now mounts a waveform for every dropped file, so a global
+"first call fails" counter would hand that first call to whichever clip mounted first.
+`timeline-scale.spec.ts`'s 302-file scenario gained real `creation_time` stamps — a card
+dump reporting none would pile all 302 clips at t=0 before the sync, which is correct
+behaviour but not the virtualization case that file exists to prove.

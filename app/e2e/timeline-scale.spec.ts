@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { boot, BOOT_FIXTURES, fn, SETTLED_SETTINGS } from "./harness";
+import { boot, BOOT_FIXTURES, fn, SETTLED_SETTINGS, waitForResult } from "./harness";
 import { en } from "../src/i18n";
 import { visibleClips } from "../src/timeline/geometry";
 import { stackClips, type ClipSpan } from "../src/timeline/laneLayout";
@@ -58,6 +58,21 @@ const CALIBRATION_INDEX = Math.floor(CLIPS_PER_DEVICE / 2);
 const CALIBRATION_FILE = `/nas/dev0/c0_${CALIBRATION_INDEX}.mp4`;
 const CALIBRATION_START_SEC = CALIBRATION_INDEX * SPACING_SEC;
 
+/**
+ * The wall-clock the shoot's cards claim to have started at.
+ *
+ * Since V04-U3 (D-061) the timeline is mounted BEFORE a sync, laying the same files out by
+ * their container `creation_time`. A card dump whose files all reported `null` there would
+ * pile all 302 clips on top of each other at t=0 in the sources phase — technically what
+ * the app should do with no timestamps, but not what a real camera card looks like, and
+ * not the scale case this file is about. Giving each file the timestamp its own offset
+ * implies makes the pre-sync layout realistic (and, incidentally, close to the solved one)
+ * so this stays a proof about virtualization rather than about the degenerate pile.
+ */
+const SHOOT_START_MS = Date.parse("2026-08-09T09:00:00.000Z");
+const startedAt = (offsetSeconds: number): string =>
+  new Date(SHOOT_START_MS + offsetSeconds * 1000).toISOString();
+
 interface Placement {
   file: string;
   device: string;
@@ -106,7 +121,7 @@ function buildScenario() {
         format_name: kind === "video" ? "mov,mp4" : "wav",
         audio: { codec: kind === "video" ? "aac" : "pcm_s16le", sample_rate: 48000, channels: 2 },
         video: kind === "video" ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" } : null,
-        creation_time: null,
+        creation_time: startedAt(offset),
       });
     }
     devices.push({ id, label: `Device ${d}`, kind, files });
@@ -137,7 +152,7 @@ function buildScenario() {
       format_name: "mov,mp4",
       audio: { codec: "aac", sample_rate: 48000, channels: 2 },
       video: { codec: "h264", width: 1920, height: 1080, fps: "25/1" },
-      creation_time: null,
+      creation_time: startedAt(offset),
     });
     (devices[d].files as string[]).push(file);
   }
@@ -230,7 +245,10 @@ async function reachResult(page: Page): Promise<void> {
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
   await page.getByRole("button", { name: en.syncButton }).click();
-  await expect(page.locator(".timeline__body")).toBeVisible();
+  // The timeline itself is mounted from the sources phase on (V04-U3, D-061), so waiting
+  // for it no longer means the sync has finished — `waitForResult` gates on the
+  // result-only export bar instead.
+  await waitForResult(page);
 }
 
 /** `title` is `Clip.tsx`'s basename — read off every currently-mounted clip so the DOM's
