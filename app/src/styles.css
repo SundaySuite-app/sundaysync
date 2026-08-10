@@ -429,6 +429,10 @@ select:hover, input:hover { border-color: var(--accent-border); }
 
 /* One quiet line above the frame — the pre-sync caveat that cannot live in a clip. */
 .timeline__note { color: var(--text3); font-size: 0.8125rem; }
+/* The off-session line names a date, and a named date is the one line here the operator may
+   want to act on (D-071). Amber, matching the clips it is about; still a note, not a
+   banner — nothing has gone wrong. */
+.timeline__note--offsession { color: var(--orange); }
 
 .timeline__zoom { margin-left: auto; display: flex; gap: 0.15rem; }
 .timeline__zoom button { padding: 0.15rem 0.55rem; font-size: 0.8125rem; line-height: 1.4; }
@@ -442,6 +446,20 @@ select:hover, input:hover { border-color: var(--accent-border); }
      the lane column clips it. The page itself never gains a horizontal scrollbar. */
   overflow: hidden;
 }
+/* …and time never spills DOWNWARD either (V05-W3). Twelve devices at two lanes each is
+   some 800 px of tracks, and this frame had a height of "however tall its contents are":
+   the page grew instead, pushing the sources panel and the sync button below the fold on a
+   laptop. The tracks now scroll inside their own box.
+
+   `max-height`, not `height` — a three-device drop must not be given an empty grey
+   half-screen to sit in. `overflow-x: hidden` because horizontal movement is the
+   timeline's own pan/zoom and has its own scrollbar row below; a real horizontal scrollbar
+   here would be a second, contradictory way to move in time. */
+.timeline__scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 .timeline__body {
   position: relative;
   cursor: grab;
@@ -454,7 +472,19 @@ select:hover, input:hover { border-color: var(--accent-border); }
 /* One hairline per device boundary, gutter included, so the eye can follow a row
    all the way from its name to its clips. */
 .track + .track:not(.track--scrollbar) { border-top: 1px solid var(--border); }
-.track--ruler { height: var(--tl-ruler-h); }
+/* Stuck to the top of the scrolling box (V05-W3): the ruler is the only thing on screen
+   that says what the horizontal axis MEANS, and a twelve-device drop scrolled past it
+   leaves the operator reading unlabelled boxes. It keeps its normal-flow height, so the
+   ghost layer's `--tl-ruler-h` offset is unaffected.
+   `z-index: 2` puts it over the clips (whose `.clip__chrome` sits at 1) and under
+   `.timeline__overlay`, so the playhead still draws across the ruler as it always did. */
+.track--ruler {
+  height: var(--tl-ruler-h);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+}
 .track--scrollbar { height: 20px; padding-top: 8px; }
 
 .track__gutter {
@@ -506,6 +536,9 @@ select:hover, input:hover { border-color: var(--accent-border); }
   inset: 0 0 0 var(--tl-gutter);
   overflow: hidden;
   pointer-events: none;
+  /* Above the sticky ruler (z-index 2), so the playhead still crosses the timecodes rather
+     than disappearing behind them the moment the tracks are scrolled (V05-W3). */
+  z-index: 3;
 }
 .timeline__playhead { position: absolute; inset: 0; }
 .timeline__playhead-line {
@@ -573,6 +606,40 @@ select:hover, input:hover { border-color: var(--accent-border); }
   border: 1px dashed var(--orange);
   color: var(--orange);
   min-width: 3px;
+}
+/* ── What the recording time is MADE OF (V05-W3, D-067/D-068/D-071) ──────────────────────
+   Three marks, all of them about the provenance of the position rather than the position.
+   They stack: a mixer file placed from its filename and stamped a day early wears both
+   `clip--est` and `clip--offsession`.
+
+   All three reuse the dashed edge `clip--nodur` already taught the eye to read as "not a
+   measurement", and none of them changes the box's fill — a pre-sync clip is slate
+   whatever rung placed it, because none of these is the engine's answer either. */
+
+/* The start came from a lower rung of the ladder: a BWF's split date + time, a timestamp in
+   the filename, or the file's mtime minus its duration. A dashed TOP edge only, so the mark
+   survives a 3 px clip (where a full dashed border would be a smudge) and so two adjacent
+   estimates do not merge into one dashed block. */
+.clip--est { border-top: 1px dashed var(--text2); }
+
+/* No recording time at all: this box is here because of where its filename sits in its
+   device's sequence (D-068). Fainter, and with the leading edge marked, since the one thing
+   it does NOT claim is that it starts here. */
+.clip--seq {
+  background: var(--surface2);
+  color: var(--text3);
+  border: 1px dashed var(--border2);
+  /* The leading edge, thickened: the one thing a sequential clip does NOT claim is that it
+     starts here, and the eye goes to the left edge of a box on a timeline first. */
+  border-left-width: 3px;
+}
+
+/* There IS a timestamp and it belongs to another day (D-071) — the June drone folder inside
+   a July wedding. Amber rather than the neutral slate, because unlike the two above this
+   one is worth a second look: it is usually a folder that should not have been dropped. */
+.clip--offsession {
+  border: 1px dashed var(--orange);
+  color: var(--orange);
 }
 /* ── The clip's chrome row (V05-W1, D-065) ───────────────────────────────────
    The name and whatever the waveform has to say are SIBLINGS in one flex row, not two

@@ -40,6 +40,12 @@ export default defineConfig({
 
   use: {
     baseURL: "http://localhost:1420",
+    // V05-W3 (D-067): the recording-time ladder reads a BWF's date + clock and a
+    // filename's timestamp as LOCAL wall time and a container stamp as UTC, so what a
+    // pre-sync clip claims depends on the zone the renderer is in. Pinned here for the
+    // same reason `vitest.config.ts` pins `TZ`: a CI box in UTC would make the two doors
+    // indistinguishable, and a spec that passes only in one zone is not a spec.
+    timezoneId: "Europe/Oslo",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",

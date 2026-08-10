@@ -3,6 +3,7 @@ import type { Strings } from "../../i18n";
 import { visibleClips, type TimelineView } from "../../timeline/geometry";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import type { PrewarmStatus } from "../../state";
+import type { TimeSource } from "../../timeline/recordingTime";
 import type { Device, Placement } from "../../types";
 import { CameraIcon, MicIcon } from "../icons";
 import { Clip } from "./Clip";
@@ -45,7 +46,8 @@ export const Track = memo(function Track({
   visEnd,
   isReference,
   unknownDurations,
-  unknownStart,
+  timeSource,
+  outsideWindow,
   prewarm,
   laneHeight,
   onSelect,
@@ -68,8 +70,11 @@ export const Track = memo(function Track({
   /** Files the outcome carries no duration for — drawn as a stated unknown rather than
    *  as a silent zero-length sliver (V03-S6, finding 15). */
   unknownDurations: ReadonlySet<string>;
-  /** Pre-sync: files with no creation timestamp, sitting at zero (v0.4, D-061). */
-  unknownStart: ReadonlySet<string>;
+  /** Pre-sync: which rung of the recording-time ladder positioned each file (D-067).
+   *  Empty after a sync — the engine's answer has replaced every rung of it. */
+  timeSource: ReadonlyMap<string, TimeSource>;
+  /** Pre-sync: files whose timestamp belongs to another day (D-071). */
+  outsideWindow: ReadonlySet<string>;
   /** file -> background pre-analysis status (v0.4, D-062); a file the pass is not
    *  tracking is simply absent. */
   prewarm: Record<string, PrewarmStatus>;
@@ -148,7 +153,8 @@ export const Track = memo(function Track({
                     placement={placement ?? null}
                     view={view}
                     durationUnknown={unknownDurations.has(item.file)}
-                    startUnknown={unknownStart.has(item.file)}
+                    timeSource={timeSource.get(item.file) ?? null}
+                    offSession={outsideWindow.has(item.file)}
                     analysisStatus={prewarm[item.file] ?? null}
                     onSelect={onSelect}
                   />

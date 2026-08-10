@@ -12,6 +12,7 @@ import {
 import { LANE_HEIGHT_PX } from "../../timeline/hop";
 import { stackClips, type ClipSpan } from "../../timeline/laneLayout";
 import { getPlayheadMs, publishPlayheadMs } from "../../timeline/playhead";
+import type { TimeSource } from "../../timeline/recordingTime";
 import { sourceSpans } from "../../timeline/sourceLayout";
 import {
   clampScroll,
@@ -84,6 +85,9 @@ const SCROLL_STEP_FRACTION = 0.1;
 const VIEWPORT_ID = "timeline-viewport";
 
 const NO_FILES: ReadonlySet<string> = new Set();
+/** No file has a pre-sync time source — the result phase, where the engine answered. */
+const NO_SOURCES: ReadonlyMap<string, TimeSource> = new Map();
+const NO_DAYS: readonly number[] = [];
 
 /** Which of the app's phases this timeline is drawing. */
 export type TimelinePhase = "sources" | "syncing" | "result";
@@ -99,7 +103,14 @@ interface TimelineContent {
   placements: Map<string, Placement> | null;
   audioClips: PlacedClip[];
   unknownDurations: ReadonlySet<string>;
-  unknownStart: ReadonlySet<string>;
+  /** Pre-sync only (D-067): which rung of the recording-time ladder positioned each file.
+   *  This is what the legend above the frame is counted from, and what marks a clip as an
+   *  estimate rather than as a measurement. */
+  timeSource: ReadonlyMap<string, TimeSource>;
+  /** Pre-sync only (D-071): files stamped outside this session — named, never removed. */
+  outsideWindow: ReadonlySet<string>;
+  /** The distinct days those files claim, as local-midnight ms. The legend names them. */
+  outsideWindowDays: readonly number[];
   /** Device carrying the reference badge — the engine's pick, or the operator's. */
   referenceDevice: string | null;
 }
@@ -112,7 +123,9 @@ const EMPTY_CONTENT: TimelineContent = {
   placements: null,
   audioClips: [],
   unknownDurations: NO_FILES,
-  unknownStart: NO_FILES,
+  timeSource: NO_SOURCES,
+  outsideWindow: NO_FILES,
+  outsideWindowDays: NO_DAYS,
   referenceDevice: null,
 };
 
@@ -236,7 +249,9 @@ export function TimelineView({
       placements,
       audioClips,
       unknownDurations,
-      unknownStart: NO_FILES,
+      timeSource: NO_SOURCES,
+      outsideWindow: NO_FILES,
+      outsideWindowDays: NO_DAYS,
       referenceDevice: result.reference?.device ?? null,
     };
   }, [outcome, excluded]);
@@ -275,7 +290,9 @@ export function TimelineView({
       placements: null,
       audioClips: [],
       unknownDurations: NO_FILES,
-      unknownStart: layout.unknownStart,
+      timeSource: layout.timeSource,
+      outsideWindow: layout.outsideWindow,
+      outsideWindowDays: layout.outsideWindowDays,
       referenceDevice,
     };
   }, [outcome, manifest, overrides, reference, excluded]);
@@ -287,9 +304,30 @@ export function TimelineView({
     placements,
     audioClips,
     unknownDurations,
-    unknownStart,
+    timeSource,
+    outsideWindow,
+    outsideWindowDays,
     referenceDevice,
   }: TimelineContent = outcomeContent ?? sourceContent ?? EMPTY_CONTENT;
+
+  // ---- What the legend above the frame says (D-067/D-068/D-071) ----------------------
+  //
+  // Four counts, four different claims, and they sum to every clip on screen — §7.3's rule
+  // that every input is accounted for, applied to the sentence the operator reads. Derived
+  // here rather than returned by `sourceSpans` because it is presentation: the layout's job
+  // is where the boxes go, and a count is not a position.
+  const legend = useMemo(() => {
+    let placed = 0;
+    let estimated = 0;
+    let ordered = 0;
+    for (const [file, source] of timeSource) {
+      if (outsideWindow.has(file)) continue;
+      if (source === "container") placed += 1;
+      else if (source === "none") ordered += 1;
+      else estimated += 1;
+    }
+    return { placed, estimated, ordered, offSession: outsideWindow.size };
+  }, [timeSource, outsideWindow]);
 
   // ---- View state: zoom + pan, measured against the lane column's width ----
   const [view, setView] = useState<View>(() => ({
@@ -652,12 +690,12 @@ export function TimelineView({
                 formatDuration(result.sequence.duration_seconds),
               )
             : // "Provisional positions from the files' own timestamps" is a claim, and it
-              // is false when not one file in the drop carries a usable one — a folder of
-              // field-recorder WAVs, or a set of cards whose clocks were all rejected
-              // (`sourceLayout.ts`). Then nothing was positioned by a timestamp at all;
-              // everything is piled at zero, and saying otherwise invites the operator to
-              // read that pile as a claim about when they recorded (V04-U5).
-              clipCount > 0 && unknownStart.size === clipCount
+              // is false when not one file in the drop reached ANY rung of the ladder — a
+              // folder of untagged WAVs, or a set of cards whose clocks were all rejected
+              // (`recordingTime.ts`). Then nothing was positioned by a clock at all; the
+              // clips are in filename order (D-068), and saying otherwise invites the
+              // operator to read that order as a claim about when they recorded (V04-U5).
+              clipCount > 0 && legend.placed + legend.estimated === 0
               ? t.presyncMetaNoClock
               : t.presyncMeta}
         </span>
@@ -680,69 +718,89 @@ export function TimelineView({
         </p>
       ))}
 
-      {/* A recorder that wrote no timestamp has told us nothing about when it started, so
-          its clips sit at the very start of the timeline. Without this line that reads as
-          "the app thinks these all began together", which is a claim nobody made. */}
-      {unknownStart.size > 0 && (
-        <p className="timeline__note">{t.presyncUnknownStart(unknownStart.size)}</p>
+      {/* The legend (V05-W3). Not "N files have no recording time" any more: the ladder
+          (D-067) means a drop divides into four different situations, and one number
+          covering all of them was what let 174 of the owner's files share one sentence.
+          Counts, in words, summing to every clip on screen. */}
+      {legend.placed + legend.estimated + legend.ordered + legend.offSession > 0 && (
+        <p className="timeline__note">{t.presyncLegend(legend)}</p>
+      )}
+      {/* …and the off-session files get their own line, which NAMES THE DATE. That is what
+          makes it actionable: the owner recognises «13.06.2023» as the June drone folder
+          instantly, and would recognise nothing at all in «14 filer». Nothing is removed —
+          D-062's per-file removal is the operator's, not the app's (D-071). */}
+      {outsideWindowDays.length > 0 && (
+        <p className="timeline__note timeline__note--offsession">
+          {t.presyncOffSession(outsideWindow.size, outsideWindowDays.map(t.presyncDay))}
+        </p>
       )}
 
       <div className="timeline__frame">
-        <div
-          className="timeline__body"
-          ref={bodyRef}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={endPan}
-          onPointerCancel={endPan}
-        >
-          <div className="track track--ruler">
-            <div className="track__gutter" />
-            <div className="track__lanes" id={VIEWPORT_ID} ref={viewportRef}>
-              <Ruler view={view} label={t.rulerAria} onSeek={seek} />
+        {/* The vertical safety net (V05-W3). Twelve devices at two lanes each is some 800 px
+            of tracks, and this frame had `overflow: hidden` and no height — so the BODY grew
+            instead, pushing the sources panel and the sync button off a laptop screen. The
+            tracks scroll inside their own box now, with the ruler stuck to its top so the
+            times stay readable at any scroll offset, and the horizontal scrollbar row left
+            outside it (it is a sibling already, and a scrollbar that scrolled away would be
+            a control the operator has to hunt for). */}
+        <div className="timeline__scroll">
+          <div
+            className="timeline__body"
+            ref={bodyRef}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={endPan}
+            onPointerCancel={endPan}
+          >
+            <div className="track track--ruler">
+              <div className="track__gutter" />
+              <div className="track__lanes" id={VIEWPORT_ID} ref={viewportRef}>
+                <Ruler view={view} label={t.rulerAria} onSeek={seek} />
+              </div>
             </div>
+
+            {tracks.map(({ device, rows }) => (
+              <Track
+                key={device.id}
+                t={t}
+                device={device}
+                rows={rows}
+                placements={placements}
+                view={view}
+                visStart={visStart}
+                visEnd={visEnd}
+                isReference={referenceDevice === device.id}
+                unknownDurations={unknownDurations}
+                timeSource={timeSource}
+                outsideWindow={outsideWindow}
+                prewarm={prewarm}
+                laneHeight={LANE_HEIGHT_PX}
+                onSelect={setSelected}
+                muted={playback.muted.includes(device.id)}
+                soloed={playback.soloed.includes(device.id)}
+                showSolo={showSolo}
+                showMix={result !== null}
+                onToggleMute={toggleMute}
+                onToggleSolo={toggleSolo}
+              />
+            ))}
+
+            {/* Where a departing clip's fade ghost is drawn (v0.4, D-063). React has already
+                removed the real node by the time anything can react to the outcome, so the
+                thing that fades is a copy placed at the box the clip used to occupy. Offset
+                from the top by the ruler and from the left by the gutter, so it shares the
+                lane column's origin — the same origin `timeline/hop.ts` measures in.
+                Populated imperatively and only during a hop; empty the rest of the time. */}
+            <div className="timeline__ghosts" ref={ghostRef} aria-hidden="true" />
+
+            {/* The playhead is the transport's marker; before a sync there is nothing to
+                play and no schedule for it to point into. */}
+            {result && (
+              <div className="timeline__overlay">
+                <PlayheadLine view={view} />
+              </div>
+            )}
           </div>
-
-          {tracks.map(({ device, rows }) => (
-            <Track
-              key={device.id}
-              t={t}
-              device={device}
-              rows={rows}
-              placements={placements}
-              view={view}
-              visStart={visStart}
-              visEnd={visEnd}
-              isReference={referenceDevice === device.id}
-              unknownDurations={unknownDurations}
-              unknownStart={unknownStart}
-              prewarm={prewarm}
-              laneHeight={LANE_HEIGHT_PX}
-              onSelect={setSelected}
-              muted={playback.muted.includes(device.id)}
-              soloed={playback.soloed.includes(device.id)}
-              showSolo={showSolo}
-              showMix={result !== null}
-              onToggleMute={toggleMute}
-              onToggleSolo={toggleSolo}
-            />
-          ))}
-
-          {/* Where a departing clip's fade ghost is drawn (v0.4, D-063). React has already
-              removed the real node by the time anything can react to the outcome, so the
-              thing that fades is a copy placed at the box the clip used to occupy. Offset
-              from the top by the ruler and from the left by the gutter, so it shares the
-              lane column's origin — the same origin `timeline/hop.ts` measures in.
-              Populated imperatively and only during a hop; empty the rest of the time. */}
-          <div className="timeline__ghosts" ref={ghostRef} aria-hidden="true" />
-
-          {/* The playhead is the transport's marker; before a sync there is nothing to
-              play and no schedule for it to point into. */}
-          {result && (
-            <div className="timeline__overlay">
-              <PlayheadLine view={view} />
-            </div>
-          )}
         </div>
 
         <div className="track track--scrollbar">
