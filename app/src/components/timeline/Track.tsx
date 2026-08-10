@@ -91,28 +91,28 @@ export const Track = memo(function Track({
         </span>
         {isReference && <span className="badge badge--ref">{t.reference}</span>}
         {showMix && (
-        <span className="track__mix">
-          <button
-            type="button"
-            className={`mixbtn${muted ? " mixbtn--on mixbtn--mute" : ""}`}
-            aria-label={muted ? t.unmuteDevice(name) : t.muteDevice(name)}
-            aria-pressed={muted}
-            onClick={() => onToggleMute(device.id)}
-          >
-            {t.muteShort}
-          </button>
-          {showSolo && (
+          <span className="track__mix">
             <button
               type="button"
-              className={`mixbtn${soloed ? " mixbtn--on mixbtn--solo" : ""}`}
-              aria-label={soloed ? t.unsoloDevice(name) : t.soloDevice(name)}
-              aria-pressed={soloed}
-              onClick={() => onToggleSolo(device.id)}
+              className={`mixbtn${muted ? " mixbtn--on mixbtn--mute" : ""}`}
+              aria-label={muted ? t.unmuteDevice(name) : t.muteDevice(name)}
+              aria-pressed={muted}
+              onClick={() => onToggleMute(device.id)}
             >
-              {t.soloShort}
+              {t.muteShort}
             </button>
-          )}
-        </span>
+            {showSolo && (
+              <button
+                type="button"
+                className={`mixbtn${soloed ? " mixbtn--on mixbtn--solo" : ""}`}
+                aria-label={soloed ? t.unsoloDevice(name) : t.soloDevice(name)}
+                aria-pressed={soloed}
+                onClick={() => onToggleSolo(device.id)}
+              >
+                {t.soloShort}
+              </button>
+            )}
+          </span>
         )}
       </div>
       <div className="track__lanes">
