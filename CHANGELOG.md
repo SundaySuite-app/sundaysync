@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### New
+
+- **The app analyses your media while you are still choosing it (D-059).** Dropping a folder
+  used to do nothing but read each file's metadata, so the whole decode ran after you pressed
+  Sync and every waveform stayed blank until it finished. It now decodes in the background
+  while you are looking at the sources list — the sync then finds the work already done, and
+  the timeline draws immediately. It is the same analysis the sync would have made, into the
+  same cache, so nothing about the result changes; only the waiting does. Press Sync at any
+  time and the background pass steps aside for you within a second or two. Cache maintenance
+  and a manual waveform rebuild wait their turn instead, and say so.
+- **Clips can be left out of a run (D-060).** The camera that recorded ten seconds of lens
+  cap, the board dump that duplicates a device, the file that belongs to a different service:
+  an excluded file is not decoded, not placed, and not reported as a failure — it is simply
+  not part of the run. Excluding a clip makes an existing result stale exactly as changing
+  the sources does, so an export can never quietly contain a file you took out.
+
+*Backend only in this entry — the buttons that drive it land with the rest of v0.4.*
+
 ### Changed
 
 - **Vinduet sier ikke lenger navnet sitt to ganger (D-058).** Den innebygde macOS-tittellinja

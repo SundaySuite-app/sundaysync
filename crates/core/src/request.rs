@@ -62,6 +62,19 @@ pub struct SyncRequest {
     /// stale override left over after the user removed an input must not abort a run
     /// (D-028). A target id the grouping never produced creates a fresh device.
     pub device_overrides: BTreeMap<PathBuf, String>,
+    /// Files the user has taken out of this run (V04-U2, D-060).
+    ///
+    /// Removed from the manifest right after the scan — before device overrides and before
+    /// anything is extracted — so an excluded file is neither decoded, nor placed, nor
+    /// reported as `unsynced`: it is simply not part of the run.
+    ///
+    /// Same matching contract as [`device_overrides`](Self::device_overrides): the exact
+    /// path the scan reported, no canonicalisation, and a path matching nothing is
+    /// **ignored** rather than an error — a stale exclusion left over after the user
+    /// removed an input must not abort a run (D-028's rule, applied here).
+    ///
+    /// Request-side only, so the frozen §5 `SyncResult` schema is untouched (D-060).
+    pub exclude_files: Vec<PathBuf>,
     /// §9 advanced: correlation segment count. Clamped to
     /// [`crate::correlate::SEGMENT_COUNT_RANGE`] at the pipeline boundary, so a wild
     /// value from a config file degrades to the nearest sane one instead of erroring.
@@ -99,6 +112,7 @@ impl SyncRequest {
             reference_override: None,
             min_psr: DEFAULT_MIN_PSR,
             device_overrides: BTreeMap::new(),
+            exclude_files: Vec::new(),
             segment_count: crate::correlate::SEGMENT_COUNT,
             sidecar: None,
             correct_drift: true,
@@ -124,5 +138,14 @@ mod tests {
         // E6 contract: the toggle defaults ON so the "trustworthy long clips" behaviour is
         // what a user gets without touching advanced mode. The UI's switch turns it off.
         assert!(SyncRequest::new(vec![]).correct_drift);
+    }
+
+    #[test]
+    fn nothing_is_excluded_by_default() {
+        // D-060: exclusion is opt-in. A caller that never sets the field runs exactly the
+        // set it scanned, which is what keeps every pre-V04 caller byte-identical.
+        assert!(SyncRequest::new(vec![PathBuf::from("/tmp/a.wav")])
+            .exclude_files
+            .is_empty());
     }
 }

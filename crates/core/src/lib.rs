@@ -126,6 +126,14 @@ pub fn sync_with_durations(
         cancel,
     )?;
 
+    // V04-U2 (D-060): the files the user took out of this run leave the manifest here —
+    // immediately after the scan and BEFORE anything else looks at it. This is the only
+    // honest enforcement point in the engine: `run_sync` re-scans internally, so a shell
+    // that filtered its own input list would have the exclusion silently undone by the
+    // walk. Removing them here means an excluded file is never probed into a candidate,
+    // never decoded, never placed, and never reported on the unsynced shelf.
+    scan::apply_exclusions(&mut manifest, &request.exclude_files);
+
     // §9 advanced re-grouping, applied before candidates are built so the overridden
     // device flows into placement — including the §4.4 same-device-overlap invariant,
     // which is exactly what lets a user resolve a `device_overlap` refusal (D-028).
