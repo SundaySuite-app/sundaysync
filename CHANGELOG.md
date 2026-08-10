@@ -2,70 +2,97 @@
 
 ## Unreleased
 
+**v0.4 — the picture comes first, and it moves.** v0.3 made the *result* something you could
+look at. v0.4 makes everything before the result something you can look at too: drop a
+folder and the timeline is there, with your clips on it, while the app quietly gets on with
+the analysis in the background. Take out what does not belong. Then press Sync — and watch
+the clips hop from where the cameras claimed they were to where their own audio says they
+actually were.
+
 ### New
 
-- **The app analyses your media while you are still choosing it (D-059).** Dropping a folder
-  used to do nothing but read each file's metadata, so the whole decode ran after you pressed
-  Sync and every waveform stayed blank until it finished. It now decodes in the background
-  while you are looking at the sources list — the sync then finds the work already done, and
-  the timeline draws immediately. It is the same analysis the sync would have made, into the
-  same cache, so nothing about the result changes; only the waiting does. Press Sync at any
-  time and the background pass steps aside for you within a second or two. Cache maintenance
-  and a manual waveform rebuild wait their turn instead, and say so.
-- **Clips can be left out of a run (D-060).** The camera that recorded ten seconds of lens
-  cap, the board dump that duplicates a device, the file that belongs to a different service:
-  an excluded file is not decoded, not placed, and not reported as a failure — it is simply
-  not part of the run. Excluding a clip makes an existing result stale exactly as changing
-  the sources does, so an export can never quietly contain a file you took out.
-
-- **Du kan fjerne enkeltfiler, enten de kan leses eller ikke (D-062).** Hver fil i
-  kildelista har fått en ✕ — også filene appen ikke fikk lest, og de som ikke lot seg
-  synkronisere. Fila forsvinner med det samme fra tidslinja, fra enhetsgruppa og fra
-  tellingene, og den blir ikke tatt med i neste synkronisering eller eksport. Ingenting er
-  slettet: nederst i panelet ligger «Fjernet (N)» med «Angre» på hver rad, så ett feilklikk
-  koster ett nytt klikk — ikke å slippe inn hele mappa på nytt. Stjerna følger med om du
-  fjerner referansefila, slik at appen velger referanse på nytt i stedet for å peke på noe
-  som ikke er med.
-- **Bakgrunnsanalysen er koblet på — bølgeformene dukker opp én og én (D-062).** Analysen
-  D-059 la inn starter nå av seg selv så snart appen har lest kildene, mens du fortsatt
-  ser over lista. Hvert klipp tegner bølgeformen sin i det øyeblikket akkurat den fila er
-  ferdig, i stedet for at alt kommer samtidig etter synken. Klipp som venter sier
-  «Analyserer …» framfor å tilby «Bygg bølgeform på nytt» — knappen ville bare fått et
-  «opptatt»-svar, og bølgeformen er på vei uansett. Trykker du Synkroniser midt i det hele,
-  starter synken med én gang; bakgrunnsjobben trekker seg stille tilbake. Framdriften vises
-  som én rolig linje i panelet, ikke som en framdriftsindikator — dette er ikke noe du
-  venter på.
+- **Your files are on the timeline the moment you drop them (D-061).** No more list of
+  filenames you have to sync before you can see anything. One track per device, each clip
+  where its own recording timestamp says it belongs — because the picture is what tells you
+  whether the app read your card properly, and that should not have to wait. Those pre-sync
+  clips are drawn in a muted grey, never the placed green: they are the *files'* claim about
+  when they were recorded, not the engine's.
+- **The app analyses your media while you are still choosing it (D-059, D-062).** Dropping a
+  folder used to do nothing but read each file's metadata, so the whole decode happened after
+  you pressed Sync and every waveform stayed blank until it finished. It now decodes in the
+  background while you read the sources list, and each clip draws its waveform the moment
+  *that* file is done rather than all of them at once at the end. The sync then finds the
+  work already made. It is the same analysis the sync would have done, into the same cache,
+  so nothing about the result changes — only the waiting. Press Sync whenever you like and
+  the background pass steps aside within a second or two. Its progress is one quiet line in
+  the sources panel, deliberately not a progress bar: this is not something you are waiting
+  for.
+- **Clips can be left out of a run (D-060, D-062).** The camera that recorded ten seconds of
+  lens cap, the board dump that duplicates a device, the file that belongs to a different
+  service. Every row in the sources list has a ✕ — including the files the app could not read
+  and the ones that would not sync — and the file leaves the timeline, its device group and
+  the counts at once. It is not decoded, not placed, and not reported as a failure; it is
+  simply not part of the run. Nothing is deleted: «Fjernet (N)» at the foot of the panel has
+  an «Angre» on every row, so one misclick costs one click rather than re-dropping the whole
+  card. Remove the file you had starred as reference and the star goes with it, so the app
+  chooses again instead of naming something it was told to skip. Removing anything makes an
+  existing result stale exactly as changing the sources does, so an export can never quietly
+  contain a file you took out.
+- **The clips hop into place when the sync lands (D-063).** The one moment where the app has
+  something to *show* you — this is where your camera's clock said it was; this is where its
+  own audio says it was — used to go by as a cut between two frames. Now every clip travels
+  there, in about half a second, on a timeline that deliberately holds still while they do:
+  the view only re-frames itself once they have arrived, so what you see is the correction and
+  not a shuffle. Clips the run could not place fade out and reappear on the "not synced"
+  shelf. Touch the timeline at any point — pan, zoom, fit — and the animation gets out of the
+  way immediately, leaving everything on its final position. If your system asks for reduced
+  motion, there is no animation at all: the clips are simply already where they belong.
 
 ### Changed
 
-- **Vinduet sier ikke lenger navnet sitt to ganger (D-058).** Den innebygde macOS-tittellinja
-  skrev «SundaySync» rett over appens eget ordmerke. Tittelteksten er nå skjult i vinduet;
-  navnet står fortsatt i Mission Control, i Dock og i ⌘-tab, der systemet trenger det. Selve
-  tittellinja er urørt — knappene sitter der de alltid har sittet, ingenting er flyttet.
-- **Ikonet hører hjemme i familien (D-058).** Korset i SundaySync-ikonet har nå nøyaktig samme
-  form som i SundayRec, bølgene er tegnet tynnere, og gullet er den samme to-trinns
-  gradienten som resten av suiten bruker. Lilla bakgrunn og den hårfine hvite ringen er som
-  før. Hele ikonsettet er generert på nytt fra kilde-SVG-en, og de to kommandoene som gjør
-  det står nå dokumentert i SVG-en selv.
-- **The timeline is the main view now (D-061).** Drop your files and they are on the
-  timeline immediately — one track per device, each clip where its own recording timestamp
-  says it belongs — instead of a list of filenames you have to sync before you can see
-  anything. The picture is what tells you whether the app read your card properly, so it
-  arrives first. Those pre-sync clips are drawn in a muted grey, not the placed green: they
-  are the files' own claim about when they were recorded, not the engine's. Files with no
-  timestamp at all (a field recorder's WAV usually has none) sit at the start, and the
-  timeline says in as many words how many they are, rather than quietly implying they all
-  began together.
 - **The timeline stays on screen while the sync runs.** Pressing Sync no longer replaces
-  everything with a progress bar on an empty screen: the progress and its Cancel appear
-  above the clips, which stay visible and dimmed until the result lands in their place.
-  Nothing you were looking at moves out from under you.
+  everything with a progress bar on an empty screen: the progress and its Cancel appear above
+  the clips, which stay visible and dimmed until the result lands in their place. Nothing you
+  were looking at moves out from under you — and you can still pan and zoom it while you wait.
 - **The file list is now a compact panel under the timeline.** Everything it did before it
-  still does — starring a reference, moving a file to another device, the badges, the
-  summary chips — it just no longer has to be the main event.
-- **Unusable files fold into one collapsed group.** The count still shows (on its own chip
-  and on the group's own line); the list of them is one click away instead of being the
-  loudest block on the screen when the drop went fine.
+  still does — starring a reference, moving a file to another device, the badges, the summary
+  chips — it just no longer has to be the main event. Unusable files fold into one collapsed
+  group; the count still shows, on its own chip and on the group's own line, but the list of
+  them is one click away instead of being the loudest block on the screen when the drop went
+  fine.
+- **The window does not say its name twice (D-058).** The built-in macOS title bar wrote
+  "SundaySync" directly above the app's own wordmark. The title text is hidden in the window
+  now; the name is still in Mission Control, the Dock and ⌘-tab, where the system needs it.
+  The title bar itself is untouched — the buttons are exactly where they always were.
+- **The icon belongs to the family (D-058).** The cross in the SundaySync icon is now the same
+  shape as SundayRec's, the waves are drawn thinner, and the gold is the two-stop gradient the
+  rest of the suite uses. Purple background and the hairline white ring as before. The whole
+  icon set was regenerated from the source SVG, and the two commands that do it are documented
+  inside the SVG itself.
+
+### Fixed
+
+- **A camera with a flat battery no longer wrecks the pre-sync picture (D-063).** A camera
+  that lost its clock comes back reporting 1970, and writes that into its files as confidently
+  as any other date. The app believed it, which set the drop's start fifty-six years early and
+  pushed the actual shoot clean off the right-hand edge of the timeline — leaving what looked
+  like an app that had failed to read the card. A recording time that cannot belong to the
+  same session as the rest of the drop is now treated as no recording time at all: the clip
+  joins the others at the start, and the note above the timeline counts it.
+- **The timeline no longer claims positions it did not compute (D-063).** Drop a folder of
+  field-recorder WAVs — none of which carries a timestamp — and the line above the clips still
+  read "Provisional positions from the files' own timestamps" over a pile of clips at zero
+  that had been positioned by nothing whatsoever. It now says what is true: there are no usable
+  timestamps, and the clips sit at the start until the sync places them.
+- **Dropping a second folder no longer leaves it without background analysis (D-063).** The
+  pass running against the first folder held the analysis slot, so the second drop's pass was
+  refused — silently — and got nothing, while the abandoned pass kept reading the folder you
+  had just replaced (over the network, if it lives on a NAS) and kept reporting its progress
+  against a file list that was no longer on screen. A new drop now stops the old pass.
+- **The timeline can be panned and zoomed with the mouse while a sync runs (D-063).** The
+  keyboard's `+`/`−`/`0` and arrows always worked during a sync; the mouse did not, because the
+  dimming that marks the timeline as "not an answer yet" also made it ignore the pointer
+  entirely. Looking at your material is not a decision that could disturb a run.
 
 ## v0.3.0-beta.1
 

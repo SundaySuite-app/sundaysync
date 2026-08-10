@@ -412,7 +412,17 @@ select:hover, input:hover { border-color: var(--accent-border); }
 /* While the engine runs, the clips stay exactly where they are — visible, dimmed, and
    inert. Nothing here is a decision the operator can still change mid-run, and a control
    that answers a click by doing nothing is worse than one that is plainly unavailable. */
-.timeline--busy { opacity: 0.55; pointer-events: none; }
+/* While the engine runs: dimmed, because what is on screen is the operator's own material
+   and not yet an answer — but NOT inert. `pointer-events: none` was here too, and it made
+   the syncing phase the one phase where the timeline could not be panned or zoomed with a
+   mouse, which contradicts what the view is for: D-061's rule is that *looking* works in
+   every phase, and the keyboard's +/−/0 and arrows never stopped working here anyway, so
+   the two input methods disagreed about the same view. Nothing inside the timeline is a
+   decision that could disturb a running sync — pre-sync clips are `disabled`, and the
+   shelf, the transport and the clip dialog are result-only — so there was nothing for the
+   blanket to protect. The sources panel below has its own `busy` prop for the controls
+   that ARE decisions (V04-U5). */
+.timeline--busy { opacity: 0.55; }
 
 /* One quiet line above the frame — the pre-sync caveat that cannot live in a clip. */
 .timeline__note { color: var(--text3); font-size: 0.8125rem; }
@@ -578,6 +588,46 @@ select:hover, input:hover { border-color: var(--accent-border); }
 }
 .clip:hover { filter: brightness(1.1); }
 .clip:focus-visible { outline: 2px solid var(--accent2); outline-offset: -2px; }
+
+/* ── The hop (v0.4, D-063) ──────────────────────────────────────────────────
+   When the sync lands, every clip that survives it travels from where its camera's clock
+   claimed it was to where the audio says it actually was. `transform` and nothing else:
+   `left`/`width` are rewritten on every pan and zoom frame, so animating those would be
+   two writers on one property, taking turns, at the exact moment the operator is most
+   likely to grab the timeline. The 450 ms is mirrored in `useHop.ts`, which needs it only
+   to size the safety timer — the browser reads the duration from here.
+   The reduced-motion block at the top of this file already kills this transition; the hop
+   is skipped in JS as well, so a clip never gets a transform it cannot animate away. */
+.clip--hop { transition: transform 450ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* A clip the run did NOT place (unsynced, or removed) has no node left to fade — React
+   took it out with the rest of the old layout — so a copy is drawn where it used to be and
+   that fades instead. Shorter than the hop: it is leaving, and the eye belongs on what is
+   arriving. `pointer-events: none` because it is scenery, not a control. */
+.clip--ghost { pointer-events: none; opacity: 1; }
+.clip--fade { opacity: 0; transition: opacity 260ms ease-out; }
+
+.timeline__ghosts {
+  position: absolute;
+  inset: var(--tl-ruler-h) 0 0 var(--tl-gutter);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* For the length of the hop only, the lanes stop clipping their own contents: a clip whose
+   device gained or lost a sub-track has to be able to travel ACROSS a track boundary, and
+   `overflow: hidden` on the lane it lands in would cut it in half on the way. The frame
+   still clips, so nothing escapes onto the page. The gutter and the scrollbar row are
+   lifted above the clips for the same 450 ms, so a box passing over them slides BEHIND the
+   device names rather than across them. */
+.timeline--hopping .track__lanes,
+.timeline--hopping .track__lane { overflow: visible; }
+.timeline--hopping .track__gutter,
+.timeline--hopping .track--scrollbar {
+  position: relative;
+  z-index: 1;
+  background: var(--surface);
+}
 
 /* ── Per-clip waveform (v0.3 S4, D-052) ─────────────────────────────────── */
 

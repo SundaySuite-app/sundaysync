@@ -6,6 +6,7 @@ import {
   PRESYNC_B_OFFSET_SEC,
   presyncScanManifest,
   resolveControlled,
+  scanManifest,
   SETTLED_SETTINGS,
   syncOutcome,
   waitForPending,
@@ -99,6 +100,86 @@ test.describe("clips appear on the timeline before any sync", () => {
     await expect(clip(page, CAM_B)).toHaveAttribute("aria-label", new RegExp(en.presyncStart));
   });
 
+  // ── V04-U5 QA: honesty about the clocks themselves ───────────────────────────────────
+  test("with nothing but untimed files it does not claim positions from timestamps", async ({
+    page,
+  }) => {
+    // A folder of field-recorder WAVs is an ordinary drop, and not one file in it carries a
+    // container timestamp. The meta line above the timeline used to read "Provisional
+    // positions from the files' own timestamps" over a pile of clips at zero that had been
+    // positioned by nothing at all.
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        // `scanManifest()`'s two files both carry `creation_time: null`.
+        scan_inputs: scanManifest(),
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await expect(page.locator(".clip")).toHaveCount(2);
+
+    await expect(page.locator(".result__meta span").first()).toHaveText(en.presyncMetaNoClock);
+    await expect(page.locator(".timeline__note")).toHaveText(en.presyncUnknownStart(2));
+  });
+
+  test("one dead camera clock does not push the whole shoot off the screen", async ({
+    page,
+  }) => {
+    // A flat battery leaves a camera reporting 1970-01-01, and it writes that as
+    // confidently as any other date. Believing it set the drop's origin fifty-six years
+    // early: `fitPxPerMs` clamped out, and the real footage sat off the right edge of a
+    // twelve-hour window with nothing on screen saying why.
+    const dud = "/Users/e2e/shoot/CamC/C0003.MP4";
+    const base = presyncScanManifest();
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: {
+          ...base,
+          devices: [
+            ...(base.devices as Record<string, unknown>[]),
+            { id: "cam-c", label: "Camera C", kind: "video", files: [dud] },
+          ],
+          files: [
+            ...(base.files as Record<string, unknown>[]),
+            {
+              file: dud,
+              device: "cam-c",
+              duration_seconds: 1800,
+              format_name: "mov,mp4",
+              audio: { codec: "aac", sample_rate: 48000, channels: 2 },
+              video: { codec: "h264", width: 1920, height: 1080, fps: "25/1" },
+              creation_time: "1970-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await expect(page.locator(".clip")).toHaveCount(4);
+
+    // The dud is treated as a file with no usable time: it joins the WAV at the start and
+    // is counted in the note, rather than defining where zero is.
+    await expect(page.locator(".timeline__note")).toHaveText(en.presyncUnknownStart(2));
+    await expect(clip(page, dud)).toHaveAttribute(
+      "aria-label",
+      new RegExp(en.presyncStartUnknown),
+    );
+
+    // And the two cards that DO agree keep their real ten-minute separation, on screen,
+    // at a readable width — the whole point of the gate.
+    const lane = (await page.locator("#timeline-viewport").boundingBox())!;
+    const a = (await clip(page, CAM_A).boundingBox())!;
+    const b = (await clip(page, CAM_B).boundingBox())!;
+    expect(a.x).toBeCloseTo(lane.x, 0);
+    expect(b.x - a.x).toBeGreaterThan(lane.width * 0.1);
+    expect(b.x + b.width).toBeLessThanOrEqual(lane.x + lane.width + 1);
+  });
+
   test("moving a file to another device moves its clip too", async ({ page }) => {
     // The panel and the timeline are two views of ONE decision (D-027/D-028) — if the
     // override overlay only reached the list, they would disagree in front of the user.
@@ -117,6 +198,36 @@ test.describe("clips appear on the timeline before any sync", () => {
 });
 
 test.describe("the timeline stays mounted through the sync", () => {
+  // V04-U5 QA. D-061's rule is that *looking* — ruler, zoom, pan, scrollbar — works in
+  // every phase, and the keyboard's own +/−/0 handler has always obeyed it. The dimming
+  // class carried `pointer-events: none` as well, so the mouse did not: the one phase where
+  // the operator is most likely to be staring at the clips was the one phase where they
+  // could not move them under the eye. Two halves of one view, disagreeing.
+  test("it can still be zoomed and panned with a mouse while the sync runs", async ({
+    page,
+  }) => {
+    await reachSources(page, { run_sync: controlled("run_sync") });
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForPending(page, "run_sync");
+    await expect(page.locator("section.timeline")).toHaveClass(/timeline--busy/);
+
+    const before = (await clip(page, CAM_B).boundingBox())!;
+    await page.getByRole("button", { name: en.zoomIn }).click();
+    await expect.poll(async () => (await clip(page, CAM_B).boundingBox())!.width).toBeGreaterThan(
+      before.width,
+    );
+
+    const zoomed = (await clip(page, CAM_B).boundingBox())!;
+    const body = (await page.locator(".timeline__body").boundingBox())!;
+    await page.mouse.move(body.x + body.width / 2, body.y + Math.min(body.height / 2, 120));
+    await page.keyboard.down("Shift");
+    await page.mouse.wheel(0, 300);
+    await page.keyboard.up("Shift");
+    await expect.poll(async () => (await clip(page, CAM_B).boundingBox())!.x).toBeLessThan(
+      zoomed.x,
+    );
+  });
+
   test("the clips survive sources → syncing → result without a remount", async ({ page }) => {
     await reachSources(page, { run_sync: controlled("run_sync") });
 

@@ -256,20 +256,42 @@ export function App() {
       }
       return;
     }
+    // V04-U5 QA: a NEW scan supersedes the old drop, and the pass running against the old
+    // one has to be told. Two layers were each right on their own and disagreed at the
+    // seam: `prewarm_analysis` claims the D-046 activity slot with the ordinary guard, so
+    // only a `run_sync` can take it (D-059) — and this effect fires one pass per scan
+    // sequence. Drop a second folder while the first is still decoding and the second
+    // pass was therefore refused outright with `busy: analysis in progress`, silently
+    // (every rejection here is swallowed, by design). The new drop then got NO background
+    // analysis at all, while the abandoned pass kept reading the old folder off the NAS
+    // and kept ticking `prewarm:progress` against a file list that was no longer on
+    // screen. Cancelling here is the same sentence the empty case above already says —
+    // speculative work on a drop that no longer exists — and it lets the slot go before
+    // the (much slower) probe pass finishes and asks for it.
+    if (phase.name === "scanning") {
+      if (prewarmedSeq.current !== null && prewarmedSeq.current !== scanSeq) {
+        void invoke("cancel_prewarm").catch(() => {});
+      }
+      return;
+    }
     if (phase.name !== "sources" || prewarmedSeq.current === scanSeq) return;
     prewarmedSeq.current = scanSeq;
+    // Which drop this pass belongs to. A superseded pass can settle long after the next
+    // scan has landed, and `prewarm/settled` rewrites every still-pending entry to
+    // `failed` — so it has to be able to tell whose pass just ended.
+    const seq = scanSeq;
 
     const excludedNow = new Set(excludedRef.current);
     const files = phase.manifest.files
       .map((f) => f.file)
       .filter((file) => !excludedNow.has(file));
     if (files.length === 0) {
-      dispatch({ type: "prewarm/settled" });
+      dispatch({ type: "prewarm/settled", seq });
       return;
     }
     void invoke("prewarm_analysis", { files, cacheDir: getSettings().cacheDir })
       .catch(() => {})
-      .then(() => dispatch({ type: "prewarm/settled" }));
+      .then(() => dispatch({ type: "prewarm/settled", seq }));
     // `excludedRef` is read but intentionally not a dependency: see the note above — an
     // exclusion must not restart the pass. The scan sequence is what re-runs this.
     // eslint-disable-next-line react-hooks/exhaustive-deps

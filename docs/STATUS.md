@@ -29,6 +29,23 @@ already wrote: **no extra ffmpeg spawns, no second decode, no copy of the media.
 | R2 — review round | ✅ | 8 findings: time anchoring, DPR bars, RMS tail, scrollbar travel (D-056). |
 | S6 — polish + deferred | ✅ | Findings 4/5/12/13/14/15, keyboard + a11y, settings UI, docs (D-057). |
 
+**v0.4 (unreleased) is at U1–U5 complete — the round is done.** The app stops making the
+operator wait to see anything: the timeline is the main view, it is populated the moment a
+folder is dropped, the analysis runs in the background while the sources list is still being
+read, files can be taken out of a run, and when the sync lands the clips *hop* from where
+their cameras' clocks claimed they were to where their own audio says they actually were.
+
+| v0.4 stage | State | What it added |
+| --- | --- | --- |
+| U1 — window + icon | ✅ | Hidden native title text, family-matched icon set (D-058). |
+| U2 — engine half | ✅ | Background pre-analysis as a D-046 activity, per-file exclusion request-side and folded into the F6 fingerprint (D-059, D-060). |
+| U3 — timeline as main view | ✅ | Pre-sync clips from `creation_time`, mode-carrying `TimelineView` mounted across sources → syncing → result, compact sources panel (D-061). |
+| U4 — removal + prewarm wiring | ✅ | The ✕ on every row with an undo group, `excludeFiles` on both requests, progressive per-file waveforms (D-062). |
+| U5 — the hop + QA sweep | ✅ | Arithmetic FLIP with a frozen view and one smooth fit, fade ghosts, reduced-motion parity (D-063) — plus the round's QA sweep: four defects found and fixed (dead camera clocks, the meta line's false claim, a superseded prewarm speaking for the wrong drop, and the syncing phase's dead pointer). |
+
+Gates at the end of the round: 255 vitest, 116 Playwright, both cargo workspaces clean under
+`clippy -D warnings` in both D-025 PATH variants.
+
 The UX overhaul (branch `feat/ui-overhaul`) fixed two launch-blocking bugs found in
 review — the missing Tauri 2 capabilities file (dialogs/events/opener were ACL-denied)
 and drag-drop written against the Tauri 1 API (drops did nothing) — and rebuilt the app

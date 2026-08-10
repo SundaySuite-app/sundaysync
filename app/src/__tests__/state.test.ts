@@ -283,9 +283,10 @@ describe("background pre-analysis bookkeeping (D-062)", () => {
   });
 
   it("prewarm/progress carries the aggregate tick and settling clears it", () => {
-    let s = reducer(toSources(), { type: "prewarm/progress", completed: 1, total: 2 });
+    const sources = toSources();
+    let s = reducer(sources, { type: "prewarm/progress", completed: 1, total: 2 });
     expect(s.prewarmProgress).toEqual({ completed: 1, total: 2 });
-    s = reducer(s, { type: "prewarm/settled" });
+    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq });
     expect(s.prewarmProgress).toBeNull();
   });
 
@@ -294,15 +295,69 @@ describe("background pre-analysis bookkeeping (D-062)", () => {
     // in the same batch as the promise resolving. Wiping the map here would erase that
     // file's `ready` before any component saw it — and the waveform it had just written
     // would never be read.
-    let s = reducer(toSources(), { type: "prewarm/file", file: CAM, ok: true });
-    s = reducer(s, { type: "prewarm/settled" });
+    const sources = toSources();
+    let s = reducer(sources, { type: "prewarm/file", file: CAM, ok: true });
+    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq });
     expect(s.prewarm).toEqual({ [CAM]: "ready", [WAV]: "failed" });
   });
 
   it("settling an already-settled pass is a no-op", () => {
-    const s = reducer(reducer(toSources(), { type: "prewarm/settled" }), {
+    const sources = toSources();
+    const seq = sources.scanSeq;
+    const s = reducer(reducer(sources, { type: "prewarm/settled", seq }), {
       type: "prewarm/settled",
+      seq,
     });
-    expect(reducer(s, { type: "prewarm/settled" })).toBe(s);
+    expect(reducer(s, { type: "prewarm/settled", seq })).toBe(s);
+  });
+});
+
+// ── V04-U5 QA: a superseded pass must not speak for the drop that replaced it ──────────
+//
+// Two seams, both invisible from either side alone. `prewarm_analysis` claims the D-046
+// activity slot with the ordinary guard, so only a `run_sync` may take it (D-059) — while
+// the App fires exactly one pass per scan sequence and swallows every rejection. Drop a
+// second folder mid-pass and the second `prewarm_analysis` was refused `busy:` in silence:
+// the new drop got no background analysis at all, and the abandoned pass went on narrating
+// the old one. `App.tsx` now cancels the running pass the moment a new scan starts; these
+// two guards are what stops its dying words from being believed.
+
+describe("a superseded pre-analysis pass (V04-U5)", () => {
+  it("cannot tick the aggregate line for a drop that is no longer on screen", () => {
+    const sources = toSources();
+    // A second folder goes in: back to scanning, and the pass against the first drop is
+    // still running for as long as it takes to notice it was cancelled.
+    const scanning = reducer(sources, { type: "inputs/add", paths: ["/y"] });
+    expect(scanning.phase.name).toBe("scanning");
+    expect(reducer(scanning, { type: "prewarm/progress", completed: 3, total: 9 })).toBe(
+      scanning,
+    );
+  });
+
+  it("cannot tick it while a sync it was preempted by is running either", () => {
+    const syncing = reducer(toSources(), { type: "sync/start" });
+    expect(reducer(syncing, { type: "prewarm/progress", completed: 3, total: 9 })).toBe(
+      syncing,
+    );
+  });
+
+  it("cannot declare the NEW drop's files failed when it finally settles", () => {
+    const first = toSources();
+    // The next drop lands and starts its own pass; every file is pending again.
+    let s = reducer(first, { type: "inputs/add", paths: ["/y"] });
+    s = reducer(s, { type: "scan/done", seq: s.scanSeq, manifest });
+    expect(s.prewarm).toEqual({ [CAM]: "pending", [WAV]: "pending" });
+
+    // NOW the first pass's promise finally resolves. Its sequence is stale, so it settles
+    // nothing: these files are waiting on the second pass, which is still running.
+    const late = reducer(s, { type: "prewarm/settled", seq: first.scanSeq });
+    expect(late).toBe(s);
+    expect(late.prewarm).toEqual({ [CAM]: "pending", [WAV]: "pending" });
+
+    // The pass that actually belongs to this drop still settles it.
+    expect(reducer(s, { type: "prewarm/settled", seq: s.scanSeq }).prewarm).toEqual({
+      [CAM]: "failed",
+      [WAV]: "failed",
+    });
   });
 });

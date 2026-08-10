@@ -2382,3 +2382,176 @@ behave exactly as they did before this stage. `removal.spec.ts` asserts the reco
 the engine was told. `prewarm.spec.ts` covers the frontend half of D-059's preemption:
 `run_sync` is in flight while the prewarm's promise is still open, i.e. the UI never waits
 for the pass to let go.
+
+## D-063 — V04-U5: the clips hop into place, and the view is frozen while they do
+
+**The ask, verbatim:** «Når man klikker sync, så *hopper* filene på plass når de får en
+match. Det skal være veldig smooth.»
+
+The structural half of that shipped in U3: the timeline is mode-carrying, mounted from the
+first drop and never torn down, with every clip keyed on its `data-file`. What was missing
+was the movement itself — the result simply replaced the guess between two frames, and the
+one moment where the app has something to *show* the operator (this is where your camera's
+clock said it was; this is where its own audio says it was) went by as a cut.
+
+### Freeze → hop → fit, in that order
+
+The commit that first carries an outcome renders the solved placements **under the pre-sync
+view** — same zoom, same pan. `TimelineView`'s fit-on-new-content path is held off by a
+`frozen` ref while this runs, and so is its scroll clamp: a result span is usually shorter
+than the pre-sync one, so clamping alone would have yanked the scroll to a new maximum in
+the very frame the clips start moving, and every delta they had just been given would have
+been measured from somewhere they no longer were.
+
+The freeze is what makes the movement mean anything. Re-fitting in the same frame would mix
+two motions the eye cannot separate — "how far the audio says this clip really was from
+where its clock claimed" and "how far the app just zoomed" — and the result reads as a
+shuffle rather than as an answer. So the clips travel first, on a stationary canvas, and
+only then does the view make one interpolated ~300 ms move to the result's own fit
+(geometrically in zoom, because zoom is a ratio and a linear ramp between two px/ms values
+crawls at one end and lurches at the other).
+
+`useHop` is declared **before** the measure effect in `TimelineView` on purpose: React runs
+one component's layout effects in declaration order, and `frozen` has to be set on the
+outcome's own commit before the fit reads it.
+
+### FLIP by transform, and by arithmetic
+
+`transform`, not `left`. A clip's `left`/`width` are inline and rewritten on every pan and
+zoom frame; animating `left` would put two writers on one property, taking turns, at exactly
+the moment the operator is most likely to grab the timeline.
+
+And the "First" half of FLIP is computed, not measured (`app/src/timeline/hop.ts`). This is
+not an optimisation — a DOM read is not *available*. By the time anything can react to the
+outcome, React has already committed the new positions, so `getBoundingClientRect` returns
+the layout we are trying to animate *from nowhere*. The old layout exists only as the
+previous render's data, which is what `hopDeltas` takes:
+
+- **x** is `msToX(span.startMs, view)` — the very expression `Clip.tsx` writes into `left`,
+  so the two agree by construction rather than by luck.
+- **y** is a sum of track heights above the clip plus its row inside its own track, from the
+  same `LANE_HEIGHT_PX` the component hands `Track`. A file's device rarely changes across a
+  sync, but the *stack* does: a device that gains a sub-track pushes every track below it
+  down, and an empty track (§7.5 keeps those) appears where none was.
+
+`hop.ts` therefore owns a clip box's pixel geometry outright — `LANE_HEIGHT_PX`,
+`MIN_CLIP_WIDTH_PX`, `CLIP_HEIGHT_PX` — and `TimelineView` and `Clip` import them rather
+than keeping their own copies. The fade ghosts are drawn from those same numbers next to
+real clips positioned by the CSS, which is what keeps the duplication in `styles.css`
+honest.
+
+### Departures fade; arrivals do not
+
+A clip the run could not place, or one the operator removed, has no node left to animate:
+React removed it with the rest of the old layout. What fades is a **ghost** — a plain
+`aria-hidden` box drawn at the box the clip used to occupy (`hopExits`) into a dedicated
+layer offset by the ruler and the gutter, so it shares the lane column's origin. It is gone
+before the timeline comes to rest, and the file itself reappears where a file that would not
+sync belongs: the shelf.
+
+Arriving clips get nothing. A clip with no "before" has no journey to show, and inventing
+one (a fade-in, a rise) would be decoration on a screen whose whole job is to say what the
+engine found.
+
+### Reduced motion skips the work, not just the animation
+
+`styles.css` kills every transition under `prefers-reduced-motion: reduce`. A hop gated on
+CSS alone would therefore set a transform, get no transition to carry it away, and leave the
+clip sitting on its old position waiting for a `transitionend` that never comes — the
+accessibility setting turning correct output into wrong output. The gate is at the top of
+the sequence in JS: no transforms, no ghosts, no interpolated fit. The layout lands final
+and correct, which it already was.
+
+For the same reason "unknown counts as reduce": if `matchMedia` is missing there is no way
+to ask, and the safe answer to "may I animate?" without an answer is no.
+
+### The user always wins
+
+Any pan, zoom, fit or scrollbar gesture cancels the whole sequence on the spot — inline
+transforms dropped, clips on their true positions, ghosts removed, and the view left exactly
+where the operator put it (`fittedSpan` is marked done so nothing snaps it back). A hop
+describes a journey between two positions on a stationary canvas; the moment the canvas
+moves it has stopped describing anything.
+
+Nothing may outlive its run: every timer and rAF handle is cancelled on unmount, and a
+second sync cancels whatever the first left in flight before it starts.
+
+### `data-hop`, and why an animation test never samples a tween
+
+The section carries `data-hop` for the whole sequence — freeze through hop through fit. It
+is real state ("is this timeline showing its final layout?", which for ~750 ms after a sync
+is no), and it is what lets `waitForResult` mean *and has stopped moving*.
+
+The browser tier splits accordingly. **Where it lands** is asserted under
+`reducedMotion: "reduce"`, where there is no animation at all: clips at their solved
+positions, no lingering class, no inline transform. **That it moves** is asserted with a
+`MutationObserver` installed before the outcome arrives, recording discrete, timing-free
+facts — a class was applied, a non-identity translate was set *and then removed*
+(`attributeOldValue` is the only place that value still exists), a ghost was inserted. No
+screenshot of a tween, and no pixel sampled mid-flight: an animation frame is a
+time-dependent value, and a test that asserts one fails on a slow runner for no reason.
+
+### What the QA sweep found (V04-U5, Task B)
+
+Four defects across U1–U4, each fixed with a test that fails on the code before it.
+
+1. **A dead camera clock destroyed the pre-sync picture.** `sourceLayout.ts` gated stamps on
+   `Date.parse` alone, so a camera that came back from a flat battery reading 1970-01-01 —
+   and wrote that as confidently as any other date — set the drop's origin fifty-six years
+   early. `contentBounds` returned a span of ~1.8 × 10¹² ms, `fitPxPerMs` clamped to
+   `MIN_PX_PER_MS`, and the operator got twelve hours of empty grid with the dud clip at the
+   far left and every real file off the right edge, with nothing on screen saying why — which
+   reads as "the app did not read my card". Stamps are now kept only if they fall in the
+   drop's plausible session window (`PLAUSIBLE_SPREAD_MS`, one day: SundaySync exists to line
+   up sources that were recording *at the same time*, so anything the correlator could ever
+   match is inside one session). The largest run of stamps inside that window wins; ties go
+   to the **later** one, because a clock that is wrong is wrong *early* — an epoch, a factory
+   date, a battery-pull default — never late. Rejected stamps join the no-stamp files at zero
+   and are counted in the note, so the operator is told.
+2. **The meta line claimed positions nobody had computed.** "Provisional positions from the
+   files' own timestamps" sat above the timeline even when not one file in the drop carried a
+   usable one — a folder of field-recorder WAVs, the commonest audio drop there is. Then
+   nothing was positioned by a timestamp at all; everything was piled at zero, and the line
+   invited the operator to read that pile as a claim about when they recorded.
+   `presyncMetaNoClock` says what is actually true.
+3. **A superseded pre-analysis pass spoke for the drop that replaced it.** A seam, in the
+   shape of two layers each correct alone. `prewarm_analysis` claims the D-046 activity slot
+   with the ordinary guard, so only a `run_sync` may take it (D-059); the App fires exactly
+   one pass per scan sequence and swallows every rejection, by design. Drop a second folder
+   mid-pass and the second `prewarm_analysis` was therefore refused `busy: analysis in
+   progress` **in silence**: the new drop got no background analysis at all, while the
+   abandoned pass kept reading the old folder off the NAS and kept ticking `prewarm:progress`
+   against a file list that was no longer on screen. Three fixes, one per hole: `App.tsx`
+   cancels the running pass the moment a new scan starts (the same sentence the empty case
+   already said — speculative work on a drop that no longer exists — and early enough that
+   the slot is free before the much slower probe finishes and asks for it); `prewarm/progress`
+   is ignored outside the `sources` phase, since that channel carries no sequence of its own;
+   and `prewarm/settled` now travels with the sequence that launched it, so a late settlement
+   can no longer declare the *new* drop's files `failed` on the strength of the old drop's
+   promise resolving.
+4. **The syncing phase was the one phase the timeline could not be looked at.**
+   `.timeline--busy` carried `pointer-events: none` as well as its dim, so a mouse could not
+   pan or zoom while the engine ran — while the keyboard's `+`/`−`/`0` and arrows, which go
+   through the section's own handler, always could. Two halves of one view disagreeing, and
+   both against D-061's stated rule that *looking* works in every phase. There was nothing
+   for the blanket to protect: pre-sync clips are `disabled`, and the shelf, the transport
+   and the clip dialog are result-only, while the sources panel below has its own `busy` prop
+   for the controls that genuinely are decisions. The dim stays; the inertness is gone.
+
+Verified and deliberately **not** changed:
+
+- **The exclusion × override × reference matrix** holds. Removing the reference clears the
+  star (so the run cannot name a file the engine was told to skip); removing a file takes its
+  override with it and does not hand it back on restore (an override silently returning under
+  a restored file is worse than re-picking); removing a device's last file removes the
+  device's track from the timeline and its group from the panel, by the same rule an override
+  that empties a device already followed; and the F6 refusal's localized copy is already
+  proven end to end in `export.spec.ts`.
+- **A result keeps the reference badge of the run that produced it**, even after the operator
+  removes that file. The result is a historical record, and it is marked stale by the same
+  action — rewriting its badge would be editing the record of a run that did happen.
+- **`prewarm_analysis` still refuses a second pass rather than superseding it.** The frontend
+  cancel above closes the case that actually occurs. Teaching the backend guard to preempt a
+  prewarm with another prewarm would widen D-059's "only a sync may take the slot" for a race
+  the frontend no longer creates, and the failure mode if the cancel loses the race is
+  unchanged from today: one drop without background analysis, which the sync then does itself.
