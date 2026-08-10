@@ -115,6 +115,21 @@ with waveforms, at any zoom, that you can play.
   screen. The answer is now arithmetic, and the audio is read only for waveforms actually
   drawn.
 
+### QA
+
+- **Scale, memory and the owner's listening protocol (V03-S7).** A Playwright suite proves
+  the interactive timeline stays responsive at real-service scale — six devices, 302
+  placements across an exact 3-hour span, several overlapping per device — by checking
+  that only the clips near the visible window ever get a DOM node
+  (`app/e2e/timeline-scale.spec.ts`). A vitest simulation drives the playback chunk
+  planner across a 3-hour, 10-device sweep and confirms resident audio never exceeds the
+  documented 256 MB budget, and that nothing needed is evicted while still needed
+  (`app/src/audio/playbackMemory.simulation.test.ts`). `docs/QA_TIMELINE_LISTENING.md` is
+  the practical, Norwegian checklist for running all of this against real multicam footage
+  by ear — sync a real shoot, listen for the comb-filtered doubling that means "in sync"
+  versus the distinct echo that means "bug," check drift correction and mute/solo, and
+  confirm Resolve agrees with what was heard.
+
 ### Internal
 
 - **Waveform peaks pipeline (D-052).** `crates/core/src/peaks.rs` — a streamed
