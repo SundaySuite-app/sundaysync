@@ -102,6 +102,48 @@ Judging the final audio still means exporting and listening in Resolve.
   validator. The span is keyboard-operable (`tabIndex`, Enter/Space, `aria-disabled`), so
   the practical cost is the flagged rule, not a lost control. See D-054/D-055/D-057.
 
+## The pre-sync timeline shows camera clocks, not the answer (v0.4)
+
+Files land on the timeline the moment they are scanned, positioned by the `creation_time`
+their container carries. That is the only clock the app has before it has listened to
+anything, and it is frequently wrong: cameras drift, cameras are set to the wrong time zone,
+and a camera that lost its battery comes back reading 1970. Those clips are drawn in a muted
+grey rather than the placed green, and they say «foreløpig» in as many words — but the
+picture is still a *claim by the cards*, not by SundaySync, until the sync corrects it.
+
+Two specific shapes of that:
+
+- **Files with no usable recording time sit at the start, together.** A field recorder's WAV
+  usually carries no timestamp at all, and a stamp that falls outside the drop's plausible
+  session window is discarded rather than believed (D-063). Both cases pile at zero, and the
+  note above the timeline counts them. They are *not* spread out in file order — that would
+  be drawing an order the app does not know.
+- **The hop after a sync is the correction, and it can be large.** A ten-minute jump means
+  the card's clock was ten minutes out, not that anything went wrong.
+
+## The background analysis starts before you have finished choosing (v0.4)
+
+Pre-analysis (D-059/D-062) begins the moment a scan finishes, on every file the scan found —
+which is before the operator has had a chance to remove the lens-cap take, the duplicate
+board dump or the file that belongs to a different service. So the app reads media it may
+turn out not to need, and on a NAS that read is over the network.
+
+**This is a deliberate trade the owner accepted**, and it is the whole point of the feature:
+the reason the timeline draws waveforms while you are still reading the sources list is that
+the decode is already running. Waiting for the file list to be final would mean waiting for
+the operator, which is exactly the wait the feature exists to remove. The cost is bounded and
+recoverable rather than open-ended:
+
+- The work is the same decode the sync would have done anyway, into the same cache — nothing
+  is done twice, and an excluded file's cache entry is simply never read.
+- An excluded file is skipped by any *later* pass, and by the sync itself.
+- Pressing Sync preempts the pass within a second or two (D-059); dropping a different folder
+  cancels it (D-063); clearing the sources cancels it.
+- The cache is swept on the 90-day mtime rule (D-040), so an unneeded entry is not permanent.
+
+What it is not: it is not something to wait for, and it never reports failure. A pass that is
+refused, cancelled or preempted is the system working.
+
 ## A produced or edited mix is not a valid sync reference
 
 Correlation assumes the reference is one continuous recording. A post-produced mix

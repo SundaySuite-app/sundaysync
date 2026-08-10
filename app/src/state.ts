@@ -115,7 +115,7 @@ export type Action =
   | { type: "files/restore"; file: string }
   | { type: "prewarm/file"; file: string; ok: boolean }
   | { type: "prewarm/progress"; completed: number; total: number }
-  | { type: "prewarm/settled" }
+  | { type: "prewarm/settled"; seq: number }
   | { type: "sync/start" }
   | { type: "sync/progress"; progress: ProgressEvent }
   | { type: "sync/done"; outcome: SyncOutcome }
@@ -300,12 +300,26 @@ export function reducer(state: AppState, action: Action): AppState {
       };
 
     case "prewarm/progress":
+      // V04-U5 QA: only a pass belonging to the drop that is ON SCREEN may move this line.
+      // The `prewarm:progress` channel carries no sequence number of its own, and a pass
+      // that has been superseded (a second folder dropped) or preempted (Sync pressed)
+      // goes on emitting for as long as it takes to notice — so an unguarded tick showed
+      // the OLD drop's counts under the NEW drop's file list, which is a progress bar for
+      // work nobody is waiting for against a list it does not describe. `sources` is the
+      // only phase a live pass belongs to.
+      if (state.phase.name !== "sources") return state;
       return {
         ...state,
         prewarmProgress: { completed: action.completed, total: action.total },
       };
 
     case "prewarm/settled": {
+      // V04-U5 QA: whose pass ended? A superseded pass settles LATE — after the next scan
+      // has already put its own files in the map as `pending` — and the rewrite below
+      // would then declare every file of the new drop `failed` on the strength of the old
+      // drop's promise resolving. The launching sequence travels with the action so a late
+      // settlement can only ever settle its own pass.
+      if (action.seq !== state.scanSeq) return state;
       // The pass ended — finished, refused as busy, superseded, or preempted by a sync.
       // Whatever the reason, nothing more is coming, so nothing may still be `pending`:
       // a clip left waiting on an event that will never arrive would show the

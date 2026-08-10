@@ -100,6 +100,10 @@ export const nb = {
   // Tidslinjen som hovedvisning (v0.4, D-061) — klippene vises før synkronisering,
   // plassert etter filenes egne tidsstempler. Det er en gjetning, og teksten sier det.
   presyncMeta: "Foreløpig plassering fra filenes tidsstempler",
+  // …og linja over er en påstand som ikke holder når ingen av filene har et brukbart
+  // tidsstempel: da er det ingen plassering å ha fra tidsstempler i det hele tatt, alt
+  // ligger på null (V04-U5).
+  presyncMetaNoClock: "Ingen brukbare tidsstempler — klippene ligger på start til synken plasserer dem",
   presyncStart: "starter",
   presyncStartUnknown: "ukjent opptakstidspunkt",
   presyncUnknownStart: (n: number) =>
@@ -386,6 +390,7 @@ export const en: Strings = {
   clipDurationUnknown: "Length unknown",
 
   presyncMeta: "Provisional positions from the files' own timestamps",
+  presyncMetaNoClock: "No usable timestamps — the clips sit at the start until the sync places them",
   presyncStart: "starts at",
   presyncStartUnknown: "unknown recording time",
   presyncUnknownStart: (n: number) =>

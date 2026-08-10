@@ -9,6 +9,7 @@ import {
   zoomAround,
   type TimelineView as View,
 } from "../../timeline/geometry";
+import { LANE_HEIGHT_PX } from "../../timeline/hop";
 import { stackClips, type ClipSpan } from "../../timeline/laneLayout";
 import { getPlayheadMs, publishPlayheadMs } from "../../timeline/playhead";
 import { sourceSpans } from "../../timeline/sourceLayout";
@@ -29,6 +30,7 @@ import { Ruler } from "./Ruler";
 import { Track } from "./Track";
 import { Transport } from "./Transport";
 import { UnsyncedShelf } from "./UnsyncedShelf";
+import { useHop } from "./useHop";
 import { warningText } from "./warnings";
 
 /**
@@ -67,9 +69,6 @@ import { warningText } from "./warnings";
  *      its detail dialog keep showing the engine's real `offset_seconds`.
  */
 
-/** Height of one sub-track lane — the 34px the old `.lane__track` used. */
-const LANE_H = 34;
-
 /** Wheel/button zoom step. Small enough that a trackpad flick is not a jump. */
 const WHEEL_FACTOR = 1.15;
 const BUTTON_FACTOR = 1.4;
@@ -92,6 +91,9 @@ export type TimelinePhase = "sources" | "syncing" | "result";
 /** Everything the tracks are drawn from, whichever phase produced it. */
 interface TimelineContent {
   tracks: { device: Device; rows: ClipSpan[][] }[];
+  /** How many clips are drawn in total. Only used to tell "some files have no usable
+   *  recording time" from "NONE of them do", which are two different sentences. */
+  clipCount: number;
   contentSpanMs: number;
   /** Null before a sync: there are spans, but no engine placements behind them. */
   placements: Map<string, Placement> | null;
@@ -105,6 +107,7 @@ interface TimelineContent {
 /** Nothing to draw — no manifest yet. Frozen so it is never a fresh identity per render. */
 const EMPTY_CONTENT: TimelineContent = {
   tracks: [],
+  clipCount: 0,
   contentSpanMs: 1,
   placements: null,
   audioClips: [],
@@ -151,8 +154,10 @@ export function TimelineView({
   const [selected, setSelected] = useState<Placement | null>(null);
   const result = outcome?.result ?? null;
 
+  const sectionRef = useRef<HTMLElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
 
   // ---- Content: seconds → ms, grouped per device, stacked into sub-tracks ----
   //
@@ -226,6 +231,7 @@ export function TimelineView({
 
     return {
       tracks,
+      clipCount: spans.length,
       contentSpanMs: spanMs,
       placements,
       audioClips,
@@ -264,6 +270,7 @@ export function TimelineView({
           null);
     return {
       tracks,
+      clipCount: layout.tracks.reduce((n, t) => n + t.spans.length, 0),
       contentSpanMs: spanMs,
       placements: null,
       audioClips: [],
@@ -275,6 +282,7 @@ export function TimelineView({
 
   const {
     tracks,
+    clipCount,
     contentSpanMs,
     placements,
     audioClips,
@@ -296,10 +304,26 @@ export function TimelineView({
     [contentSpanMs],
   );
 
+  const fittedSpan = useRef<number | null>(null);
+
+  // The hop (v0.4, D-063). Declared ABOVE the measure effect on purpose: React runs a
+  // component's layout effects in declaration order, and `hop.frozen` has to be set on the
+  // outcome's own commit before the fit below reads it.
+  const hop = useHop({
+    tracks,
+    view,
+    outcome,
+    contentSpanMs,
+    bodyRef,
+    sectionRef,
+    ghostRef,
+    setView,
+    fittedSpan,
+  });
+
   // Measure the lane column and fit the content into it. The fit re-runs whenever
   // the content changes (a new sync outcome) — but NOT on every resize, or the
   // user's chosen zoom would be thrown away by an incidental window drag.
-  const fittedSpan = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
@@ -307,6 +331,12 @@ export function TimelineView({
       const w = el.clientWidth;
       setView((v) => {
         const widthPx = w > 0 ? w : v.widthPx;
+        // Mid-hop the result is deliberately drawn under the PRE-SYNC view, and the hop
+        // owns the view until it hands it back (D-063). Not even the clamp may run here:
+        // the result's span is usually shorter than the pre-sync one, so clamping would
+        // yank the scroll to a new maximum in the very frame the clips start moving, and
+        // every delta they were given would be measured from somewhere they no longer are.
+        if (hop.frozen.current) return { ...v, widthPx };
         if (fittedSpan.current !== contentSpanMs) {
           fittedSpan.current = contentSpanMs;
           return { widthPx, pxPerMs: fitPxPerMs(contentSpanMs, widthPx), scrollMs: 0 };
@@ -318,7 +348,7 @@ export function TimelineView({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [contentSpanMs, clampS]);
+  }, [contentSpanMs, clampS, hop.frozen]);
 
   // A fresh result is a fresh clock: the old playhead pointed into a timeline
   // that no longer exists.
@@ -357,24 +387,29 @@ export function TimelineView({
   const toggleSolo = useCallback((id: string) => engine.toggleSolo(id), [engine]);
   const showSolo = (result?.devices.length ?? 0) > 1;
 
+  // Every gesture that takes the view calls `hop.cancel()` first (D-063): a hop describes
+  // a journey between two positions on a stationary canvas, and the moment the operator
+  // moves the canvas the journey stops describing anything. Cancelling drops the clips on
+  // their true positions and leaves the view exactly where it was put.
   const zoomBy = useCallback(
-    (factor: number, anchorX?: number) =>
+    (factor: number, anchorX?: number) => {
+      hop.cancel();
       setView((v) => {
         const z = zoomAround(v, factor, anchorX ?? v.widthPx / 2);
         return { ...z, scrollMs: clampS(z.scrollMs, z.pxPerMs, v.widthPx) };
-      }),
-    [clampS],
+      });
+    },
+    [clampS, hop],
   );
 
-  const fit = useCallback(
-    () =>
-      setView((v) => ({
-        ...v,
-        pxPerMs: fitPxPerMs(contentSpanMs, v.widthPx),
-        scrollMs: 0,
-      })),
-    [contentSpanMs],
-  );
+  const fit = useCallback(() => {
+    hop.cancel();
+    setView((v) => ({
+      ...v,
+      pxPerMs: fitPxPerMs(contentSpanMs, v.widthPx),
+      scrollMs: 0,
+    }));
+  }, [contentSpanMs, hop]);
 
   // Wheel is bound natively, not through React's synthetic handler, because React
   // registers `wheel` on the root as PASSIVE — `preventDefault()` there is a no-op,
@@ -407,6 +442,7 @@ export function TimelineView({
       const horizontal = e.deltaX !== 0 || e.shiftKey;
       if (!horizontal) return;
       e.preventDefault();
+      hop.cancel();
       const delta = e.deltaX || e.deltaY;
       setView((v) => ({
         ...v,
@@ -415,7 +451,7 @@ export function TimelineView({
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomBy, clampS]);
+  }, [zoomBy, clampS, hop]);
 
   // ---- Background drag = pan ----
   const pan = useRef<{ x: number; scrollMs: number } | null>(null);
@@ -425,6 +461,7 @@ export function TimelineView({
     // Controls and the ruler own their own pointer gestures.
     const target = e.target as HTMLElement;
     if (target.closest("button, select, label, .timeline__ruler")) return;
+    hop.cancel();
     pan.current = { x: e.clientX, scrollMs: view.scrollMs };
     e.currentTarget.setPointerCapture(e.pointerId);
   }
@@ -472,6 +509,7 @@ export function TimelineView({
   function onScrollbarDown(e: React.PointerEvent<HTMLDivElement>) {
     const frac = troughFrac(e);
     if (frac === null) return;
+    hop.cancel();
     e.currentTarget.setPointerCapture(e.pointerId);
 
     if (frac >= bar.offsetFrac && frac <= bar.offsetFrac + bar.thumbFrac) {
@@ -509,6 +547,7 @@ export function TimelineView({
    *  keyboard user cannot reach a scroll a pointer could not. */
   function onScrollbarKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    hop.cancel();
     setView((v) => {
       const visibleMs = v.widthPx / v.pxPerMs;
       const step = visibleMs * SCROLL_STEP_FRACTION;
@@ -591,6 +630,7 @@ export function TimelineView({
 
   return (
     <section
+      ref={sectionRef}
       className={[
         "result timeline",
         stale ? "result--stale" : "",
@@ -611,7 +651,15 @@ export function TimelineView({
                 result.sequence.fps,
                 formatDuration(result.sequence.duration_seconds),
               )
-            : t.presyncMeta}
+            : // "Provisional positions from the files' own timestamps" is a claim, and it
+              // is false when not one file in the drop carries a usable one — a folder of
+              // field-recorder WAVs, or a set of cards whose clocks were all rejected
+              // (`sourceLayout.ts`). Then nothing was positioned by a timestamp at all;
+              // everything is piled at zero, and saying otherwise invites the operator to
+              // read that pile as a claim about when they recorded (V04-U5).
+              clipCount > 0 && unknownStart.size === clipCount
+              ? t.presyncMetaNoClock
+              : t.presyncMeta}
         </span>
         <div className="timeline__zoom">
           <button type="button" className="ghost" onClick={() => zoomBy(1 / BUTTON_FACTOR)} aria-label={t.zoomOut}>
@@ -669,7 +717,7 @@ export function TimelineView({
               unknownDurations={unknownDurations}
               unknownStart={unknownStart}
               prewarm={prewarm}
-              laneHeight={LANE_H}
+              laneHeight={LANE_HEIGHT_PX}
               onSelect={setSelected}
               muted={playback.muted.includes(device.id)}
               soloed={playback.soloed.includes(device.id)}
@@ -679,6 +727,14 @@ export function TimelineView({
               onToggleSolo={toggleSolo}
             />
           ))}
+
+          {/* Where a departing clip's fade ghost is drawn (v0.4, D-063). React has already
+              removed the real node by the time anything can react to the outcome, so the
+              thing that fades is a copy placed at the box the clip used to occupy. Offset
+              from the top by the ruler and from the left by the gutter, so it shares the
+              lane column's origin — the same origin `timeline/hop.ts` measures in.
+              Populated imperatively and only during a hop; empty the rest of the time. */}
+          <div className="timeline__ghosts" ref={ghostRef} aria-hidden="true" />
 
           {/* The playhead is the transport's marker; before a sync there is nothing to
               play and no schedule for it to point into. */}

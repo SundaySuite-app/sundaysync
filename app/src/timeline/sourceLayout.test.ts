@@ -143,3 +143,104 @@ describe("sourceSpans", () => {
     expect(unknownStart.size).toBe(0);
   });
 });
+
+// ── A stamp that parses but cannot be true (V04-U5) ────────────────────────────────────
+//
+// Found in the v0.4 QA sweep. `Date.parse` was the only gate, so one camera whose battery
+// had gone flat — reporting 1970-01-01 with complete confidence — set the drop's origin
+// fifty-six years early. `contentBounds` then returned a span of ~1.8 × 10¹² ms,
+// `fitPxPerMs` clamped to `MIN_PX_PER_MS`, and the whole shoot went off the right edge of a
+// timeline that looked, to the operator, like an app that had failed to read the card.
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+describe("sourceSpans and clocks that cannot be true", () => {
+  it("treats a dead camera clock as no clock at all, not as the drop's origin", () => {
+    const scan = manifest(
+      [device("cam-a"), device("cam-b"), device("dud")],
+      [
+        file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "2026-08-09T10:00:00Z" }),
+        file({ file: "/b/C2.MP4", device: "cam-b", creation_time: "2026-08-09T10:10:00Z" }),
+        // Flat battery: the camera came back at the epoch and wrote it down.
+        file({ file: "/d/C3.MP4", device: "dud", creation_time: "1970-01-01T00:00:00Z" }),
+      ],
+    );
+
+    const { tracks, unknownStart } = sourceSpans(scan, {});
+
+    expect([...unknownStart]).toEqual(["/d/C3.MP4"]);
+    const startOf = (file: string) =>
+      tracks.flatMap((t) => t.spans).find((s) => s.file === file)!.startMs;
+    // The two real cards keep their true ten-minute separation, and the earliest of THEM
+    // is zero — the dud does not get to define the origin.
+    expect(startOf("/a/C1.MP4")).toBe(0);
+    expect(startOf("/b/C2.MP4")).toBe(10 * 60 * 1000);
+    expect(startOf("/d/C3.MP4")).toBe(0);
+  });
+
+  it("keeps a whole session together, however long the session is", () => {
+    // Six hours is a long day, not an impossible one: still one drop, still one origin.
+    const scan = manifest(
+      [device("cam-a"), device("cam-b")],
+      [
+        file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "2026-08-09T08:00:00Z" }),
+        file({ file: "/b/C2.MP4", device: "cam-b", creation_time: "2026-08-09T14:00:00Z" }),
+      ],
+    );
+    const { unknownStart, tracks } = sourceSpans(scan, {});
+    expect(unknownStart.size).toBe(0);
+    expect(tracks.flatMap((t) => t.spans).find((s) => s.file === "/b/C2.MP4")!.startMs).toBe(
+      6 * 60 * 60 * 1000,
+    );
+  });
+
+  it("keeps the LATER of two equally-sized clusters — a broken clock reads early", () => {
+    const scan = manifest(
+      [device("cam-a"), device("cam-b")],
+      [
+        file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "2020-01-01T00:00:00Z" }),
+        file({ file: "/b/C2.MP4", device: "cam-b", creation_time: "2026-08-09T10:00:00Z" }),
+      ],
+    );
+    // Neither file has company, so size cannot decide. A camera that lost its clock falls
+    // back to a fixed date in the past; nothing makes one jump forward.
+    expect([...sourceSpans(scan, {}).unknownStart]).toEqual(["/a/C1.MP4"]);
+  });
+
+  it("believes the majority when one card is the odd one out", () => {
+    const base = Date.parse("2026-08-09T10:00:00Z");
+    const scan = manifest(
+      [device("cam-a"), device("cam-b"), device("cam-c"), device("dud")],
+      [
+        file({ file: "/a.MP4", device: "cam-a", creation_time: new Date(base).toISOString() }),
+        file({
+          file: "/b.MP4",
+          device: "cam-b",
+          creation_time: new Date(base + 60_000).toISOString(),
+        }),
+        file({
+          file: "/c.MP4",
+          device: "cam-c",
+          creation_time: new Date(base + 120_000).toISOString(),
+        }),
+        // Three days ahead — a clock set to the wrong date, and outnumbered.
+        file({
+          file: "/dud.MP4",
+          device: "dud",
+          creation_time: new Date(base + 3 * DAY_MS).toISOString(),
+        }),
+      ],
+    );
+    expect([...sourceSpans(scan, {}).unknownStart]).toEqual(["/dud.MP4"]);
+  });
+
+  it("leaves a single stamped file alone — one clock cannot contradict itself", () => {
+    const scan = manifest(
+      [device("cam-a")],
+      [file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "1970-01-01T00:00:00Z" })],
+    );
+    // Absurd on its face, but there is nothing to compare it with, and it positions
+    // nothing: it is the origin, it sits at zero, and the sync is about to answer anyway.
+    expect(sourceSpans(scan, {}).unknownStart.size).toBe(0);
+  });
+});

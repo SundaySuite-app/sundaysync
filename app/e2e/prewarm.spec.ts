@@ -129,6 +129,30 @@ test.describe("the pass starts on its own", () => {
       .toEqual({ files: [WAV, CAM_A], cacheDir: null });
   });
 
+  // V04-U5 QA. `prewarm_analysis` takes the D-046 activity slot with the ordinary guard,
+  // so only a `run_sync` can take it away (D-059) — which meant a SECOND folder dropped
+  // mid-pass had its own pass refused `busy:` and silently swallowed. The new drop then got
+  // no background analysis at all, while the abandoned pass carried on reading the old
+  // folder off the NAS. Nothing on either side of that seam was wrong on its own.
+  test("a second drop stops the pass running against the first", async ({ page }) => {
+    await reachSources(page, { ...prewarmHeld(), ...cancelPrewarmSpy() });
+    await waitForPending(page, "prewarm_analysis");
+    expect(
+      await page.evaluate(() => (window as unknown as Record<string, any>).__E2E_CANCEL_PREWARM__),
+    ).toBeUndefined();
+
+    // A second folder goes in. The scan for it has not finished yet — the cancel must not
+    // wait for that, or the old pass keeps the slot right through the probe and the new
+    // pass arrives to find it taken.
+    await page.getByRole("button", { name: en.dropFolder }).click();
+
+    await expect
+      .poll(async () =>
+        page.evaluate(() => (window as unknown as Record<string, any>).__E2E_CANCEL_PREWARM__),
+      )
+      .toBe(1);
+  });
+
   test("clearing the sources stops it", async ({ page }) => {
     // The pass is speculative work on a drop that no longer exists. Leaving it running
     // would keep decoding a card the operator has just put away.

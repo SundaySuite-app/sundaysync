@@ -2,14 +2,12 @@ import { memo } from "react";
 import type { Strings } from "../../i18n";
 import type { PrewarmStatus } from "../../state";
 import { formatTimecode, msToX, type TimelineView } from "../../timeline/geometry";
+import { MIN_CLIP_WIDTH_PX } from "../../timeline/hop";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import { usePlayheadInsideSpan } from "../../timeline/playhead";
 import { basename } from "../../types";
 import type { Placement } from "../../types";
 import { WaveformCanvas } from "./WaveformCanvas";
-
-/** Narrower than this and the box is a tick mark, not a clip — but still there. */
-const MIN_CLIP_PX = 3;
 
 /** How much of a clip stays label-free at its right end when the label slides. */
 const LABEL_KEEP_PX = 36;
@@ -62,7 +60,9 @@ export const Clip = memo(function Clip({
   onSelect: (placement: Placement) => void;
 }) {
   const left = msToX(span.startMs, view);
-  const width = Math.max(MIN_CLIP_PX, (span.endMs - span.startMs) * view.pxPerMs);
+  // The floor lives in `timeline/hop.ts` alongside the rest of a clip box's geometry, so a
+  // fade ghost drawn from that module can never disagree with the clip it stands in for.
+  const width = Math.max(MIN_CLIP_WIDTH_PX, (span.endMs - span.startMs) * view.pxPerMs);
   const name = basename(span.file);
   const hasWarnings = placement !== null && placement.warnings.length > 0;
   // Subscribed to the DERIVED boolean, so this re-renders when the playhead crosses this

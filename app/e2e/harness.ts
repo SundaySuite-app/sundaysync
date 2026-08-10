@@ -127,15 +127,23 @@ export async function emit(page: Page, name: string, payload: unknown): Promise<
 }
 
 /**
- * Wait until the RESULT view is on screen.
+ * Wait until the RESULT view is on screen **and has stopped moving**.
  *
  * Since V04-U3 (D-061) the timeline is the main view: `.timeline__body`, `.clip` and the
  * ruler are all mounted from the sources phase onwards, so none of them means "the sync
  * has finished" any more. The export bar is result-only and is what actually distinguishes
  * the phases — every spec that used to gate on the timeline appearing now gates on this.
+ *
+ * Since V04-U5 (D-063) that is not enough on its own: for the ~750 ms after an outcome
+ * lands the clips are hopping to their solved positions and the view is interpolating to
+ * the result's fit, so anything measured in that window is a frame of an animation rather
+ * than the layout. `data-hop` is on the section for exactly that period (`useHop.ts`), so
+ * waiting for it to clear is waiting for the timeline's final answer. Under
+ * `reducedMotion: "reduce"` the attribute is never set at all and this costs nothing.
  */
 export async function waitForResult(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: en.exportButton })).toBeVisible();
+  await expect(page.locator(".timeline")).not.toHaveAttribute("data-hop", /.*/);
 }
 
 export interface BootOptions {
