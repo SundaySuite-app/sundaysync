@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { Strings } from "../i18n";
 import { formatDuration } from "../i18n";
 import { basename } from "../types";
-import type { Device, FileEntry, ScanManifest, UnsyncedReason } from "../types";
+import type { Device, FileEntry, ScanManifest, Unsynced, UnsyncedReason } from "../types";
 import { CameraIcon, MicIcon, StarIcon } from "./icons";
 
 /**
@@ -28,6 +28,17 @@ import { CameraIcon, MicIcon, StarIcon } from "./icons";
  *   - `busy` dims and freezes the panel while a sync runs. The panel stays mounted (the
  *     operator can still read it) but an override applied mid-run would silently belong to
  *     the NEXT run, not the one they are watching.
+ *
+ * **v0.4 (D-062): every row can be taken out of the run.** Readable files, problem files
+ * and (elsewhere) the result view's unsynced shelf all carry the same ✕, because the
+ * operator does not sort the drop into "removable" and "not removable" — the lens-cap take
+ * and the file that would not decode are the same wish. Removed paths leave every count,
+ * every group and every timeline span, and land in a collapsed group at the bottom with
+ * an undo each: a misclick must have a way back that is not "drop the whole folder again".
+ *
+ * The ✕ is deliberately NOT added to the root chips at the top — those already have their
+ * own remove button, and a second `<button>` inside `.roots .root` would make "remove this
+ * root" ambiguous both to a screen reader and to the browser tier that clicks it.
  */
 export function SourcesPanel({
   t,
@@ -35,23 +46,33 @@ export function SourcesPanel({
   inputs,
   overrides,
   reference,
+  excluded,
+  prewarmProgress,
   busy = false,
   onRemoveRoot,
   onClearAll,
   onOverride,
   onReference,
+  onExclude,
+  onRestore,
 }: {
   t: Strings;
   manifest: ScanManifest;
   inputs: string[];
   overrides: Record<string, string>;
   reference: string | null;
+  /** Files taken out of the run (D-062) — filtered out of every group and count below. */
+  excluded: ReadonlySet<string>;
+  /** The aggregate background-analysis tick, or null when no pass is running. */
+  prewarmProgress: { completed: number; total: number } | null;
   /** A sync is running: read-only until it finishes. */
   busy?: boolean;
   onRemoveRoot: (path: string) => void;
   onClearAll: () => void;
   onOverride: (file: string, device: string) => void;
   onReference: (file: string | null) => void;
+  onExclude: (file: string) => void;
+  onRestore: (file: string) => void;
 }) {
   // Apply overrides as an overlay: file rows grouped under their effective device.
   const grouped = useMemo(() => {
@@ -61,6 +82,7 @@ export function SourcesPanel({
       byId.set(device.id, { device, files: [] });
     }
     for (const entry of manifest.files) {
+      if (excluded.has(entry.file)) continue;
       const id = effectiveDevice(entry);
       const group = byId.get(id);
       if (group) {
@@ -69,11 +91,29 @@ export function SourcesPanel({
     }
     // Devices emptied by the overlay disappear, matching what the engine will do.
     return Array.from(byId.values()).filter((g) => g.files.length > 0);
-  }, [manifest, overrides]);
+  }, [manifest, overrides, excluded]);
 
   const cameras = grouped.filter((g) => g.files.some((f) => f.video !== null)).length;
   const recorders = grouped.length - cameras;
-  const problems = manifest.unsynced.length;
+  // Counted after the filter, not before: a chip that keeps counting a file the operator
+  // removed is the panel disagreeing with the run it is about to start.
+  const fileCount = grouped.reduce((acc, g) => acc + g.files.length, 0);
+  const problemFiles = manifest.unsynced.filter((u) => !excluded.has(u.file));
+  const problems = problemFiles.length;
+
+  /** Removed paths, in the order they were removed, with whatever the scan knows about
+   *  each — a problem file's row has no `FileEntry`, so the name is all there is. */
+  const removed = useMemo(() => {
+    const known = new Map<string, FileEntry>();
+    for (const entry of manifest.files) known.set(entry.file, entry);
+    const problemsByFile = new Map<string, Unsynced>();
+    for (const u of manifest.unsynced) problemsByFile.set(u.file, u);
+    return Array.from(excluded).map((file) => ({
+      file,
+      entry: known.get(file) ?? null,
+      problem: problemsByFile.get(file) ?? null,
+    }));
+  }, [manifest, excluded]);
 
   const reasonText: Record<UnsyncedReason, string> = {
     low_confidence: t.reasonLowConfidence,
@@ -125,9 +165,20 @@ export function SourcesPanel({
             {t.recorderCount(recorders)}
           </span>
         )}
-        <span className="chip">{t.fileCount(manifest.files.length)}</span>
+        <span className="chip">{t.fileCount(fileCount)}</span>
         {problems > 0 && <span className="chip badge--problem">{t.problemCount(problems)}</span>}
       </div>
+
+      {/* The background pre-analysis (D-059/D-062), as quietly as it deserves. Its OWN
+          element and class — never `.progress__label` or the ProgressBar markup, which
+          belong to the scan and the sync: those are things the operator is waiting for,
+          this is work the app started on its own and will silently abandon the moment
+          Sync is pressed. */}
+      {prewarmProgress !== null && (
+        <p className="prewarm" aria-live="off">
+          {t.prewarmProgress(prewarmProgress.completed, prewarmProgress.total)}
+        </p>
+      )}
 
       {reference === null && <p className="subtle">{t.autoReference}</p>}
 
@@ -153,6 +204,7 @@ export function SourcesPanel({
                 isReference={reference === entry.file}
                 onOverride={onOverride}
                 onReference={onReference}
+                onExclude={onExclude}
               />
             ))}
           </div>
@@ -168,19 +220,76 @@ export function SourcesPanel({
             <span className="device-group__name">{t.unsyncedTitle}</span>
             <span className="device-group__meta">{t.problemCount(problems)}</span>
           </summary>
-          {manifest.unsynced.map((u) => (
+          {problemFiles.map((u) => (
             <div key={u.file} className="filerow filerow--problem">
               <span className="filerow__name" title={u.file}>
                 {basename(u.file)}
               </span>
               <span className="badge badge--problem">{reasonText[u.reason]}</span>
               <span />
+              <RemoveButton t={t} file={u.file} onExclude={onExclude} />
+            </div>
+          ))}
+        </details>
+      )}
+
+      {removed.length > 0 && (
+        // The way back. Collapsed like the problem group, and for the same reason — on a
+        // normal run it is empty and on a tidied one it is a footnote — but it must exist:
+        // a removal with no undo turns one misclick into re-dropping the whole card.
+        <details className="device-group device-group--problems device-group--removed">
+          <summary className="device-group__head">
+            <span className="device-group__name">{t.removedTitle(removed.length)}</span>
+          </summary>
+          {removed.map(({ file, entry, problem }) => (
+            <div key={file} className="filerow filerow--removed">
+              <span className="filerow__name" title={file}>
+                {basename(file)}
+              </span>
+              <span className="filerow__badges">
+                {entry && <span className="badge">{formatDuration(entry.duration_seconds)}</span>}
+                {problem && (
+                  <span className="badge badge--problem">{reasonText[problem.reason]}</span>
+                )}
+              </span>
               <span />
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => onRestore(file)}
+                aria-label={`${t.restoreFile}: ${basename(file)}`}
+              >
+                {t.restoreFile}
+              </button>
             </div>
           ))}
         </details>
       )}
     </section>
+  );
+}
+
+/** The one ✕ every removable row uses, so a problem row and a readable row are removed by
+ *  the same control with the same accessible name pattern. */
+function RemoveButton({
+  t,
+  file,
+  onExclude,
+}: {
+  t: Strings;
+  file: string;
+  onExclude: (file: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="iconbtn removebtn"
+      onClick={() => onExclude(file)}
+      aria-label={`${t.removeFile}: ${basename(file)}`}
+      title={t.removeFile}
+    >
+      ✕
+    </button>
   );
 }
 
@@ -192,6 +301,7 @@ function FileRow({
   isReference,
   onOverride,
   onReference,
+  onExclude,
 }: {
   t: Strings;
   entry: FileEntry;
@@ -200,10 +310,11 @@ function FileRow({
   isReference: boolean;
   onOverride: (file: string, device: string) => void;
   onReference: (file: string | null) => void;
+  onExclude: (file: string) => void;
 }) {
   const name = basename(entry.file);
   return (
-    <div className="filerow">
+    <div className="filerow filerow--removable">
       <span className="filerow__name" title={entry.file}>
         {name}
       </span>
@@ -241,6 +352,7 @@ function FileRow({
           ))}
         </select>
       </label>
+      <RemoveButton t={t} file={entry.file} onExclude={onExclude} />
     </div>
   );
 }

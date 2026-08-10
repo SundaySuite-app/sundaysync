@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { Strings } from "../../i18n";
+import type { PrewarmStatus } from "../../state";
 import { formatTimecode, msToX, type TimelineView } from "../../timeline/geometry";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import { usePlayheadInsideSpan } from "../../timeline/playhead";
@@ -40,6 +41,7 @@ export const Clip = memo(function Clip({
   view,
   durationUnknown = false,
   startUnknown = false,
+  analysisStatus = null,
   onSelect,
 }: {
   t: Strings;
@@ -51,6 +53,12 @@ export const Clip = memo(function Clip({
   durationUnknown?: boolean;
   /** Pre-sync only: nothing in the file said when it started, so it sits at zero. */
   startUnknown?: boolean;
+  /** Where the background pre-analysis is with this file (v0.4, D-062) — passed straight
+   *  through to the waveform slot, which is the only thing that behaves differently. One
+   *  file's status rather than the whole prewarm map on purpose: this component is
+   *  `memo`ised, and a map would hand every clip a fresh prop on every `prewarm:file`
+   *  event, re-rendering the entire timeline once per decoded file. */
+  analysisStatus?: PrewarmStatus | null;
   onSelect: (placement: Placement) => void;
 }) {
   const left = msToX(span.startMs, view);
@@ -119,7 +127,13 @@ export const Clip = memo(function Clip({
       {/* v0.3 S4: the peaks canvas (or its regenerate/status affordance) fills this slot,
           behind the label. */}
       <span className="clip__waveform" data-waveform-slot="">
-        <WaveformCanvas t={t} file={span.file} span={span} view={view} />
+        <WaveformCanvas
+          t={t}
+          file={span.file}
+          span={span}
+          view={view}
+          analysisStatus={analysisStatus}
+        />
       </span>
       <span className="clip__name" style={{ transform: `translateX(${labelShift}px)` }}>
         {name}

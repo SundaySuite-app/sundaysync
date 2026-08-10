@@ -313,6 +313,27 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .filerow__badges { display: flex; gap: 0.35rem; }
 .filerow--problem { color: var(--text2); }
 .filerow--problem .filerow__name { text-decoration: line-through; text-decoration-color: var(--text4); }
+/* v0.4 (D-062): a readable row carries one control more than a problem row — the star,
+   the device select AND the ✕ — so it gets its own column count rather than squeezing
+   two controls into one cell. */
+.filerow--removable { grid-template-columns: 1fr auto auto auto auto; }
+.filerow--removed { color: var(--text2); }
+.filerow--removed .filerow__name { text-decoration: line-through; text-decoration-color: var(--text4); }
+
+/* Quiet by design: removing a file is undoable and not destructive, so the control does
+   not announce itself until the row is under the pointer. */
+.removebtn { opacity: 0.55; }
+.filerow:hover .removebtn,
+.removebtn:focus-visible { opacity: 1; }
+
+/* The background pre-analysis tick (D-059/D-062). Its own element and class on purpose —
+   `.progress__label`/`.progress` belong to the scan and the sync, which are things the
+   operator is waiting for. This one is work the app started on its own. */
+.prewarm {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text3);
+}
 
 .badge {
   background: var(--surface3);
@@ -594,6 +615,19 @@ select:hover, input:hover { border-color: var(--accent-border); }
   z-index: 1;
   font-size: 0.65rem;
   opacity: 0.75;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* v0.4 (D-062): the background pass is decoding this very file. Click-through like the
+   status line above, and for the same reason — it stands where the clip's own click
+   target is, and it is not a control: there is nothing to press, only something to
+   wait a moment for. */
+.waveform__analysing {
+  position: relative;
+  z-index: 1;
+  font-size: 0.65rem;
+  opacity: 0.6;
+  font-style: italic;
   white-space: nowrap;
   pointer-events: none;
 }

@@ -7,7 +7,7 @@
  * simple mode does with an untouched configuration.
  */
 
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -29,10 +29,17 @@ import { invokeWithTimeout } from "./invoke";
 import { detectLang, dictionaries, type Lang } from "./i18n";
 import { getSettings, saveSettings } from "./settings";
 import { initialState, reducer } from "./state";
+import { invalidate as invalidateWaveform } from "./timeline/waveformStore";
 import { getTelemetryStatus, reportFrontendError } from "./telemetry";
 import { checkForUpdate } from "./update";
 import { gateErrorReport, initialErrorGateState, shapeErrorPayload } from "./telemetryErrors";
 import type { ProgressEvent, ScanManifest, SidecarStatus, SyncOutcome } from "./types";
+
+/** `prewarm:file` (lib.rs `PrewarmFileEvent`) — one file finished pre-analysing. */
+interface PrewarmFileEvent {
+  file: string;
+  ok: boolean;
+}
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -164,6 +171,38 @@ export function App() {
     };
   }, []);
 
+  // Per-file outcomes from the background pre-analysis (D-059's `prewarm:file`).
+  //
+  // Two things happen per event, and the ORDER matters: the store's memo for that file is
+  // dropped FIRST, so that when the state update below re-renders the clip out of its
+  // "analysing" state, the re-read it triggers goes to the shell instead of replaying the
+  // `cache_missing` rejection that was cached before the pass got there (D-062).
+  useEffect(() => {
+    const unlisten = listen<PrewarmFileEvent>("prewarm:file", (e) => {
+      invalidateWaveform(e.payload.file);
+      dispatch({ type: "prewarm/file", file: e.payload.file, ok: e.payload.ok });
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, []);
+
+  // The aggregate tick. Its own channel, its own state, and (in the panel) its own element
+  // — never the ProgressBar: a prewarm is not something the operator is waiting for, and
+  // dressing it as the scan's or the sync's progress would say it is.
+  useEffect(() => {
+    const unlisten = listen<ProgressEvent>("prewarm:progress", (e) =>
+      dispatch({
+        type: "prewarm/progress",
+        completed: e.payload.completed,
+        total: e.payload.total,
+      }),
+    );
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, []);
+
   // The scan effect: whenever the phase enters `scanning`, run scan_inputs for the
   // current sequence number. A superseded scan's result is dropped by the reducer.
   const phase = state.phase;
@@ -181,6 +220,60 @@ export function App() {
     // better than re-scanning the whole card dump because the user toggled languages.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase.name === "scanning" ? scanSeq : -1]);
+
+  // ---- Background pre-analysis (V04-U4, D-062; backend D-059) ----------------------
+  //
+  // Fire-and-forget, exactly once per scan. The whole point is that the operator is
+  // reading the sources list while the decode the sync would have had to do anyway is
+  // already happening, so this must never behave like a step: it reports nothing when it
+  // starts, and nothing when it fails.
+  //
+  // A `busy:` rejection is EXPECTED (a cache sweep, a regenerate, a sync the user started
+  // between the scan finishing and this effect running) and is a non-event: the sync does
+  // the very same extraction itself. So is "cancelled" — a `run_sync` preempts a running
+  // prewarm (D-059), which is precisely what should happen and is not a failure of
+  // anything. So is the browser tier's "no backend". Every rejection is therefore
+  // swallowed, and the one thing that ALWAYS happens is `prewarm/settled`: whatever
+  // ended the pass, nothing more is coming, and no clip may be left waiting on it.
+  //
+  // Deliberately NOT re-invoked when the exclusion set changes: the extra files a
+  // superseded pass already decoded are harmless cache entries, and restarting the pass
+  // for every ✕ would throw away the work in flight each time. A new scan does re-invoke,
+  // because that is a genuinely different set of files.
+  //
+  // The exclusion set is therefore read through a ref rather than taken as a
+  // dependency.
+  const excludedRef = useRef(state.excluded);
+  excludedRef.current = state.excluded;
+  const prewarmedSeq = useRef<number | null>(null);
+  useEffect(() => {
+    if (phase.name === "empty") {
+      // Back to nothing: stop the pass rather than letting it decode a drop the operator
+      // has already cleared. Only worth a call if we ever started one.
+      if (prewarmedSeq.current !== null) {
+        prewarmedSeq.current = null;
+        void invoke("cancel_prewarm").catch(() => {});
+      }
+      return;
+    }
+    if (phase.name !== "sources" || prewarmedSeq.current === scanSeq) return;
+    prewarmedSeq.current = scanSeq;
+
+    const excludedNow = new Set(excludedRef.current);
+    const files = phase.manifest.files
+      .map((f) => f.file)
+      .filter((file) => !excludedNow.has(file));
+    if (files.length === 0) {
+      dispatch({ type: "prewarm/settled" });
+      return;
+    }
+    void invoke("prewarm_analysis", { files, cacheDir: getSettings().cacheDir })
+      .catch(() => {})
+      .then(() => dispatch({ type: "prewarm/settled" }));
+    // `excludedRef` is read but intentionally not a dependency: see the note above — an
+    // exclusion must not restart the pass. The scan sequence is what re-runs this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase.name, phase.name === "sources" ? scanSeq : -1]);
 
   const addPaths = useCallback((paths: string[]) => {
     setExportedPath(null);
@@ -210,6 +303,11 @@ export function App() {
           reference: state.reference,
           deviceOverrides:
             Object.keys(state.overrides).length > 0 ? state.overrides : null,
+          // D-060/D-062: the engine re-walks every folder it is given, so the shell cannot
+          // enforce a removal by trimming `inputs` — the filter has to travel with the
+          // request. Null when nothing is excluded, which the backend treats identically
+          // to an empty list (`#[serde(default)]`).
+          excludeFiles: state.excluded.length > 0 ? state.excluded : null,
           segmentCount: settings.segmentCount,
           correctDrift: settings.correctDrift,
         },
@@ -218,7 +316,7 @@ export function App() {
     } catch (e) {
       dispatch({ type: "sync/failed", error: mapEngineError(String(e), t) });
     }
-  }, [state.phase, state.reference, state.overrides, t]);
+  }, [state.phase, state.reference, state.overrides, state.excluded, t]);
 
   const cancelSync = useCallback(async () => {
     dispatch({ type: "cancel/requested" });
@@ -241,6 +339,10 @@ export function App() {
         reference: state.reference,
         deviceOverrides:
           Object.keys(state.overrides).length > 0 ? state.overrides : null,
+        // Part of the F6 fingerprint on the backend (D-060): without it, removing a file
+        // after a sync would leave the fingerprint unchanged and the export would happily
+        // write a timeline containing the clip the operator had just taken out.
+        excludeFiles: state.excluded.length > 0 ? state.excluded : null,
       });
       setExportedPath(path);
       dispatch({
@@ -253,7 +355,7 @@ export function App() {
         banner: { kind: "error", text: mapEngineError(String(e), t).text },
       });
     }
-  }, [projectName, t, state.phase, state.reference, state.overrides]);
+  }, [projectName, t, state.phase, state.reference, state.overrides, state.excluded]);
 
   const notice = useCallback((kind: "ok" | "error", text: string) => {
     dispatch({ type: "banner/set", banner: { kind, text } });
@@ -267,6 +369,10 @@ export function App() {
         : null;
   const deviceIds = manifest ? manifest.devices.map((d) => d.id) : [];
   const overridesDirty = Object.keys(state.overrides).length > 0;
+  // Built once per change rather than per consumer: the timeline and the panel ask the
+  // same membership question, and rebuilding a `Set` inside a `memo`ised subtree would
+  // defeat the memo on every render.
+  const excludedSet = useMemo(() => new Set(state.excluded), [state.excluded]);
   // The timeline is the main view (v0.4, D-061): it appears the moment a scan has told us
   // what was dropped, and stays MOUNTED across sources → syncing → result. Nothing below
   // may unmount it on a phase change — the continuity is the feature.
@@ -360,10 +466,13 @@ export function App() {
           manifest={manifest}
           overrides={state.overrides}
           reference={state.reference}
+          excluded={excludedSet}
+          prewarm={state.prewarm}
           outcome={phase.name === "result" ? phase.outcome : null}
           stale={phase.name === "result" && phase.stale}
           deviceIds={deviceIds}
           onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+          onExclude={(file) => dispatch({ type: "files/exclude", file })}
         />
       )}
 
@@ -396,11 +505,15 @@ export function App() {
           inputs={phase.name === "empty" || phase.name === "scanning" ? [] : phase.inputs}
           overrides={state.overrides}
           reference={state.reference}
+          excluded={excludedSet}
+          prewarmProgress={state.prewarmProgress}
           busy={phase.name === "syncing"}
           onRemoveRoot={(path) => dispatch({ type: "inputs/removeRoot", path })}
           onClearAll={() => dispatch({ type: "inputs/clear" })}
           onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
           onReference={(file) => dispatch({ type: "reference/set", file })}
+          onExclude={(file) => dispatch({ type: "files/exclude", file })}
+          onRestore={(file) => dispatch({ type: "files/restore", file })}
         />
       )}
 

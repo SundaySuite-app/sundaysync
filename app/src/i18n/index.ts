@@ -42,6 +42,16 @@ export const nb = {
   isReference: "Referanse",
   autoReference: "Referanse velges automatisk (lengste opptak)",
 
+  // Fjerne enkeltfiler fra kjøringen (v0.4, D-062). En bortvalgt fil er ikke en feil —
+  // den er bare ikke med, og veien tilbake står rett under lista.
+  removeFile: "Fjern fila",
+  restoreFile: "Angre",
+  removedTitle: (n: number) => `Fjernet (${n})`,
+  // Bakgrunnsanalysen (D-059/D-062). Bevisst rolig: dette er arbeid appen gjorde av seg
+  // selv, ikke noe brukeren venter på.
+  prewarmProgress: (completed: number, total: number) =>
+    `analyserer lyd … ${completed}/${total}`,
+
   // Sync & progress (§9.3)
   syncButton: "Synkroniser",
   resyncButton: "Synkroniser på nytt",
@@ -102,6 +112,10 @@ export const nb = {
   waveformRegenerating: "Bygger på nytt …",
   waveformUnavailable: "Bølgeform utilgjengelig",
   waveformBusy: "Opptatt — prøv igjen",
+  // v0.4 (D-062): bakgrunnsanalysen holder på med akkurat denne fila. Da er «bygg på
+  // nytt» feil tilbud — knappen ville bare fått et «opptatt»-avslag, og bølgeformen er
+  // på vei uansett.
+  waveformAnalysing: "Analyserer …",
 
   // Avspilling (v0.3, D-055) — hør at synken stemmer før du eksporterer.
   transportAria: "Avspilling",
@@ -323,6 +337,13 @@ export const en: Strings = {
   isReference: "Reference",
   autoReference: "Reference is chosen automatically (longest recording)",
 
+  // Per-file removal (v0.4, D-062) — see the nb comment above.
+  removeFile: "Remove file",
+  restoreFile: "Undo",
+  removedTitle: (n: number) => `Removed (${n})`,
+  prewarmProgress: (completed: number, total: number) =>
+    `analysing audio … ${completed}/${total}`,
+
   syncButton: "Sync",
   resyncButton: "Sync again",
   resyncHint: "cached analysis is reused",
@@ -377,6 +398,8 @@ export const en: Strings = {
   waveformRegenerating: "Rebuilding …",
   waveformUnavailable: "Waveform unavailable",
   waveformBusy: "Busy — try again",
+  // v0.4 (D-062) — see the nb comment above.
+  waveformAnalysing: "Analysing …",
 
   // Playback (v0.3, D-055) — see the nb comment above.
   transportAria: "Playback",

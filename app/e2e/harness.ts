@@ -302,6 +302,14 @@ export const BOOT_FIXTURES: Fixtures = {
   "plugin:dialog|save": null,
   "plugin:opener|reveal_item_in_dir": VOID,
   cancel_sync: VOID,
+  // V04-U4 (D-062): the app fires `prewarm_analysis` off the back of every scan and
+  // cancels it on the way back to the empty state. Both are fire-and-forget and both are
+  // answered here so a spec that is not about pre-analysis never has to think about it —
+  // resolving immediately means the pass "ends" at once, every file leaves the
+  // «analysing …» state, and the waveform affordances behave exactly as they did before
+  // this stage. `prewarm.spec.ts` overrides these to hold the pass open.
+  prewarm_analysis: VOID,
+  cancel_prewarm: VOID,
   // `consentVersion` non-null means "already answered" — keeps the one-time
   // ConsentCard from popping up unbidden in specs that are not about consent.
   telemetry_status: { consentVersion: 1, granted: false, hasInstallId: true, queued: 0 },
