@@ -101,6 +101,17 @@ interface TimelineContent {
   referenceDevice: string | null;
 }
 
+/** Nothing to draw — no manifest yet. Frozen so it is never a fresh identity per render. */
+const EMPTY_CONTENT: TimelineContent = {
+  tracks: [],
+  contentSpanMs: 1,
+  placements: null,
+  audioClips: [],
+  unknownDurations: NO_FILES,
+  unknownStart: NO_FILES,
+  referenceDevice: null,
+};
+
 export function TimelineView({
   t,
   phase,
@@ -136,57 +147,17 @@ export function TimelineView({
   //
   // Two sources, one shape. With an outcome, the §5 contract's `offset_seconds` are the
   // truth. Without one, `sourceSpans` positions the same files by their own creation
-  // timestamps — provisional, and marked as such downstream. Everything below this memo
+  // timestamps — provisional, and marked as such downstream. Everything below these memos
   // (zoom, pan, virtualization, the ruler) works on the shape, not on where it came from.
-  const {
-    tracks,
-    contentSpanMs,
-    placements,
-    audioClips,
-    unknownDurations,
-    unknownStart,
-    referenceDevice,
-  }: TimelineContent = useMemo(() => {
-    if (!result || !outcome) {
-      if (!manifest) {
-        return {
-          tracks: [],
-          contentSpanMs: 1,
-          placements: null,
-          audioClips: [],
-          unknownDurations: NO_FILES,
-          unknownStart: NO_FILES,
-          referenceDevice: null,
-        };
-      }
-      const layout = sourceSpans(manifest, overrides);
-      const { originMs, spanMs } = contentBounds(layout.tracks.flatMap((s) => s.spans));
-      const tracks = layout.tracks.map(({ device, spans }) => ({
-        device,
-        rows: stackClips(
-          spans.map((s) => ({ ...s, startMs: s.startMs - originMs, endMs: s.endMs - originMs })),
-        ),
-      }));
-      // Pre-sync the reference is whatever the operator starred, under the same override
-      // overlay the grouping uses — so the badge follows a file that has been moved.
-      const referenceDevice =
-        reference === null
-          ? null
-          : (overrides[reference] ??
-            manifest.files.find((f) => f.file === reference)?.device ??
-            null);
-      return {
-        tracks,
-        contentSpanMs: spanMs,
-        placements: null,
-        audioClips: [],
-        unknownDurations: NO_FILES,
-        unknownStart: layout.unknownStart,
-        referenceDevice,
-      };
-    }
-
-    const { durations } = outcome;
+  //
+  // Deliberately TWO memos, not one with the union of their dependencies. The outcome's
+  // content must not be rebuilt because `overrides` changed: an override on a result marks
+  // it stale, and rebuilding `audioClips` there would hand `Transport` a fresh array,
+  // which re-enters `engine.setClips` and rebuilds the audio schedule underneath whatever
+  // is currently playing.
+  const outcomeContent: TimelineContent | null = useMemo(() => {
+    if (!outcome) return null;
+    const { result, durations } = outcome;
     const placements = new Map<string, Placement>();
     for (const p of result.placements) placements.set(p.file, p);
 
@@ -244,7 +215,47 @@ export function TimelineView({
       unknownStart: NO_FILES,
       referenceDevice: result.reference?.device ?? null,
     };
-  }, [result, outcome, manifest, overrides, reference]);
+  }, [outcome]);
+
+  const sourceContent: TimelineContent | null = useMemo(() => {
+    // Only the phase that has no outcome pays for this.
+    if (outcome || !manifest) return null;
+    const layout = sourceSpans(manifest, overrides);
+    const { originMs, spanMs } = contentBounds(layout.tracks.flatMap((s) => s.spans));
+    const tracks = layout.tracks.map(({ device, spans }) => ({
+      device,
+      rows: stackClips(
+        spans.map((s) => ({ ...s, startMs: s.startMs - originMs, endMs: s.endMs - originMs })),
+      ),
+    }));
+    // Pre-sync the reference is whatever the operator starred, under the same override
+    // overlay the grouping uses — so the badge follows a file that has been moved.
+    const referenceDevice =
+      reference === null
+        ? null
+        : (overrides[reference] ??
+          manifest.files.find((f) => f.file === reference)?.device ??
+          null);
+    return {
+      tracks,
+      contentSpanMs: spanMs,
+      placements: null,
+      audioClips: [],
+      unknownDurations: NO_FILES,
+      unknownStart: layout.unknownStart,
+      referenceDevice,
+    };
+  }, [outcome, manifest, overrides, reference]);
+
+  const {
+    tracks,
+    contentSpanMs,
+    placements,
+    audioClips,
+    unknownDurations,
+    unknownStart,
+    referenceDevice,
+  }: TimelineContent = outcomeContent ?? sourceContent ?? EMPTY_CONTENT;
 
   // ---- View state: zoom + pan, measured against the lane column's width ----
   const [view, setView] = useState<View>(() => ({
