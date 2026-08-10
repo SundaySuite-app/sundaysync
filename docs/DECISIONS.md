@@ -2555,3 +2555,180 @@ Verified and deliberately **not** changed:
   prewarm with another prewarm would widen D-059's "only a sync may take the slot" for a race
   the frontend no longer creates, and the failure mode if the cancel loses the race is
   unchanged from today: one drop without background analysis, which the sync then does itself.
+
+## D-069 — V05-W4a: the preview is one JPEG over binary IPC, and its seek shape is measured
+
+**The ask:** the owner wants to *see* the clip he is about to mark, not only its waveform.
+
+The whole question was how to get a picture of arbitrary media into a webview whose CSP
+forbids essentially everything. The shape chosen has a **zero security delta**: no CSP edit,
+no `assetProtocol`, no new capability, no temporary files. ffmpeg decodes one frame to a
+JPEG on stdout, and that JPEG travels the same binary-IPC path this repo has already proved
+twice — `waveform_level` (D-052) and `read_audio_window` (D-055). The renderer receives an
+`ArrayBuffer`, makes a blob URL, and revokes it.
+
+```rust
+#[tauri::command(async)]
+fn video_frame(state: State<'_, AppState>, file: PathBuf, at_seconds: f64, height: u32)
+    -> Result<tauri::ipc::Response, String>
+```
+
+### What the alternatives would have cost
+
+- **`asset://` / `convertFileSrc`** — the obvious answer, and the expensive one. It needs
+  `assetProtocol` enabled with a scope, a `csp` allowance for the protocol, and a capability
+  granting it. That is three edits to the security posture S-4/S-5 were written to hold, in
+  exchange for handing the webview a *file-reading protocol* pointed at whatever directory
+  the operator dropped. It also cannot answer "the frame at 4:07" — it serves whole files, so
+  the browser would demux multi-gigabyte AVCHD over SMB to show one thumbnail.
+- **A JPEG written to a temp directory, then served** — needs the same protocol work *plus*
+  a lifetime, an eviction story and a place in the cache-size number the settings screen
+  shows. D-052 refused sidecar `.peaks` files for exactly these reasons; this is the same
+  refusal.
+- **Base64 in a JSON field** — no security delta either, but +33 % on every frame and a
+  second encoding to keep honest. D-052 already measured this as the fallback it would take
+  only if raw IPC stopped working; it has not.
+
+The one runtime assumption — that `tauri::ipc::Response` produces an
+`InvokeResponseBody::Raw` rather than JSON — is pinned by a test through the real
+`generate_handler!` dispatch, the same way `waveform_level_answers_with_raw_bytes_not_json`
+pins it for the waveform.
+
+### The seek shape is MEASURED, and is not a candidate for tidying
+
+Timed against the owner's real corpus, over SMB:
+
+| argv | AVCHD `.MTS` | 4K DJI MP4, 816 MB | exit |
+|---|---|---|---|
+| `-ss T -i F` (input seek only) | 0.83 s, valid JPEG | — | **69** |
+| `-i F -ss T` (output seek only) | 8.7 s | 8.9 s | 0 |
+| **hybrid** `-ss (T−2) -i F -ss 2` | **0.69 s** | **4.4 s** | **0** |
+
+**Input-only seek is a trap, and it is the trap the next person will fall into.** It is the
+fastest and the most obvious, and on AVCHD it exits **69 while having written a perfectly
+good JPEG to stdout**. `sidecar::run` reports a non-zero exit as `Err` and *drops* the
+output, so that shape fails on all **136** of the owner's `.MTS` files — while working
+flawlessly on whatever MP4 it was first tried with. Output-only seek decodes from the head
+of the file and is unusable over a share.
+
+The hybrid takes both halves: the input-side `-ss` skips cheaply through the container to
+two seconds before the target, and the output-side `-ss` decodes that short run to land on
+the exact frame. **Their positions relative to `-i` are the entire mechanism.** The argv is
+built by a pure function, `frame_args`, whose unit test asserts the ordering verbatim with
+these numbers in its comment, because "why are there two `-ss` flags?" is a question a
+future reader will answer wrongly.
+
+Shipped verbatim:
+
+```
+-v error
+-protocol_whitelist file          # D-032, input side. Verified NOT to block pipe:1 output.
+-ss <max(0, at_seconds - 2)>      # fast seek
+-i <file>
+-ss <at_seconds - that>           # accurate seek; equals min(2, at_seconds)
+-frames:v 1
+-vf scale=-2:<height>
+-f image2 -vcodec mjpeg -y pipe:1
+```
+
+`-protocol_whitelist file` is the same S-1 guard the probe and extract stages carry, for the
+same reason: §4.1 does not reject by extension, so a dropped "video" may really be an HLS
+playlist or a concat script. It governs the input demuxer only — `pipe:1` on the output side
+was verified to still work, and the argv test asserts both facts separately. `-i` rather than
+a bare positional keeps a file named `-frames:v` from being parsed as an option. The accurate
+seek is written as `at_seconds - coarse` rather than `min(2, at_seconds)` so the two provably
+sum to the requested time instead of doing so by coincidence.
+
+### An empty answer means "no picture", and it is a success
+
+Also measured: `.WAV` and `.HEIC` exit **234 having written zero bytes** — and **32 of the
+owner's 386 files** are in that class. That is a normal case, not a failure (§7.2: a file
+that will not decode is a value), so it comes back as an **empty** `Response`, which the
+panel distinguishes by `byteLength === 0` without parsing a string. A red banner on eight
+percent of a perfectly good card would be a lie about the app's state. The ffmpeg stderr
+still goes to the log, so a genuinely surprising exit remains diagnosable.
+
+Everything that actually went wrong still errors loudly: a timeout, an unresolvable ffmpeg,
+a blown byte ceiling, and a supersession (as the shared `cancelled` word `scan_inputs` and
+`prewarm_analysis` already return, so the frontend's existing handling covers it).
+
+### It does NOT claim the D-046 activity slot
+
+The preview writes nothing, so it has no business in the mutual exclusion D-046 exists for —
+which is cache *writers* versus a running sync. Claiming the slot would be actively wrong
+twice over: it would blank every preview the instant Sync is pressed, and on a fresh drop it
+would collide with `prewarm_analysis`, which holds the slot for **minutes**. Same posture,
+same reasoning as `waveform_meta`, `waveform_level` and `read_audio_window`.
+
+"Needs no mutual exclusion" is not "may spawn freely", though, so it gets three bounds of
+its own:
+
+- **A spawn semaphore, 2 permits** (`FramePermits`). `extract.rs` caps analysis decodes at 4
+  explicitly because "more concurrent ffmpeg processes mostly contend for the same disk"; a
+  preview that spawned without limit would sit on that same disk and starve a running sync's
+  decoders — over SMB, spectacularly. **A held permit is a wait, not a refusal**: the command
+  is `async`, so it is already off the UI thread, and a preview arriving 200 ms later is
+  right where one that errored "too busy" would have been wrong. Two rather than one because
+  at any moment there may be a grab the user just asked for plus a superseded one still
+  unwinding, and queueing the new one behind the dying one would show its picture late for
+  no reason.
+- **`THUMB_TIMEOUT = 30 s`**, sized like `PROBE_TIMEOUT`. `EXTRACT_TIMEOUT`'s thirty minutes
+  is a whole-file budget for a three-hour service and absurd for one frame; the slowest shape
+  measured was 4.4 s, so thirty seconds bounds a wedged ffmpeg without ever firing on real
+  media.
+- **`MAX_FRAME_BYTES = 2 MiB`**, enforced by a new `sidecar::run_capped`. Measured frames at
+  `height = 160` are **6–11 KB**, so this is three orders of magnitude of headroom and still
+  a real bound. What it stops is an ffmpeg that ignored `-frames:v 1`: `sidecar::drain` is an
+  uncapped `read_to_end`, and the failure without a ceiling is an OOM kill rather than an
+  error. It fails **loudly** — a truncated half-JPEG that decoded to a grey smear is the
+  silent wrongness §7.5 forbids. Same refuse-on-a-size-argument posture `MAX_WINDOW_SAMPLES`
+  already applies at this boundary.
+
+`height` is validated to `1..=480` and `at_seconds` clamped to `>= 0` (a playhead a hair
+before zero is the timeline's own rounding, not a caller error); NaN and the infinities are
+refused rather than formatted into an ffmpeg argument. Nothing else can be checked here —
+this command does not know the file's duration, and asking ffprobe for it would double the
+cost of the thing being made fast.
+
+### `run_capped` is additive; the existing callers keep the uncapped path
+
+`sidecar::run` and `run_capped` share one body with the cap as an `Option`, so the uncapped
+path is byte-identical to what it was. The two existing callers deliberately keep it: the
+extractor writes its audio to a *file* and produces almost nothing on stdout, and ffprobe's
+JSON is bounded by the number of streams in a container. Capping them would be a behaviour
+change with its own error-mapping work (`ProbeError` has no variant for it) in exchange for
+bounding two things that are already bounded.
+
+Over-ceiling output is drained into a sink rather than merely left unread. Stopping the read
+would let the pipe fill and block the child forever, so `try_wait` would never see it exit
+and only the timeout could end the call — turning a 5 ms "too big" into a 30 s stall. That is
+the same class of mistake D-010 records, arrived at from the other direction.
+
+### Cancellation, because `invoke` has none
+
+`app/src/invoke.ts` has no cancellation: a grab whose answer nobody wants any more — the
+playhead moved on, the panel closed — keeps a permit and a running ffmpeg until it finishes
+by itself. So the preview gets its own token slot in `AppState` and a `cancel_thumbnail`
+command, shaped exactly like `cancel_prewarm`: a new grab supersedes and cancels the previous
+one, and the finishing grab clears the slot **only if `Arc::ptr_eq` says it still holds its
+own token** (F3). Without that identity guard a late-finishing grab clears a newer grab's
+token and leaves the newer one uncancellable — which is to say, holding a permit and a child
+nobody can stop. Its own slot rather than a shared one, for the reason the scan and prewarm
+slots are separate: firing it must be incapable of reaching a sync the user is waiting on.
+The token is installed *before* the permit is waited on, since the queue is exactly where a
+superseded grab is most likely to be sitting.
+
+### What this stage deliberately does not do
+
+`video_frame` and `cancel_thumbnail` are **registered and uncalled**. The panel that consumes
+them is W4b. That is the intended end state: the engine half lands, proven by its own tests
+and by a real-ffmpeg pass over a generated clip, without moving a pixel — which is why every
+existing frontend spec passes untouched.
+
+**`.LRF` as a faster preview source is deferred, not rejected.** DJI writes a low-resolution
+proxy next to each clip, and grabbing the frame from it measured **0.5 s against the 4.4 s**
+of the 816 MB original. It is tempting and it is a separate decision: `.lrv`/`.LRF` proxies
+are currently *skipped by the scanner* (D-009), so using one as a preview source means
+teaching the shell a source→proxy mapping, deciding what happens when the proxy is stale or
+absent, and accepting that the picture shown is not the picture that will be cut. None of
+that belongs in the stage that establishes the mechanism.

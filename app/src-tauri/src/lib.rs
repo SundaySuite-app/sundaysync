@@ -234,6 +234,19 @@ struct AppState {
     /// preempt a prewarm, and it must be impossible for that to reach into a real sync or a
     /// scan the user is waiting on.
     prewarm_cancel: Arc<Mutex<Option<Arc<CancelToken>>>>,
+    /// V05-W4a (D-069): the preview frame grab gets its own slot, on exactly the
+    /// `scan_cancel`/`prewarm_cancel` pattern — dragging the playhead supersedes the
+    /// previous grab, and `invoke` has no cancellation of its own
+    /// (`app/src/invoke.ts`), so a superseded grab only stops because this token kills
+    /// its ffmpeg child.
+    ///
+    /// Its own slot rather than a shared one for the usual reason: firing it must be
+    /// incapable of reaching a sync, a scan or a prewarm the user is waiting on.
+    thumbnail_cancel: Arc<Mutex<Option<Arc<CancelToken>>>>,
+    /// V05-W4a (D-069): how many preview ffmpegs may be in flight at once. See
+    /// [`FramePermits`] for why the preview needs a limiter of its own rather than the
+    /// D-046 activity slot.
+    frame_permits: FramePermits,
     last: Arc<Mutex<Option<LastRun>>>,
     /// The ffmpeg/ffprobe pair every command decodes with, resolved once at startup
     /// (D-031). `None` means resolution failed — a user who installs ffmpeg while the
@@ -538,6 +551,45 @@ impl AppState {
     /// lock like every other cancel path (F1).
     fn request_prewarm_cancel(&self) {
         if let Ok(slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover) {
+            if let Some(token) = slot.as_ref() {
+                token.cancel();
+            }
+        }
+    }
+
+    /// Installs a fresh thumbnail-cancel token, cancelling and superseding any previous
+    /// frame grab (D-069). Returns the owning `Arc` so the caller can later prove
+    /// ownership (F3), exactly as the scan and prewarm slots do.
+    fn install_thumbnail_cancel(&self) -> Arc<CancelToken> {
+        let token = Arc::new(CancelToken::new());
+        if let Ok(mut slot) = lock_state(&self.thumbnail_cancel, OnPoison::Recover) {
+            if let Some(previous) = slot.replace(token.clone()) {
+                previous.cancel();
+            }
+        }
+        token
+    }
+
+    /// Clears the thumbnail-cancel slot **only if it still holds `mine`** (F3's identity
+    /// guard, for the same reason it exists on the other two slots): a grab that finishes
+    /// late and clears a newer grab's token would leave that newer one uncancellable — and
+    /// an uncancellable grab is one that keeps a permit and a running ffmpeg for as long as
+    /// it likes while the user drags the playhead past it.
+    fn clear_thumbnail_cancel_if_ours(&self, mine: &Arc<CancelToken>) {
+        if let Ok(mut slot) = lock_state(&self.thumbnail_cancel, OnPoison::Recover) {
+            if slot
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, mine))
+            {
+                *slot = None;
+            }
+        }
+    }
+
+    /// Fires the in-flight frame grab's cancel token, if there is one. Recovers a poisoned
+    /// lock like every other cancel path (F1).
+    fn request_thumbnail_cancel(&self) {
+        if let Ok(slot) = lock_state(&self.thumbnail_cancel, OnPoison::Recover) {
             if let Some(token) = slot.as_ref() {
                 token.cancel();
             }
@@ -1372,6 +1424,337 @@ fn read_audio_window(
     Ok(tauri::ipc::Response::new(buf))
 }
 
+// ---- Video preview frames (V05-W4a, docs/DECISIONS.md D-069) ----------------------
+//
+// The owner wants to see the clip he is about to mark, not just its waveform. The whole
+// question was how to get a picture of arbitrary media into a webview whose CSP forbids
+// everything, and the answer chosen is the one with a **zero security delta**: no CSP
+// edit, no `assetProtocol`, no new capability, and nothing written to disk. ffmpeg
+// decodes one frame to a JPEG on stdout, and that JPEG travels the same binary-IPC path
+// `waveform_level` (D-052) and `read_audio_window` (D-055) already use. The renderer gets
+// an ArrayBuffer, makes a blob URL from it, and revokes it. See D-069 for the alternatives
+// and their costs.
+//
+// Read-only in the D-046 sense — it writes nothing, and it deliberately does NOT claim the
+// activity slot. Claiming it would blank every preview the instant Sync is pressed, and on
+// a fresh drop it would collide with `prewarm_analysis`, which holds the slot for minutes.
+// What it has instead is a spawn limiter of its own ([`FramePermits`]), because "does not
+// need mutual exclusion" is not the same as "may start unlimited ffmpegs".
+
+/// Safety valve for one frame grab.
+///
+/// Sized like [`sundaysync_core::sidecar::PROBE_TIMEOUT`], and deliberately NOT like
+/// `EXTRACT_TIMEOUT`: that one is thirty minutes because it is a whole-file budget for a
+/// three-hour service. This decodes a fraction of a second of video. The slowest shape
+/// measured on the owner's corpus — an 816 MB 4K DJI MP4 over SMB — took 4.4 s, so thirty
+/// seconds bounds a wedged ffmpeg without ever being able to fire on real media.
+const THUMB_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Hard ceiling on the JPEG one grab may hand back, enforced by
+/// [`sundaysync_core::sidecar::run_capped`].
+///
+/// Measured: frames at `height = 160` come back at **6–11 KB**, so 2 MiB is three orders
+/// of magnitude of headroom for a full-height 480 px grab and still a real bound. Without
+/// it the stdout drain is an uncapped `read_to_end` — an ffmpeg that ignored `-frames:v 1`
+/// and wrote a stream would allocate until the process died. Refusing loudly on a size is
+/// the same posture [`MAX_WINDOW_SAMPLES`] already takes.
+const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
+
+/// Tallest frame a caller may ask for.
+///
+/// A preview thumbnail on a timeline, not a viewer. 480 px is generous for the intended
+/// use and keeps both the scale filter's work and [`MAX_FRAME_BYTES`] proportionate; a
+/// caller asking for 20 000 is either buggy or hostile, and gets told so.
+const MAX_FRAME_HEIGHT: u32 = 480;
+
+/// How far before the wanted timestamp the fast (input-side) seek lands, in seconds.
+///
+/// See [`frame_args`] for the measurements that chose this shape. Two seconds is enough
+/// preroll for the accurate seek to land on the right frame across the GOP lengths in the
+/// owner's corpus, and short enough that the decoded run stays cheap.
+const FAST_SEEK_LEAD: f64 = 2.0;
+
+/// Preview ffmpegs allowed in flight at once.
+///
+/// `extract.rs` caps analysis decodes at 4 explicitly because "more concurrent ffmpeg
+/// processes mostly contend for the same disk". A preview that spawned freely would sit on
+/// the same disk as a running sync's decoders and starve the thing the user is actually
+/// waiting for — over SMB, where these numbers were measured, spectacularly so.
+///
+/// Two rather than one: at any moment there may be a grab the user just asked for plus a
+/// superseded one still unwinding after its token fired, and making the new grab queue
+/// behind the dying one would show the playhead's picture arriving late for no reason.
+const FRAME_PERMITS: usize = 2;
+
+/// What a caller is told when its grab was superseded by a newer one, or cancelled.
+///
+/// The same word `prewarm_analysis` and `scan_inputs` return, so the frontend's existing
+/// "ignore a cancelled supersession" handling applies to this command unchanged.
+const CANCELLED_MSG: &str = "cancelled";
+
+/// A counting semaphore for preview spawns.
+///
+/// Hand-rolled on `Mutex` + `Condvar` for the reason [`PyramidLru`] is hand-rolled: a new
+/// dependency has to clear `cargo deny`, the licence allow-list and the supply-chain
+/// surface, and this is twenty lines.
+///
+/// **A held permit is a wait, not a refusal.** [`acquire`](Self::acquire) blocks. The
+/// command is `#[tauri::command(async)]`, so it is already on Tauri's blocking pool rather
+/// than the UI thread, and a preview that arrives 200 ms later is right where a preview
+/// that errored "too busy" would have been wrong.
+#[derive(Debug)]
+struct FramePermits {
+    /// Permits currently available.
+    available: Mutex<usize>,
+    released: std::sync::Condvar,
+}
+
+impl Default for FramePermits {
+    fn default() -> Self {
+        Self::new(FRAME_PERMITS)
+    }
+}
+
+impl FramePermits {
+    fn new(permits: usize) -> Self {
+        Self {
+            available: Mutex::new(permits),
+            released: std::sync::Condvar::new(),
+        }
+    }
+
+    /// Waits for a permit and takes it. The permit is returned when the guard drops —
+    /// every early `?` return included, which is the whole reason it is a guard.
+    fn acquire(&self) -> FramePermit<'_> {
+        // Poison is recovered rather than propagated, the same policy `OnPoison::Recover`
+        // encodes elsewhere (D-036): a thread that panicked while holding this must not be
+        // able to wedge every future preview, and the count it left behind is still
+        // correct — the guard's `Drop` runs during an unwind.
+        //
+        // Not routed through `lock_state` for one structural reason: this must be
+        // INFALLIBLE. `lock_state` returns a `Result`, and the only honest thing an error
+        // arm could do here is hand back a permit that was never taken — which `Drop` would
+        // then return, inflating the semaphore's count for the rest of the session. The
+        // `Condvar::wait` below has to recover poison in exactly this form regardless.
+        let mut available = self
+            .available
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *available == 0 {
+            available = self
+                .released
+                .wait(available)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        *available -= 1;
+        FramePermit { owner: self }
+    }
+}
+
+/// RAII permit from [`FramePermits`].
+struct FramePermit<'a> {
+    owner: &'a FramePermits,
+}
+
+impl Drop for FramePermit<'_> {
+    fn drop(&mut self) {
+        // Infallible for the same reason `acquire` is: a permit that failed to be RETURNED
+        // would shrink the semaphore permanently, and after two of those no preview would
+        // ever run again.
+        let mut available = self
+            .owner
+            .available
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *available += 1;
+        self.owner.released.notify_one();
+    }
+}
+
+/// The ffmpeg argv for one frame grab — a pure function, so the ordering below can be
+/// pinned by a test rather than trusted.
+///
+/// # The seek shape is MEASURED, and is not a candidate for tidying
+///
+/// Three shapes were timed against the owner's real corpus over SMB:
+///
+/// | argv | AVCHD `.MTS` | 4K DJI MP4, 816 MB | exit |
+/// |---|---|---|---|
+/// | `-ss T -i F` (input seek only) | 0.83 s, valid JPEG | — | **69** |
+/// | `-i F -ss T` (output seek only) | 8.7 s | 8.9 s | 0 |
+/// | **hybrid** `-ss (T−2) -i F -ss 2` | **0.69 s** | **4.4 s** | **0** |
+///
+/// Input-only seek is the obvious "fast" answer and it is a trap: on AVCHD it exits **69
+/// despite having written a perfectly good JPEG to stdout**, and
+/// [`sundaysync_core::sidecar::run`] reports a non-zero exit as `Err` and drops the
+/// output — so the preview would have failed on all 136 of the owner's `.MTS` files while
+/// working on everything he tested it with first. Output-only seek decodes from the start
+/// of the file and is unusable over a network share.
+///
+/// The hybrid gets both: the input-side `-ss` skips cheaply through the container to two
+/// seconds before the target, and the output-side `-ss` decodes that short run to land on
+/// the exact frame. Both are required, and their **positions relative to `-i` are the
+/// whole mechanism** — an edit that merges them into one flag silently reintroduces one of
+/// the two failures above.
+fn frame_args(
+    file: &Path,
+    at_seconds: f64,
+    height: u32,
+) -> Result<Vec<std::ffi::OsString>, String> {
+    if height == 0 || height > MAX_FRAME_HEIGHT {
+        return Err(format!(
+            "preview height {height} is out of range; it must be between 1 and {MAX_FRAME_HEIGHT}"
+        ));
+    }
+    // NaN and the infinities have no honest clamp and would format as "NaN"/"inf" into an
+    // ffmpeg argument, so they are refused rather than guessed at.
+    if !at_seconds.is_finite() {
+        return Err(format!("preview timestamp {at_seconds} is not a real time"));
+    }
+    // Clamped rather than rejected: a playhead a few milliseconds before zero is a rounding
+    // artefact of the timeline's own arithmetic, not a caller error. Nothing else can be
+    // checked here — this command does not know the file's duration, and asking ffprobe for
+    // it would double the cost of the thing being made fast.
+    let at_seconds = at_seconds.max(0.0);
+
+    let coarse = (at_seconds - FAST_SEEK_LEAD).max(0.0);
+    // Equal to `min(FAST_SEEK_LEAD, at_seconds)`, but written as the remainder so the two
+    // seeks provably sum to the requested time rather than doing so by coincidence.
+    let fine = at_seconds - coarse;
+
+    let osstr = |s: String| std::ffi::OsString::from(s);
+    Ok(vec![
+        // Keeps ffmpeg's banner off stderr, so what remains is a real diagnostic.
+        osstr("-v".into()),
+        osstr("error".into()),
+        // S-1 (D-032), input side, exactly as the probe and extract stages do it: §4.1
+        // does not reject by extension, so a dropped "video" may really be an HLS playlist
+        // or a concat script, and ffmpeg left to its defaults would fetch remote URLs
+        // (SSRF) or read arbitrary local paths. Must precede `-i`. Verified NOT to block
+        // the `pipe:1` OUTPUT — the whitelist governs the input demuxer's protocols.
+        osstr("-protocol_whitelist".into()),
+        osstr("file".into()),
+        // Fast seek: input side, before `-i`. See this function's header.
+        osstr("-ss".into()),
+        osstr(format!("{coarse:.3}")),
+        // `-i` rather than a bare positional, so a file literally named `-frames:v` cannot
+        // be parsed as an option (argument injection, D-032's third flag).
+        osstr("-i".into()),
+        file.as_os_str().to_os_string(),
+        // Accurate seek: output side, after `-i`. See this function's header.
+        osstr("-ss".into()),
+        osstr(format!("{fine:.3}")),
+        // Pinned: one frame is the entire contract, and it is what makes the byte ceiling
+        // a generous bound rather than a coin toss.
+        osstr("-frames:v".into()),
+        osstr("1".into()),
+        // `-2` keeps the aspect ratio and rounds the width to an even number, which the
+        // MJPEG encoder's chroma subsampling requires; `-1` can produce an odd width and
+        // fail on some sources.
+        osstr("-vf".into()),
+        osstr(format!("scale=-2:{height}")),
+        osstr("-f".into()),
+        osstr("image2".into()),
+        osstr("-vcodec".into()),
+        osstr("mjpeg".into()),
+        osstr("-y".into()),
+        osstr("pipe:1".into()),
+    ])
+}
+
+/// One JPEG frame of `file` at `at_seconds`, scaled to `height` pixels tall.
+///
+/// Returns [`tauri::ipc::Response`], which the webview resolves to an **`ArrayBuffer`** —
+/// the same binary-IPC path D-052 proved and `read_audio_window` reuses. Nothing is
+/// written to disk and no new protocol, capability or CSP allowance is involved: that zero
+/// security delta is the reason this shape was chosen (D-069).
+///
+/// # An empty answer means "no picture", and is a success
+///
+/// Measured on the owner's corpus: `.WAV` and `.HEIC` exit **234 with zero bytes**, and 32
+/// of his 386 files are in that class. A file with no decodable video frame is a normal
+/// outcome, not a failure (§7.2) — so it comes back as an **empty** response, which the
+/// renderer distinguishes by `byteLength === 0` without parsing a string. A red banner for
+/// eight percent of a working card would be a lie about the app's state.
+///
+/// Everything that genuinely went wrong still errors loudly: a timeout, a missing ffmpeg,
+/// a blown [`MAX_FRAME_BYTES`] ceiling, and a supersession (as the usual
+/// [`CANCELLED_MSG`]).
+#[tauri::command(async)]
+fn video_frame(
+    state: State<'_, AppState>,
+    file: PathBuf,
+    at_seconds: f64,
+    height: u32,
+) -> Result<tauri::ipc::Response, String> {
+    // Validated before anything is claimed or resolved: a bad height should cost nothing
+    // and needs neither ffmpeg nor a permit.
+    let args = frame_args(&file, at_seconds, height)?;
+    let sidecar = state.sidecar()?;
+
+    // Installed BEFORE the permit is waited on, so a grab that is still queued is already
+    // cancellable — the queue is exactly where a superseded grab is most likely to be.
+    let cancel = state.install_thumbnail_cancel();
+    let _permit = state.frame_permits.acquire();
+
+    // Re-checked after the wait: if the playhead moved on while we queued, the honest
+    // thing is to not spawn ffmpeg at all.
+    if cancel.is_cancelled() {
+        state.clear_thumbnail_cancel_if_ours(&cancel);
+        return Err(CANCELLED_MSG.to_string());
+    }
+
+    let outcome = sundaysync_core::sidecar::run_capped(
+        &sidecar.ffmpeg,
+        args,
+        THUMB_TIMEOUT,
+        &cancel,
+        MAX_FRAME_BYTES,
+    );
+    // F3's identity guard: a newer grab may already own the slot, and clearing that would
+    // leave it uncancellable.
+    state.clear_thumbnail_cancel_if_ours(&cancel);
+
+    use sundaysync_core::sidecar::RunFailure;
+    match outcome {
+        // An exit-0 run that wrote nothing is the same "no picture" answer as the
+        // non-zero one below, and needs no special case: the bytes are simply empty.
+        Ok(output) => Ok(tauri::ipc::Response::new(output.stdout)),
+        // Ran, and said no. The `.WAV`/`.HEIC` case above, and equally a video file whose
+        // stream is damaged at this timestamp. Both are "there is no picture here", which
+        // is a state the UI can render, not an error it must explain. The stderr goes to
+        // the log so a genuinely surprising one is still diagnosable.
+        Err(RunFailure::Failed { code, stderr }) => {
+            eprintln!(
+                "no preview frame for {} at {at_seconds}s (ffmpeg exit {code:?}): {}",
+                file.display(),
+                stderr.lines().next().unwrap_or("").trim()
+            );
+            Ok(tauri::ipc::Response::new(Vec::new()))
+        }
+        Err(RunFailure::Cancelled) => Err(CANCELLED_MSG.to_string()),
+        Err(RunFailure::TimedOut) => Err(format!(
+            "the preview of {} timed out after {THUMB_TIMEOUT:?}",
+            file.display()
+        )),
+        // The ceiling and a failed spawn are both real breakages of an assumption this
+        // command is built on, and neither may masquerade as "no picture".
+        Err(other) => Err(format!("could not read a preview frame: {other}")),
+    }
+}
+
+/// Stops the in-flight preview frame grab, if there is one. Fire-and-forget, like
+/// [`cancel_prewarm`] and [`cancel_sync`].
+///
+/// This is not a convenience. `invoke` has no cancellation of its own
+/// (`app/src/invoke.ts`), so a grab whose answer nobody wants any more — the playhead
+/// moved, the panel closed — keeps a permit and a running ffmpeg until it finishes on its
+/// own. The token is the only thing that can end it.
+#[tauri::command]
+fn cancel_thumbnail(state: State<'_, AppState>) {
+    state.request_thumbnail_cancel();
+}
+
 /// §7.4: cancel must take effect within 2 s. The engine kills in-flight ffmpeg children,
 /// so this returns immediately and the run unwinds on its own.
 #[tauri::command]
@@ -1898,6 +2281,11 @@ pub fn run() {
             prewarm_analysis,
             cancel_prewarm,
             read_audio_window,
+            // V05-W4a (D-069). Registered but not yet called from anywhere: the panel that
+            // consumes it is W4b. That is the intended end state of this stage — the
+            // engine half lands, proven by its own tests, without moving a pixel.
+            video_frame,
+            cancel_thumbnail,
             export_timeline,
             export_diagnostics,
             check_sidecar,
@@ -3270,5 +3658,729 @@ mod waveform_tests {
 
         window(&f, &webview, 0, 100)
             .expect("a read-only playback window must not be blocked by a running sync");
+    }
+}
+
+/// V05-W4a (docs/DECISIONS.md D-069): the preview frame grab.
+///
+/// # How this suite runs with no ffmpeg (D-025/D-005)
+///
+/// The shell's CI job deliberately has no ffmpeg — it stubs the two `externalBin` files
+/// only to satisfy `tauri-build`'s existence check. So every test here that needs a child
+/// process substitutes a **fake ffmpeg**: a small `sh` script installed straight into
+/// `AppState.sidecar` via [`Sidecar::new`], which takes its pair on trust. That is not a
+/// weaker test than the real binary would be — the thing under test is this shell's
+/// handling of what ffmpeg *did* (bytes on stdout, an exit code, a timeout, a kill), and a
+/// script produces each of those on demand and deterministically, where a real ffmpeg
+/// would need a media fixture per case and would still not reproduce the exit-234 one.
+///
+/// The argv itself is pinned separately, as a pure function, against the measurements in
+/// [`frame_args`].
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+    use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponseBody};
+    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    use tauri::webview::InvokeRequest;
+
+    fn app_with(state: AppState) -> tauri::App<tauri::test::MockRuntime> {
+        mock_builder()
+            .manage(state)
+            .invoke_handler(tauri::generate_handler![video_frame, cancel_thumbnail])
+            .build(mock_context(noop_assets()))
+            .expect("the mock app must build")
+    }
+
+    fn request(cmd: &str, payload: serde_json::Value) -> InvokeRequest {
+        InvokeRequest {
+            cmd: cmd.into(),
+            callback: CallbackFn(0),
+            error: CallbackFn(1),
+            url: if cfg!(windows) {
+                "http://tauri.localhost"
+            } else {
+                "tauri://localhost"
+            }
+            .parse()
+            .unwrap(),
+            body: InvokeBody::Json(payload),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        }
+    }
+
+    fn argv(file: &str, at_seconds: f64, height: u32) -> Vec<String> {
+        frame_args(Path::new(file), at_seconds, height)
+            .expect("these arguments are valid")
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    // ---- The argv: pure, measured, and pinned hard ----------------------------------
+
+    #[test]
+    fn frame_args_ships_the_measured_hybrid_seek_verbatim() {
+        // THE measurement, on the owner's real corpus over SMB. Do not "simplify" this
+        // into a single -ss; both positions are load-bearing:
+        //
+        //   -ss T -i F      (input only)  AVCHD .MTS 0.83 s, valid JPEG, **exit 69**
+        //   -i F -ss T      (output only) AVCHD 8.7 s, 4K DJI MP4 (816 MB) 8.9 s, exit 0
+        //   -ss T-2 -i F -ss 2  (hybrid)  AVCHD 0.69 s, 4K DJI 4.4 s, exit 0
+        //
+        // Input-only seek writes a perfectly good JPEG and *still* exits 69 on AVCHD, and
+        // `sidecar::run` reports a non-zero exit as Err and drops stdout — so that shape
+        // fails on all 136 of the owner's .MTS files. Output-only seek decodes from the
+        // head of the file and is unusable over a share.
+        assert_eq!(
+            argv("/Volumes/CARD/C0001.MTS", 10.0, 160),
+            vec![
+                "-v",
+                "error",
+                // The D-032 input guard, and it must precede -i.
+                "-protocol_whitelist",
+                "file",
+                // Fast seek: BEFORE -i, at T - 2.
+                "-ss",
+                "8.000",
+                "-i",
+                "/Volumes/CARD/C0001.MTS",
+                // Accurate seek: AFTER -i, the remaining 2 s.
+                "-ss",
+                "2.000",
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=-2:160",
+                "-f",
+                "image2",
+                "-vcodec",
+                "mjpeg",
+                "-y",
+                "pipe:1",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_protocol_whitelist_comes_before_the_input_and_the_output_is_still_a_pipe() {
+        // Two facts one assertion each, because a refactor that reorders the flags breaks
+        // them independently: the whitelist governs the INPUT demuxer, so it is inert if it
+        // lands after -i; and it does NOT block `pipe:1` on the output side, which is the
+        // only reason this command can answer without touching the disk.
+        let args = argv("/x/clip.mov", 5.0, 200);
+        let whitelist = args.iter().position(|a| a == "-protocol_whitelist");
+        let input = args.iter().position(|a| a == "-i");
+        assert!(whitelist < input, "the whitelist must precede -i: {args:?}");
+        assert_eq!(args.last().map(String::as_str), Some("pipe:1"));
+        assert!(
+            !args.iter().any(|a| a.contains("pipe") && a != "pipe:1"),
+            "nothing but the output may name a pipe: {args:?}"
+        );
+    }
+
+    #[test]
+    fn the_two_seeks_always_sum_to_the_requested_time() {
+        // Written as `fine = at - coarse` rather than `min(2, at)` so this holds by
+        // construction. A clip previewed inside its first two seconds gets a zero fast seek
+        // and does all its seeking accurately — which is correct and, on a short preroll,
+        // free.
+        for at in [0.0f64, 0.25, 1.999, 2.0, 2.001, 37.5, 7200.0] {
+            let args = argv("/x/clip.mov", at, 160);
+            let seeks: Vec<f64> = args
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.as_str() == "-ss")
+                .map(|(i, _)| args[i + 1].parse::<f64>().unwrap())
+                .collect();
+            assert_eq!(seeks.len(), 2, "both seeks must survive: {args:?}");
+            assert!(
+                (seeks[0] + seeks[1] - at).abs() < 1e-3,
+                "seeks {seeks:?} do not add up to {at}"
+            );
+            assert!(seeks[0] >= 0.0 && seeks[1] >= 0.0, "{seeks:?}");
+            assert!(
+                seeks[1] <= FAST_SEEK_LEAD + 1e-9,
+                "the accurate seek must stay short: {seeks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn frame_args_refuses_a_height_outside_the_thumbnail_range() {
+        // A size argument from the IPC boundary is untrusted data (D-032). Zero is a
+        // degenerate scale filter; anything past the ceiling is a caller asking this
+        // command to be a viewer, which it is not.
+        for bad in [0u32, MAX_FRAME_HEIGHT + 1, 20_000] {
+            let err = frame_args(Path::new("/x/clip.mov"), 1.0, bad).unwrap_err();
+            assert!(err.contains("height"), "unexpected for {bad}: {err}");
+            assert!(
+                err.contains(&MAX_FRAME_HEIGHT.to_string()),
+                "the refusal must name the limit: {err}"
+            );
+        }
+        assert!(frame_args(Path::new("/x/clip.mov"), 1.0, 1).is_ok());
+        assert!(frame_args(Path::new("/x/clip.mov"), 1.0, MAX_FRAME_HEIGHT).is_ok());
+    }
+
+    #[test]
+    fn a_negative_timestamp_is_clamped_and_a_non_finite_one_is_refused() {
+        // Clamped: a playhead a hair before zero is the timeline's own rounding, not a
+        // caller error. Refused: NaN and the infinities have no honest clamp and would be
+        // formatted straight into an ffmpeg argument as "NaN"/"inf".
+        let args = argv("/x/clip.mov", -3.0, 160);
+        let seeks: Vec<&String> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.as_str() == "-ss")
+            .map(|(i, _)| &args[i + 1])
+            .collect();
+        assert_eq!(seeks, vec!["0.000", "0.000"], "{args:?}");
+
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                frame_args(Path::new("/x/clip.mov"), bad, 160).is_err(),
+                "{bad} must be refused, not formatted into an argument"
+            );
+        }
+    }
+
+    // ---- The argv against a REAL ffmpeg ---------------------------------------------
+    //
+    // The pure test above pins the shape; this one pins that the shape WORKS. It needs a
+    // real binary, so it follows the repo's D-025 convention exactly: skip with a printed
+    // SKIP line where there is none (the shell's own CI job is deliberately ffmpeg-less),
+    // and turn that skip into a hard failure wherever `SUNDAYSYNC_REQUIRE_FFMPEG` is set,
+    // so it can never silently rot in an environment that does have ffmpeg.
+
+    fn require_ffmpeg() -> Option<Sidecar> {
+        match resolve_sidecar() {
+            Ok(s) => Some(s),
+            Err(e) => {
+                assert!(
+                    std::env::var("SUNDAYSYNC_REQUIRE_FFMPEG").is_err(),
+                    "ffmpeg is required in this environment but was not found: {e}"
+                );
+                eprintln!("SKIP: ffmpeg unavailable ({e})");
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn the_hybrid_argv_really_produces_one_jpeg_at_the_asked_for_height() {
+        // The measurement, re-executed rather than trusted: hybrid seek exits 0 and writes
+        // a JPEG to stdout. Verified by hand at V05-W4a against a generated H.264 clip —
+        // exit 0, 5 337 bytes, 214x160, magic FF D8 FF — which is what put the 6–11 KB
+        // figure in MAX_FRAME_BYTES' header.
+        let Some(sidecar) = require_ffmpeg() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let clip = dir.path().join("C0001.mp4");
+
+        // A short synthetic clip with a real GOP, so the fast seek has something to skip
+        // through and the accurate seek something to decode.
+        let made = sundaysync_core::sidecar::run(
+            &sidecar.ffmpeg,
+            [
+                "-v".as_ref(),
+                "error".as_ref(),
+                "-y".as_ref(),
+                "-f".as_ref(),
+                "lavfi".as_ref(),
+                "-i".as_ref(),
+                "testsrc=duration=6:size=320x240:rate=25".as_ref(),
+                "-c:v".as_ref(),
+                "libx264".as_ref(),
+                "-pix_fmt".as_ref(),
+                "yuv420p".as_ref(),
+                "-g".as_ref(),
+                "25".as_ref(),
+                clip.as_os_str(),
+            ],
+            std::time::Duration::from_secs(60),
+            &CancelToken::new(),
+        );
+        if made.is_err() {
+            eprintln!("SKIP: could not encode the preview fixture (no libx264?)");
+            return;
+        }
+
+        let out = sundaysync_core::sidecar::run_capped(
+            &sidecar.ffmpeg,
+            frame_args(&clip, 4.0, 160).unwrap(),
+            THUMB_TIMEOUT,
+            &CancelToken::new(),
+            MAX_FRAME_BYTES,
+        )
+        .expect("the hybrid argv must exit 0 — an Err here means it wrote to stdout and died");
+
+        assert_eq!(
+            &out.stdout[..3],
+            &[0xFF, 0xD8, 0xFF],
+            "stdout must be a JPEG, starting {:?}",
+            &out.stdout[..out.stdout.len().min(8)]
+        );
+        // One frame, not a stream. A JPEG has exactly one End-of-Image marker.
+        assert_eq!(
+            out.stdout.windows(2).filter(|w| w == &[0xFF, 0xD9]).count(),
+            1,
+            "-frames:v 1 must yield exactly one image"
+        );
+        assert!(
+            out.stdout.len() < MAX_FRAME_BYTES,
+            "a 160 px frame measured 6–11 KB; got {} bytes",
+            out.stdout.len()
+        );
+    }
+
+    #[test]
+    fn a_real_audio_file_exits_non_zero_with_no_bytes_which_is_the_no_picture_case() {
+        // MEASURED, and reproduced here: `.WAV` exits **234 having written nothing**. This
+        // is 32 of the owner's 386 files, so it must be a state and not an error — the
+        // command's empty-success arm exists for exactly this exit.
+        let Some(sidecar) = require_ffmpeg() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("ZOOM0001.WAV");
+
+        if sundaysync_core::sidecar::run(
+            &sidecar.ffmpeg,
+            [
+                "-v".as_ref(),
+                "error".as_ref(),
+                "-y".as_ref(),
+                "-f".as_ref(),
+                "lavfi".as_ref(),
+                "-i".as_ref(),
+                "sine=frequency=440:duration=2".as_ref(),
+                wav.as_os_str(),
+            ],
+            std::time::Duration::from_secs(60),
+            &CancelToken::new(),
+        )
+        .is_err()
+        {
+            eprintln!("SKIP: could not synthesise the WAV fixture");
+            return;
+        }
+
+        let err = sundaysync_core::sidecar::run_capped(
+            &sidecar.ffmpeg,
+            frame_args(&wav, 0.5, 160).unwrap(),
+            THUMB_TIMEOUT,
+            &CancelToken::new(),
+            MAX_FRAME_BYTES,
+        )
+        .expect_err("an audio file has no frame to give");
+
+        // The exact shape the command's `Failed` arm turns into an empty success. If this
+        // ever becomes `OutputTooLarge` or `TimedOut`, that arm is wrong.
+        assert!(
+            matches!(err, sundaysync_core::sidecar::RunFailure::Failed { .. }),
+            "expected a non-zero exit, got {err:?}"
+        );
+    }
+
+    // ---- The spawn semaphore --------------------------------------------------------
+
+    #[test]
+    fn the_preview_limiter_ships_with_its_documented_capacity() {
+        // extract.rs caps analysis decodes at 4 because concurrent ffmpegs contend for the
+        // same disk. The preview must never be the reason a running sync's decoders wait,
+        // so it gets a small budget of its own — asserted, not merely commented.
+        assert_eq!(FRAME_PERMITS, 2);
+        let state = AppState::default();
+        assert_eq!(
+            *state.frame_permits.available.lock().unwrap(),
+            FRAME_PERMITS
+        );
+    }
+
+    #[test]
+    fn a_permit_is_a_wait_not_a_refusal_and_the_capacity_actually_binds() {
+        // The permit logic, not ffmpeg: N threads contend for a 2-permit semaphore and the
+        // observed peak concurrency must never exceed 2. A refused permit that errored
+        // instead of waiting would show up here as a thread that never ran.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let permits = Arc::new(FramePermits::new(2));
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let ran = Arc::new(AtomicUsize::new(0));
+
+        let workers: Vec<_> = (0..8)
+            .map(|_| {
+                let permits = Arc::clone(&permits);
+                let live = Arc::clone(&live);
+                let peak = Arc::clone(&peak);
+                let ran = Arc::clone(&ran);
+                std::thread::spawn(move || {
+                    let _permit = permits.acquire();
+                    let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                    live.fetch_sub(1, Ordering::SeqCst);
+                    ran.fetch_add(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for w in workers {
+            w.join().unwrap();
+        }
+
+        assert_eq!(
+            ran.load(Ordering::SeqCst),
+            8,
+            "every grab must eventually run"
+        );
+        assert!(
+            peak.load(Ordering::SeqCst) <= 2,
+            "more than two previews decoded at once: peak {}",
+            peak.load(Ordering::SeqCst)
+        );
+        // …and the semaphore is back where it started, so a leaked guard cannot slowly
+        // strangle every future preview.
+        assert_eq!(*permits.available.lock().unwrap(), 2);
+    }
+
+    #[test]
+    fn a_permit_blocks_until_the_holder_lets_go() {
+        // The serialising half stated directly: with one permit, a second acquire cannot
+        // proceed while the first is held, and does proceed the moment it is dropped.
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let permits = Arc::new(FramePermits::new(1));
+        let held = permits.acquire();
+        let through = Arc::new(AtomicBool::new(false));
+
+        let waiter = {
+            let permits = Arc::clone(&permits);
+            let through = Arc::clone(&through);
+            std::thread::spawn(move || {
+                let _p = permits.acquire();
+                through.store(true, Ordering::SeqCst);
+            })
+        };
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            !through.load(Ordering::SeqCst),
+            "the second grab spawned while the first still held the only permit"
+        );
+
+        drop(held);
+        waiter.join().unwrap();
+        assert!(through.load(Ordering::SeqCst));
+    }
+
+    // ---- Cancellation bookkeeping ---------------------------------------------------
+
+    #[test]
+    fn a_superseding_grab_cancels_the_one_it_replaces() {
+        // The scan/prewarm pattern (F3). `invoke` has no cancellation of its own, so a
+        // grab whose answer nobody wants only dies because this token kills its child.
+        let state = AppState::default();
+        let first = state.install_thumbnail_cancel();
+        assert!(!first.is_cancelled());
+
+        let second = state.install_thumbnail_cancel();
+        assert!(
+            first.is_cancelled(),
+            "the superseded grab must see its own token fired"
+        );
+        assert!(!second.is_cancelled());
+    }
+
+    #[test]
+    fn a_late_finishing_grab_cannot_clear_a_newer_grabs_token() {
+        // The `Arc::ptr_eq` identity guard. Without it, a grab that finishes after being
+        // superseded clears the slot on its way out and leaves the NEWER grab
+        // uncancellable — i.e. holding a permit and an ffmpeg nobody can stop.
+        let state = AppState::default();
+        let first = state.install_thumbnail_cancel();
+        let second = state.install_thumbnail_cancel();
+
+        state.clear_thumbnail_cancel_if_ours(&first);
+        assert!(
+            state.thumbnail_cancel.lock().unwrap().is_some(),
+            "the newer grab's token was wrongly cleared"
+        );
+
+        state.clear_thumbnail_cancel_if_ours(&second);
+        assert!(
+            state.thumbnail_cancel.lock().unwrap().is_none(),
+            "the owning grab must clean up after itself"
+        );
+    }
+
+    #[test]
+    fn cancel_thumbnail_fires_the_installed_token_over_the_real_ipc() {
+        // The command exists so the panel can abandon a grab it no longer wants. Driven
+        // through the real dispatch so a registration mistake cannot pass.
+        let state = AppState::default();
+        let slot = Arc::clone(&state.thumbnail_cancel);
+        let token = state.install_thumbnail_cancel();
+        let app = app_with(state);
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+
+        get_ipc_response(&webview, request("cancel_thumbnail", serde_json::json!({})))
+            .expect("cancel is fire-and-forget and cannot fail");
+
+        assert!(token.is_cancelled());
+        // Fire-and-forget: the slot is the running grab's to clear, not this command's.
+        assert!(slot.lock().unwrap().is_some());
+    }
+
+    // ---- The command end to end, against a fake ffmpeg ------------------------------
+    //
+    // See this module's header for why a script rather than the real binary. Unix-gated
+    // like `sidecar.rs`'s own script-based tests, and following that file's established
+    // shape (write, chmod 0o755, exec) rather than inventing a second one.
+
+    #[cfg(unix)]
+    fn fake_ffmpeg(name: &str, body: &str) -> (tempfile::TempDir, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("a scratch dir");
+        let script = dir.path().join(format!("{name}.sh"));
+        std::fs::write(&script, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (dir, script)
+    }
+
+    /// An `AppState` whose sidecar slot already holds `script` as both binaries.
+    /// [`Sidecar::new`] takes its pair on trust, which is exactly what lets this bypass
+    /// `-version` verification and any need for a real ffmpeg.
+    #[cfg(unix)]
+    fn state_using(script: &Path) -> AppState {
+        let state = AppState::default();
+        *state.sidecar.lock().unwrap() =
+            Some(Sidecar::new(script.to_path_buf(), script.to_path_buf()));
+        state
+    }
+
+    #[cfg(unix)]
+    fn grab(
+        webview: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+        at_seconds: f64,
+        height: u32,
+    ) -> Result<InvokeResponseBody, serde_json::Value> {
+        get_ipc_response(
+            webview,
+            request(
+                "video_frame",
+                serde_json::json!({
+                    "file": "/Volumes/CARD/C0001.MTS",
+                    "atSeconds": at_seconds,
+                    "height": height,
+                }),
+            ),
+        )
+    }
+
+    #[cfg(unix)]
+    fn webview_for(
+        state: AppState,
+    ) -> (
+        tauri::App<tauri::test::MockRuntime>,
+        tauri::WebviewWindow<tauri::test::MockRuntime>,
+    ) {
+        let app = app_with(state);
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        (app, webview)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn video_frame_answers_with_raw_bytes_not_json() {
+        // D-052's load-bearing assumption, re-pinned for this command exactly as
+        // `waveform_level_answers_with_raw_bytes_not_json` and `read_audio_window`'s twin
+        // pin it. `tauri::ipc::Response` must produce an `InvokeResponseBody::Raw`, because
+        // that is what makes the webview's IPC bootstrap take the
+        // `application/octet-stream` branch and resolve `invoke()` to an ArrayBuffer. If
+        // this ever comes back `Json`, the panel silently receives an object where it
+        // expects a buffer — and a JPEG base64'd into a JSON field would be +33 % on every
+        // single frame.
+        //
+        // This is the whole pipeline: real `generate_handler!` dispatch, real camelCase
+        // argument deserialisation, real `IpcResponse` conversion.
+        let (_dir, script) = fake_ffmpeg("emits-jpeg", "printf '\\377\\330\\377\\340JFIF'");
+        let (_app, webview) = webview_for(state_using(&script));
+
+        let response = grab(&webview, 10.0, 160).expect("the command must succeed");
+
+        let InvokeResponseBody::Raw(bytes) = response else {
+            panic!("video_frame answered with JSON — D-052's binary IPC assumption is broken");
+        };
+        assert_eq!(
+            &bytes[..3],
+            &[0xFF, 0xD8, 0xFF],
+            "the JPEG must arrive byte for byte, got {bytes:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_with_no_picture_is_an_empty_success_not_an_error() {
+        // MEASURED: `.WAV` and `.HEIC` exit **234 having written zero bytes**, and 32 of the
+        // owner's 386 files are in that class. "There is no picture here" is a state the UI
+        // can render (§7.2 — a file that will not decode is a value, not a failure); a red
+        // banner on eight percent of a perfectly good card would be a lie.
+        //
+        // Distinguishable without parsing a string: `byteLength === 0`.
+        let (_dir, script) = fake_ffmpeg(
+            "no-video",
+            "echo 'Output file #0 does not contain any stream' >&2; exit 234",
+        );
+        let (_app, webview) = webview_for(state_using(&script));
+
+        let response = grab(&webview, 3.0, 160).expect("a file with no video is not an error");
+
+        let InvokeResponseBody::Raw(bytes) = response else {
+            panic!("even the empty answer must stay on the binary path");
+        };
+        assert!(
+            bytes.is_empty(),
+            "expected no picture, got {} bytes",
+            bytes.len()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_exit_zero_run_that_wrote_nothing_is_the_same_empty_answer() {
+        // The other half of the no-picture case, and the reason it needs no special arm:
+        // whatever the exit code, no bytes means no picture.
+        let (_dir, script) = fake_ffmpeg("silent-success", "exit 0");
+        let (_app, webview) = webview_for(state_using(&script));
+
+        let response = grab(&webview, 3.0, 160).expect("exit 0 with no bytes is not an error");
+        let InvokeResponseBody::Raw(bytes) = response else {
+            panic!("expected raw bytes");
+        };
+        assert!(bytes.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_frame_over_the_byte_ceiling_fails_loudly_rather_than_arriving_truncated() {
+        // MEASURED: real frames at height 160 are 6–11 KB, so 2 MiB is three orders of
+        // magnitude of headroom — nothing legitimate can reach it. What it stops is an
+        // ffmpeg that ignored `-frames:v 1`: `sidecar::run`'s drain is an uncapped
+        // `read_to_end`, and the failure without a ceiling is an OOM kill, not an error.
+        //
+        // Loud, not truncated: a half-JPEG that decoded to a grey smear would be the silent
+        // wrongness §7.5 forbids.
+        let over = MAX_FRAME_BYTES + 1024;
+        let (_dir, script) = fake_ffmpeg("firehose", &format!("head -c {over} /dev/zero"));
+        let (_app, webview) = webview_for(state_using(&script));
+
+        let err = grab(&webview, 3.0, 160).expect_err("the ceiling must refuse, not truncate");
+        let err = err.as_str().unwrap_or_default().to_string();
+        assert!(err.contains("preview frame"), "unexpected: {err}");
+        assert!(
+            err.contains(&MAX_FRAME_BYTES.to_string()),
+            "the refusal must name the limit it enforced: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_grab_cancelled_mid_run_returns_promptly_with_the_shared_cancelled_word() {
+        // §7.4's budget applied to the preview: the token kills the child mid-flight rather
+        // than waiting out THUMB_TIMEOUT. The word is the same one `prewarm_analysis` and
+        // `scan_inputs` return, so the frontend's existing "ignore a cancelled
+        // supersession" handling covers this command without a line of new code.
+        let (_dir, script) = fake_ffmpeg("slow", "sleep 300");
+        let state = state_using(&script);
+        let slot = Arc::clone(&state.thumbnail_cancel);
+        let (_app, webview) = webview_for(state);
+
+        // Fires as soon as the grab has installed its token — the deterministic stand-in
+        // for the user dragging the playhead onward.
+        let canceller = std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            if let Some(token) = slot.lock().unwrap().as_ref() {
+                token.cancel();
+                return;
+            }
+        });
+
+        let start = std::time::Instant::now();
+        let err = grab(&webview, 3.0, 160).expect_err("a cancelled grab must not succeed");
+        canceller.join().unwrap();
+
+        assert_eq!(err, serde_json::json!(CANCELLED_MSG), "{err}");
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "cancel took {:?} — the token is not reaching the child",
+            start.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_grab_cleans_up_its_own_token_but_leaves_a_newer_ones_alone() {
+        // The identity guard, through the command rather than the bookkeeping: an ordinary
+        // grab that finishes must leave the slot empty, so the next one installs cleanly.
+        let (_dir, script) = fake_ffmpeg("emits-jpeg", "printf '\\377\\330\\377'");
+        let state = state_using(&script);
+        let slot = Arc::clone(&state.thumbnail_cancel);
+        let (_app, webview) = webview_for(state);
+
+        grab(&webview, 1.0, 160).expect("the command must succeed");
+        assert!(
+            slot.lock().unwrap().is_none(),
+            "a finished grab must clear its own token"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bad_height_is_refused_before_ffmpeg_is_ever_spawned() {
+        // Validation ordering, asserted by consequence: the fake would report success if it
+        // ran at all, so a refusal here can only mean the argv builder rejected the height
+        // first. A bad argument must cost nothing — no sidecar resolution, no permit, no
+        // process.
+        let (_dir, script) = fake_ffmpeg("would-succeed", "printf 'x'");
+        let (_app, webview) = webview_for(state_using(&script));
+
+        for bad in [0u32, MAX_FRAME_HEIGHT + 1] {
+            let err = grab(&webview, 1.0, bad).expect_err("an out-of-range height must be refused");
+            assert!(
+                err.as_str().unwrap_or_default().contains("height"),
+                "unexpected for {bad}: {err}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_preview_is_not_refused_while_a_sync_or_a_prewarm_holds_the_activity_slot() {
+        // D-069's central guard, and the one a well-meaning future edit is most likely to
+        // undo. This command writes NOTHING, so it has no business in the D-046 mutual
+        // exclusion — and claiming the slot would blank every preview the instant Sync is
+        // pressed, then collide with `prewarm_analysis`, which holds it for minutes on a
+        // fresh drop. Precedent: the two waveform reads and `read_audio_window`.
+        for busy in [
+            Activity::Syncing,
+            Activity::Prewarming,
+            Activity::Maintaining,
+        ] {
+            let (_dir, script) = fake_ffmpeg("emits-jpeg", "printf '\\377\\330\\377'");
+            let state = state_using(&script);
+            let activity = Arc::clone(&state.activity);
+            let (_app, webview) = webview_for(state);
+
+            let _held = ActivityGuard::begin(&activity, busy).unwrap();
+            grab(&webview, 1.0, 160)
+                .unwrap_or_else(|e| panic!("a preview must survive {busy:?}: {e}"));
+        }
     }
 }

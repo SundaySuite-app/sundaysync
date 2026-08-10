@@ -236,6 +236,13 @@ pub enum RunFailure {
     Cancelled,
     /// Ran, but exited non-zero.
     Failed { code: Option<i32>, stderr: String },
+    /// Wrote more to stdout than the caller's ceiling allowed ([`run_capped`]).
+    ///
+    /// Only [`run_capped`] can produce this; plain [`run`] has no ceiling. Loud on
+    /// purpose: a caller that asked for a bounded answer and got an unbounded one has had
+    /// its assumption broken, and silently truncating would hand it a corrupt value that
+    /// looks fine.
+    OutputTooLarge { limit: usize },
 }
 
 impl std::fmt::Display for RunFailure {
@@ -250,6 +257,9 @@ impl std::fmt::Display for RunFailure {
                     Some(c) => write!(f, "exited with status {c}: {first}"),
                     None => write!(f, "killed by signal: {first}"),
                 }
+            }
+            Self::OutputTooLarge { limit } => {
+                write!(f, "produced more than the {limit}-byte output limit")
             }
         }
     }
@@ -282,6 +292,54 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    run_within(bin, args, timeout, cancel, None)
+}
+
+/// [`run`] with a hard ceiling on how many bytes of stdout it will hand back.
+///
+/// # Why this exists (V05-W4a, docs/DECISIONS.md D-069)
+///
+/// [`run`]'s stdout drain is an uncapped `read_to_end`, which is correct for its callers:
+/// the extractor writes its audio to a *file* and produces almost nothing on stdout, and
+/// ffprobe's JSON is bounded by the number of streams in a container. A caller that
+/// genuinely collects a child's stdout into memory has no such bound — a frame grab that
+/// asks for one 8 KB JPEG and is answered by an ffmpeg that decided to write a whole
+/// stream would allocate until the OOM killer arrives.
+///
+/// So the ceiling is the caller's, passed in rather than global. Exceeding it is
+/// [`RunFailure::OutputTooLarge`], never a truncated success: the same
+/// refuse-loudly-on-a-size-argument posture D-032 takes at the IPC boundary.
+///
+/// Memory stays bounded at `max_stdout_bytes + 1` even while the child keeps writing —
+/// the drain reads that much and then pours the remainder into a sink, so the pipe never
+/// fills and the child never deadlocks against a reader that stopped reading.
+pub fn run_capped<I, S>(
+    bin: &std::path::Path,
+    args: I,
+    timeout: Duration,
+    cancel: &CancelToken,
+    max_stdout_bytes: usize,
+) -> std::result::Result<Output, RunFailure>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    run_within(bin, args, timeout, cancel, Some(max_stdout_bytes))
+}
+
+/// The shared body of [`run`] and [`run_capped`]. `cap` is `None` for the historical,
+/// uncapped behaviour.
+fn run_within<I, S>(
+    bin: &std::path::Path,
+    args: I,
+    timeout: Duration,
+    cancel: &CancelToken,
+    cap: Option<usize>,
+) -> std::result::Result<Output, RunFailure>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let mut child = Command::new(bin)
         .args(args)
         .stdin(Stdio::null())
@@ -292,7 +350,9 @@ where
 
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
-    let out_reader = std::thread::spawn(move || drain(stdout_pipe));
+    let out_reader = std::thread::spawn(move || drain_within(stdout_pipe, cap));
+    // stderr stays uncapped: it is a diagnostic, `-v error` already keeps it to a line or
+    // two, and a caller's *output* ceiling is not a statement about its error text.
     let err_reader = std::thread::spawn(move || drain(stderr_pipe));
 
     let deadline = Instant::now() + timeout;
@@ -348,6 +408,16 @@ where
     let stdout = out_reader.join().unwrap_or_default();
     let stderr = String::from_utf8_lossy(&err_reader.join().unwrap_or_default()).into_owned();
 
+    // Checked BEFORE the exit status, deliberately. A child that blew the ceiling has
+    // broken the caller's contract whatever it then exited with, and reporting the
+    // ceiling regardless of the exit code makes the failure deterministic instead of
+    // dependent on how the offending process happened to end.
+    if let Some(limit) = cap {
+        if stdout.len() > limit {
+            return Err(RunFailure::OutputTooLarge { limit });
+        }
+    }
+
     if status.success() {
         Ok(Output {
             stdout,
@@ -370,9 +440,34 @@ enum Stop {
 }
 
 fn drain<R: Read>(pipe: Option<R>) -> Vec<u8> {
+    drain_within(pipe, None)
+}
+
+/// [`drain`] with an optional ceiling.
+///
+/// Reads at most `limit + 1` bytes — the extra byte is what lets the caller tell "exactly
+/// at the limit" from "over it" without keeping the overflow — and then, if the ceiling
+/// was in fact exceeded, keeps pulling the remainder into a sink.
+///
+/// That last part is not tidiness. Simply stopping the read would leave the pipe to fill,
+/// and a child blocked forever on a write to a pipe nobody drains is precisely the
+/// deadlock the reader threads exist to prevent: `try_wait` would never see it exit and
+/// only the timeout would end the call — turning a 5 ms "too big" into a 30 s stall.
+fn drain_within<R: Read>(pipe: Option<R>, limit: Option<usize>) -> Vec<u8> {
     let mut buf = Vec::new();
     if let Some(mut pipe) = pipe {
-        let _ = pipe.read_to_end(&mut buf);
+        match limit {
+            None => {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            Some(limit) => {
+                let ceiling = limit.saturating_add(1) as u64;
+                let _ = (&mut pipe).take(ceiling).read_to_end(&mut buf);
+                if buf.len() > limit {
+                    let _ = std::io::copy(&mut pipe, &mut std::io::sink());
+                }
+            }
+        }
     }
     buf
 }
@@ -601,6 +696,97 @@ mod tests {
             &cancel,
         );
         assert_eq!(r.unwrap_err(), RunFailure::Cancelled);
+    }
+
+    // ---- The output ceiling (V05-W4a, docs/DECISIONS.md D-069) ---------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn a_capped_run_accepts_output_up_to_and_including_the_limit() {
+        // The boundary is inclusive: exactly `limit` bytes is a success. The drain reads
+        // `limit + 1` to be able to tell this case from the next one, so an off-by-one
+        // here would reject every answer of exactly the expected size.
+        let r = run_capped(
+            Path::new("/bin/sh"),
+            ["-c", "yes 0123456789ABCDEF | head -c 1024"],
+            Duration::from_secs(20),
+            &CancelToken::new(),
+            1024,
+        )
+        .unwrap();
+        assert!(r.success);
+        assert_eq!(r.stdout.len(), 1024);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_capped_run_fails_loudly_rather_than_truncating() {
+        // The whole point: a caller that asked for a bounded answer must never be handed
+        // a silently truncated one, which would look exactly like a valid short answer.
+        let r = run_capped(
+            Path::new("/bin/sh"),
+            ["-c", "yes 0123456789ABCDEF | head -c 5000"],
+            Duration::from_secs(20),
+            &CancelToken::new(),
+            1024,
+        );
+        assert_eq!(r.unwrap_err(), RunFailure::OutputTooLarge { limit: 1024 });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn blowing_the_ceiling_returns_promptly_instead_of_waiting_for_the_timeout() {
+        // The drain keeps pouring the overflow into a sink after the ceiling is hit. Stop
+        // reading instead and the child blocks forever on a full pipe, `try_wait` never
+        // sees it exit, and "too big" costs the whole timeout rather than milliseconds.
+        // 4 MB is comfortably past any OS pipe buffer, so the writer genuinely has to be
+        // drained to finish.
+        let start = Instant::now();
+        let r = run_capped(
+            Path::new("/bin/sh"),
+            ["-c", "yes 0123456789ABCDEF | head -c 4000000"],
+            Duration::from_secs(30),
+            &CancelToken::new(),
+            1024,
+        );
+        assert_eq!(r.unwrap_err(), RunFailure::OutputTooLarge { limit: 1024 });
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "an over-ceiling run took {:?} — the overflow is not being drained",
+            start.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_ceiling_is_reported_ahead_of_a_non_zero_exit() {
+        // Deterministic by choice: a child that blew the ceiling has broken the caller's
+        // contract whatever it then exited with, so the ceiling wins over the exit code.
+        let r = run_capped(
+            Path::new("/bin/sh"),
+            ["-c", "head -c 5000 /dev/zero; exit 3"],
+            Duration::from_secs(20),
+            &CancelToken::new(),
+            16,
+        );
+        assert_eq!(r.unwrap_err(), RunFailure::OutputTooLarge { limit: 16 });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_uncapped_run_still_has_no_ceiling() {
+        // `run` and its existing callers are untouched by D-069: the extractor writes its
+        // audio to a file and ffprobe's JSON is bounded by the stream count, so neither
+        // wants a cap — and `a_child_that_outruns_the_pipe_buffer_still_completes` above
+        // would be the first thing to break if one were quietly imposed.
+        let r = run(
+            Path::new("/bin/sh"),
+            ["-c", "yes 0123456789ABCDEF | head -c 400000"],
+            Duration::from_secs(20),
+            &CancelToken::new(),
+        )
+        .unwrap();
+        assert_eq!(r.stdout.len(), 400_000);
     }
 
     #[cfg(unix)]
