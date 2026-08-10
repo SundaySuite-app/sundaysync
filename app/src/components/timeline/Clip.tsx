@@ -1,15 +1,16 @@
 import { memo } from "react";
 import type { Strings } from "../../i18n";
 import type { PrewarmStatus } from "../../state";
+import { clipChrome } from "../../timeline/clipChrome";
 import { formatTimecode, msToX, type TimelineView } from "../../timeline/geometry";
 import { MIN_CLIP_WIDTH_PX } from "../../timeline/hop";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import { usePlayheadInsideSpan } from "../../timeline/playhead";
 import { basename } from "../../types";
 import type { Placement } from "../../types";
-import { WaveformCanvas } from "./WaveformCanvas";
+import { ClipStatus, useClipWaveform, WaveformCanvas } from "./WaveformCanvas";
 
-/** How much of a clip stays label-free at its right end when the label slides. */
+/** How much of a clip stays label-free at its right end when the chrome slides. */
 const LABEL_KEEP_PX = 36;
 
 /**
@@ -71,7 +72,23 @@ export const Clip = memo(function Clip({
   // Zoomed in, a long clip starts far off the left edge — and its label would go
   // with it, leaving a row of anonymous coloured bars. Slide the label back to the
   // viewport edge instead, but never past the clip's own right end.
+  //
+  // V05-W1 (D-065): this is `padding-left` on the chrome row now, not a `translateX` on
+  // the name. A transform slid ONE child across the box while its siblings stayed put,
+  // which is how a filename ended up on top of a rebuild button; padding shrinks the flex
+  // row from the left, so everything in it keeps its share of what is left.
   const labelShift = Math.max(0, Math.min(-left, width - LABEL_KEEP_PX));
+
+  // The waveform's own state, and what it wants to say about itself. Held here rather than
+  // inside the canvas component because the answer competes for pixels with the filename
+  // (D-065), and the two have to be laid out by whoever can see both.
+  const waveform = useClipWaveform({ t, file: span.file, span, view, analysisStatus });
+  const status = waveform.status;
+  const chrome = clipChrome(width, status.kind);
+  // Too narrow to say it in the box: the sentence moves to the slot's tooltip, next to the
+  // filename, rather than being dropped or scribbled across three pixels.
+  const slotTitle =
+    status.kind !== "none" && chrome.status === "none" ? `${name} — ${status.label}` : undefined;
 
   // Stays a real `<button>` — S5's `TimelineView.onPointerDown` tells a clip click from a
   // background-pan gesture by `target.closest("button, select, label, .timeline__ruler")`,
@@ -124,20 +141,17 @@ export const Clip = memo(function Clip({
       aria-current={underPlayhead ? "time" : undefined}
       title={durationUnknown ? `${name} — ${t.clipDurationUnknown}` : name}
     >
-      {/* v0.3 S4: the peaks canvas (or its regenerate/status affordance) fills this slot,
-          behind the label. */}
-      <span className="clip__waveform" data-waveform-slot="">
-        <WaveformCanvas
-          t={t}
-          file={span.file}
-          span={span}
-          view={view}
-          analysisStatus={analysisStatus}
-        />
-      </span>
-      <span className="clip__name" style={{ transform: `translateX(${labelShift}px)` }}>
-        {name}
-      </span>
+      {/* Two layers, not two independently-placed children (D-065). The canvas draws
+          itself in absolute pixels and cannot be a flex item; the name and the status must
+          be flex items or they overlap — as they did, in a 3 px box, on all 386 clips of a
+          wedding. */}
+      <WaveformCanvas waveform={waveform} title={slotTitle} />
+      {chrome.name !== "none" || chrome.status !== "none" ? (
+        <span className="clip__chrome" style={{ paddingLeft: `${labelShift}px` }}>
+          {chrome.name !== "none" ? <span className="clip__name">{name}</span> : null}
+          <ClipStatus status={status} mode={chrome.status} />
+        </span>
+      ) : null}
     </button>
   );
 });

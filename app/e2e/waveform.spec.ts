@@ -40,26 +40,26 @@ function waveformMetaOk(): unknown {
   return fn(`(args) => ({ totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} })`);
 }
 
-/** Rejects the FIRST call FOR EACH FILE with `cache_missing:<file>` (D-052's affordance
- *  state), then answers that file normally — what a real cache does once
- *  `regenerate_analysis` has repopulated it. Stateful via a closure the IIFE captures once
- *  at fixture-install time, so the counter survives across the multiple `invoke` calls one
- *  spec makes.
+/**
+ * Rejects with `cache_missing:<file>` (D-052's affordance state) for as long as nothing has
+ * rebuilt that file, and answers normally once `regenerate_analysis` has — read straight off
+ * `regenerateSpyOk()`'s own record, so the two fixtures describe one consistent cache.
  *
- *  Keyed by FILE since V04-U3 (D-061): the timeline is mounted before the sync too, so
- *  every dropped file asks for its own meta, and a single global counter would hand this
- *  spec's "first call" to whichever clip happened to mount first. */
-function waveformMetaCacheMissingThenOk(): unknown {
-  return fn(`(() => {
-    const seen = new Set();
-    return (args) => {
-      if (!seen.has(args.file)) {
-        seen.add(args.file);
-        return Promise.reject("cache_missing:" + args.file);
-      }
-      return { totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} };
-    };
-  })()`);
+ * **V05-W1 (D-064) migrated this from "reject the first call per file".** A call counter
+ * was a stand-in for a cause, and the app now has a second, legitimate reason to read: a
+ * finished sync drops every memo and every clip looks again (`invalidateAll`), because the
+ * run just wrote the very analysis those clips were missing. Under a counter that
+ * re-read silently consumed the "first" rejection, and a test about the REBUILD BUTTON
+ * stopped ever seeing one. Keyed on the rebuild instead, the fixture says what a real cache
+ * says — "there is nothing here until something puts something here" — and no longer cares
+ * how many times it is asked.
+ */
+function waveformMetaMissingUntilRebuilt(): unknown {
+  return fn(`(args) => {
+    const rebuilt = window.__E2E_REGENERATE__ || [];
+    if (!rebuilt.includes(args.file)) return Promise.reject("cache_missing:" + args.file);
+    return { totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} };
+  }`);
 }
 
 /** Never has a cache entry — every call rejects. */
@@ -67,21 +67,20 @@ function waveformMetaAlwaysCacheMissing(): unknown {
   return fn(`(args) => Promise.reject("cache_missing:" + args.file)`);
 }
 
-/** Fails each file's FIRST call with something that is neither a cache miss nor a busy
- *  refusal (an IO blip, a sweep that raced the read), then answers normally — the
- *  transient the `other` branch used to turn into a permanent, unclearable dead end
- *  (finding 7). Per-file for the same reason as the fixture above. */
-function waveformMetaTransientThenOk(): unknown {
-  return fn(`(() => {
-    const seen = new Set();
-    return (args) => {
-      if (!seen.has(args.file)) {
-        seen.add(args.file);
-        return Promise.reject("io: Resource temporarily unavailable");
-      }
-      return { totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} };
-    };
-  })()`);
+/** Fails with something that is neither a cache miss nor a busy refusal (an IO blip, a
+ *  sweep that raced the read) until the test says the blip has passed, then answers
+ *  normally — the transient the `other` branch used to turn into a permanent, unclearable
+ *  dead end (finding 7).
+ *
+ *  Migrated from "fail each file's first call" for the same reason as the fixture above
+ *  (V05-W1, D-064): the post-sync re-read is now a real event, and a counter would have let
+ *  it clear the blip before the test had asked its question. The test clears it explicitly,
+ *  which is also a truer story — an IO blip passes when it passes, not on a fixed count. */
+function waveformMetaIoBlipUntilCleared(): unknown {
+  return fn(`(args) => {
+    if (!window.__E2E_IO_CLEARED__) return Promise.reject("io: Resource temporarily unavailable");
+    return { totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} };
+  }`);
 }
 
 /** Deterministic `[peak, rms]` `u8` bytes, sized to whichever level was actually asked
@@ -169,7 +168,7 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     page,
   }) => {
     await reachResult(page, {
-      waveform_meta: waveformMetaCacheMissingThenOk(),
+      waveform_meta: waveformMetaMissingUntilRebuilt(),
       waveform_level: waveformLevelOk(),
       ...regenerateSpyOk(),
     });
@@ -196,7 +195,7 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     // `<button>`) — without `stopPropagation` this click would bubble and also fire
     // `onSelect`, popping ClipDetail open behind it.
     await reachResult(page, {
-      waveform_meta: waveformMetaCacheMissingThenOk(),
+      waveform_meta: waveformMetaMissingUntilRebuilt(),
       waveform_level: waveformLevelOk(),
       ...regenerateSpyOk(),
     });
@@ -241,7 +240,7 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     // offers. One transient failure therefore killed that clip's waveform for the rest of
     // the session. Recovery is now automatic on a material zoom change.
     await reachResult(page, {
-      waveform_meta: waveformMetaTransientThenOk(),
+      waveform_meta: waveformMetaIoBlipUntilCleared(),
       waveform_level: waveformLevelOk(),
       ...regenerateSpyOk(),
     });
@@ -251,6 +250,12 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     // The raw engine detail is kept, on hover — never swallowed (§7.5).
     await expect(status).toHaveAttribute("title", /Resource temporarily unavailable/);
     await expect(clipBox(page).locator(".clip__waveform canvas")).toHaveCount(0);
+
+    // The blip passes. Nothing tells the app so — that is the point: the clip is holding a
+    // rejection and would hold it forever if a zoom change did not send it back to look.
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__E2E_IO_CLEARED__ = true;
+    });
 
     // Zoom until the quantized zoom bucket changes (BUTTON_FACTOR is 1.4, so at most a
     // few clicks) — no reload, no re-sync.
@@ -267,6 +272,37 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     expect(
       await page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_REGENERATE__),
     ).toBeUndefined();
+  });
+
+  test("the name and the status share one row instead of being drawn on top of each other", async ({
+    page,
+  }) => {
+    // V05-W1, D-065 — the owner's screenshot, in geometry. `.clip__name` and the rebuild
+    // control used to be independently positioned children of the same box: the name in
+    // normal flow with an inline `translateX`, the control absolutely centred over the
+    // whole clip with a `z-index` the name did not have. At any width they overlapped; at a
+    // 386-file wedding's width they were both illegible and the control could not be aimed
+    // at. They are flex siblings in one row now, and a row cannot overlap itself.
+    await reachResult(page, {
+      waveform_meta: waveformMetaAlwaysCacheMissing(),
+      waveform_level: waveformLevelOk(),
+    });
+
+    const nameBox = (await clipBox(page).locator(".clip__name").boundingBox())!;
+    const controlBox = (await clipBox(page)
+      .getByRole("button", { name: en.waveformRegenerate })
+      .boundingBox())!;
+    const clip = (await clipBox(page).boundingBox())!;
+
+    // Disjoint horizontally, in that order, with the gap between them.
+    expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(controlBox.x);
+    // Both inside the clip box — nothing spills out of a box that is `overflow: hidden`
+    // only because the stylesheet remembers to be.
+    expect(nameBox.x).toBeGreaterThanOrEqual(clip.x - 0.5);
+    expect(controlBox.x + controlBox.width).toBeLessThanOrEqual(clip.x + clip.width + 0.5);
+    // And one line, not two: `CLIP_HEIGHT_PX` is 27 and the row must never wrap.
+    expect(nameBox.height).toBeLessThan(clip.height);
+    expect(nameBox.y).toBeGreaterThanOrEqual(clip.y - 0.5);
   });
 
   test("an unreadable clip can still be selected — the status line is not a click target", async ({

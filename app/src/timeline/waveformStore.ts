@@ -92,6 +92,53 @@ export function invalidate(file: string): void {
   }
 }
 
+/* ── The epoch (V05-W1, D-064) ─────────────────────────────────────────────────────────
+ *
+ * `invalidate(file)` drops a memo, but nothing makes a mounted component go back and LOOK.
+ * `WaveformCanvas` only re-reads on a file change, a regenerate, a `pending → ready`
+ * transition or a zoom-bucket change — so a clip that met a `cache_missing` rejection
+ * before a sync ran held that answer for the rest of the session, and the waveforms the
+ * sync had just written never appeared. Dropping the memo and re-rendering the component
+ * are two halves of one job, and the second half had no wire.
+ *
+ * The epoch is that wire, in the smallest form that cannot go stale: a module counter that
+ * `invalidateAll()` bumps, published through the same `useSyncExternalStore` shape
+ * `playhead.ts` uses. A consumer that includes it in its read's dependencies re-reads once
+ * per wholesale invalidation and never holds a rejection forever — the whole class, not
+ * just the instance this decision was written for.
+ */
+
+let epoch = 0;
+const epochListeners = new Set<() => void>();
+
+/**
+ * Forgets every cached fetch, for every file, and bumps the epoch so every mounted
+ * consumer re-reads exactly once.
+ *
+ * Called when a run has rewritten the cache underneath the whole timeline (`App.tsx`, on
+ * `sync/done` and on a sync that failed or was cancelled): a sync extracts the analysis
+ * audio for every file in it, so afterwards *every* clip's cached answer — a rejection or
+ * a set of bins — is a claim about a cache that no longer exists.
+ */
+export function invalidateAll(): void {
+  metaCache.clear();
+  levelCache.clear();
+  epoch += 1;
+  for (const listener of epochListeners) listener();
+}
+
+export function subscribeEpoch(listener: () => void): () => void {
+  epochListeners.add(listener);
+  return () => {
+    epochListeners.delete(listener);
+  };
+}
+
+/** The current epoch. Monotonic; only its CHANGES mean anything. */
+export function getEpoch(): number {
+  return epoch;
+}
+
 /**
  * The cache-miss affordance's action (D-052): re-extract this one file's analysis audio.
  * Never cached — a regenerate is an explicit user action each time, not a read to memo.
@@ -120,7 +167,7 @@ export interface WaveformError {
 /** Stable prefix on the D-046 activity-guard refusal (`ActivityGuard::begin` in
  *  `lib.rs`) — `"busy: sync in progress"` / `"busy: cache maintenance in progress"`.
  *  Matched the same way `errors.ts` matches every other stable engine prefix (D-030). */
-const BUSY_PREFIX = "busy:";
+export const BUSY_PREFIX = "busy:";
 
 function rawMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);

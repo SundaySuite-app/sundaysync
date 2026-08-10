@@ -286,29 +286,142 @@ describe("background pre-analysis bookkeeping (D-062)", () => {
     const sources = toSources();
     let s = reducer(sources, { type: "prewarm/progress", completed: 1, total: 2 });
     expect(s.prewarmProgress).toEqual({ completed: 1, total: 2 });
-    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq });
+    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq, reason: "done" });
     expect(s.prewarmProgress).toBeNull();
   });
 
-  it("settling turns what is still pending into failed and leaves ready alone", () => {
+  it("a pass that FINISHED turns what is still pending into failed and leaves ready alone", () => {
     // React batches updates within one task, so the LAST file's `prewarm:file` can land
     // in the same batch as the promise resolving. Wiping the map here would erase that
     // file's `ready` before any component saw it — and the waveform it had just written
     // would never be read.
     const sources = toSources();
     let s = reducer(sources, { type: "prewarm/file", file: CAM, ok: true });
-    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq });
+    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq, reason: "done" });
     expect(s.prewarm).toEqual({ [CAM]: "ready", [WAV]: "failed" });
   });
 
   it("settling an already-settled pass is a no-op", () => {
     const sources = toSources();
     const seq = sources.scanSeq;
-    const s = reducer(reducer(sources, { type: "prewarm/settled", seq }), {
+    const s = reducer(reducer(sources, { type: "prewarm/settled", seq, reason: "done" }), {
       type: "prewarm/settled",
       seq,
+      reason: "done",
     });
-    expect(reducer(s, { type: "prewarm/settled", seq })).toBe(s);
+    expect(reducer(s, { type: "prewarm/settled", seq, reason: "done" })).toBe(s);
+  });
+
+  // ── V05-W1 (D-064): a cancelled pass is not a failed one ────────────────────────────
+  //
+  // The semantics of `prewarm/settled` genuinely changed here, and the old tests were
+  // updated rather than worked around: the action now carries WHY the pass ended, because
+  // "it finished and never got to these files" and "it was shoved aside before it could
+  // look" are different facts with different right answers, and the first build gave both
+  // the same one. It cost the owner a 386-file wedding wearing a rebuild button on every
+  // clip.
+
+  it("a CANCELLED pass deletes what was still pending instead of failing it", () => {
+    // Preempted by a sync, superseded by a newer drop, or refused the D-046 slot. It never
+    // formed an opinion about the files it had not reached — and neither has the app. An
+    // absent entry is "no opinion"; `failed` would be an invention, and the invention is
+    // what puts a rebuild control on a clip whose waveform is being built right now.
+    const sources = toSources();
+    let s = reducer(sources, { type: "prewarm/file", file: CAM, ok: true });
+    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq, reason: "cancelled" });
+    expect(s.prewarm).toEqual({ [CAM]: "ready" });
+    expect(WAV in s.prewarm).toBe(false);
+  });
+
+  it("a cancelled pass still leaves a file it genuinely could not decode failed", () => {
+    // `prewarm:file { ok: false }` is a verdict the pass DID reach. Cancelling what came
+    // after it does not retract it.
+    const sources = toSources();
+    let s = reducer(sources, { type: "prewarm/file", file: CAM, ok: false });
+    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq, reason: "cancelled" });
+    expect(s.prewarm).toEqual({ [CAM]: "failed" });
+  });
+
+  it("a settlement that arrives after Sync was pressed cannot touch the map at all", () => {
+    // The exact order of the owner's screenshot: `sync/start` marks every unanalysed file
+    // `pending` (the run is analysing them), and only THEN does the preempted pass's
+    // rejection come back. `sources` is the only phase a live pre-analysis belongs to —
+    // the same rule `prewarm/progress` follows, and for the same reason.
+    const sources = toSources();
+    const syncing = reducer(sources, { type: "sync/start" });
+    expect(syncing.prewarm).toEqual({ [CAM]: "pending", [WAV]: "pending" });
+
+    for (const reason of ["done", "cancelled"] as const) {
+      const after = reducer(syncing, { type: "prewarm/settled", seq: syncing.scanSeq, reason });
+      expect(after).toBe(syncing);
+    }
+  });
+});
+
+// ── V05-W1 (D-064): a sync IS the analysis ────────────────────────────────────────────
+//
+// `run_sync` extracts the analysis audio for every file in the run. While it runs, an
+// unanalysed file genuinely is being analysed — so `pending` is not a workaround for the
+// settled-storm above, it is the fact that makes the storm impossible: there is nothing
+// left for a dying prewarm to turn into a rebuild button. And when the run ends, the map
+// stops claiming anything at all, because the truth is now in the cache and every clip can
+// go and read it (`App.tsx` drops the store's memos on the same event).
+
+describe("the sync's own analysis (V05-W1)", () => {
+  it("sync/start marks every non-ready file pending, even when the map is empty", () => {
+    // Empty is the real case, not a contrived one: the pass was cancelled by this very
+    // Sync press, and cancelling deletes. Rebuilding from the manifest rather than from the
+    // old map is what makes the two orderings agree.
+    const sources = toSources();
+    const emptied = reducer(sources, {
+      type: "prewarm/settled",
+      seq: sources.scanSeq,
+      reason: "cancelled",
+    });
+    expect(emptied.prewarm).toEqual({});
+
+    expect(reducer(emptied, { type: "sync/start" }).prewarm).toEqual({
+      [CAM]: "pending",
+      [WAV]: "pending",
+    });
+  });
+
+  it("sync/start leaves an already-analysed file alone", () => {
+    // Its analysis is written; the run will find it there. Saying "pending" would put an
+    // «analyserer …» line over a waveform that is already drawn.
+    const sources = toSources();
+    const s = reducer(sources, { type: "prewarm/file", file: CAM, ok: true });
+    expect(reducer(s, { type: "sync/start" }).prewarm).toEqual({
+      [CAM]: "ready",
+      [WAV]: "pending",
+    });
+  });
+
+  it("sync/start does not claim to be analysing a file that was taken out of the run", () => {
+    const s = reducer(toSources(), { type: "files/exclude", file: CAM });
+    expect(reducer(s, { type: "sync/start" }).prewarm).toEqual({ [WAV]: "pending" });
+  });
+
+  it("sync/done stops claiming anything", () => {
+    // Left standing, every entry would keep a clip on «analyserer …» forever — the run that
+    // was doing the analysing is over.
+    const s = reducer(reducer(toSources(), { type: "sync/start" }), {
+      type: "sync/done",
+      outcome,
+    });
+    expect(s.prewarm).toEqual({});
+    expect(s.prewarmProgress).toBeNull();
+  });
+
+  it("a cancelled or failed run stops claiming anything either", () => {
+    // It wrote analysis for the files it got through and nothing for the rest. The only
+    // honest way to say that is to stop saying anything and let each clip read the cache.
+    const s = reducer(reducer(toSources(), { type: "sync/start" }), {
+      type: "sync/failed",
+      error: { kind: "notice", text: "avbrutt" },
+    });
+    expect(s.phase.name).toBe("sources");
+    expect(s.prewarm).toEqual({});
   });
 });
 
@@ -350,12 +463,14 @@ describe("a superseded pre-analysis pass (V04-U5)", () => {
 
     // NOW the first pass's promise finally resolves. Its sequence is stale, so it settles
     // nothing: these files are waiting on the second pass, which is still running.
-    const late = reducer(s, { type: "prewarm/settled", seq: first.scanSeq });
+    const late = reducer(s, { type: "prewarm/settled", seq: first.scanSeq, reason: "done" });
     expect(late).toBe(s);
     expect(late.prewarm).toEqual({ [CAM]: "pending", [WAV]: "pending" });
 
     // The pass that actually belongs to this drop still settles it.
-    expect(reducer(s, { type: "prewarm/settled", seq: s.scanSeq }).prewarm).toEqual({
+    expect(
+      reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason: "done" }).prewarm,
+    ).toEqual({
       [CAM]: "failed",
       [WAV]: "failed",
     });

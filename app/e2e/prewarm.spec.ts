@@ -63,6 +63,31 @@ function waveformMetaAlwaysCacheMissing(): unknown {
   return fn(`(args) => Promise.reject("cache_missing:" + args.file)`);
 }
 
+/** Empty until the run writes it (V05-W1, D-064): `cache_missing` for as long as
+ *  `__E2E_ANALYSIS_WRITTEN__` is unset, and a real pyramid afterwards. What a sync actually
+ *  does to a cold cache — it extracts the analysis audio for every file in the run — and
+ *  therefore the state a clip must be able to notice without being reloaded. */
+function waveformMetaWrittenByTheRun(): unknown {
+  return fn(`(args) => {
+    if (!window.__E2E_ANALYSIS_WRITTEN__) return Promise.reject("cache_missing:" + args.file);
+    return { totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} };
+  }`);
+}
+
+/** A barrier that guarantees any promise settlement already queued has been processed AND
+ *  React has rendered whatever it caused — two frames, no arbitrary timeout. Needed only
+ *  where the assertion is that something did NOT appear: `toHaveCount(0)` is true before a
+ *  regression has had a chance to happen, which is exactly how the storm below went
+ *  unnoticed by a suite that already covered this flow. */
+async function settleFrames(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+}
+
 function waveformLevelOk(): unknown {
   return fn(`(args) => {
     const levels = ${LEVELS_EXPR};
@@ -212,13 +237,93 @@ test.describe("it is fire-and-forget", () => {
     await waitForPending(page, "run_sync");
     await expect(page.locator(".progress__label")).toHaveText(en.syncing);
 
-    // Now the preempted pass unwinds, exactly as the engine makes it.
+    // ── THE regression (V05-W1, D-064) ──────────────────────────────────────────────
+    //
+    // This test existed and passed while the owner's 386-file wedding showed a «Bygg
+    // bølgeform på nytt» button on every single clip, because "silent" was only ever
+    // checked as "no banner". The pass is preempted; its promise REJECTS with the engine's
+    // cancellation; `.catch(() => {})` swallowed that and `.then(…)` still reported the
+    // pass as finished — so every file still pending was declared `failed`, and `failed`
+    // falls straight through to the cache-missing branch. A rebuild control on all 386,
+    // offering an action that could only earn a busy refusal, for work the sync in front of
+    // it was already doing.
+    //
+    // What the clips must say while the run analyses them is what is true: they are being
+    // analysed.
+    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toBeVisible();
+    await expect(clip(page, WAV).getByText(en.waveformAnalysing)).toBeVisible();
+    await expect(page.locator(".waveform__regenerate")).toHaveCount(0);
+
+    // Now the preempted pass unwinds, exactly as the engine makes it — and its dying words
+    // change nothing, because a cancelled pass has no verdict to hand down.
     await rejectControlled(page, "prewarm_analysis", "cancelled");
+    await settleFrames(page);
     await expect(page.locator(".banner")).toHaveCount(0);
+    await expect(page.locator(".waveform__regenerate")).toHaveCount(0);
+    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toBeVisible();
 
     await resolveControlled(page, "run_sync", syncOutcome());
     await waitForResult(page);
     await expect(page.locator(".banner")).toHaveCount(0);
+  });
+
+  test("a busy refusal mid-sync leaves the clips saying they are being analysed", async ({
+    page,
+  }) => {
+    // The other shape of the same ending: the operator presses Sync in the window between
+    // the scan landing and the prewarm effect firing, so `prewarm_analysis` never runs at
+    // all — the D-046 guard refuses it outright. Nothing was pre-analysed and nothing
+    // failed; the sync is doing the work. A refusal is not a verdict either.
+    await reachSources(page, {
+      prewarm_analysis: fn(`(args) => Promise.reject("busy: sync in progress")`),
+      run_sync: controlled("run_sync"),
+      waveform_meta: waveformMetaAlwaysCacheMissing(),
+      waveform_level: waveformLevelOk(),
+    });
+
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForPending(page, "run_sync");
+    await settleFrames(page);
+
+    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toBeVisible();
+    await expect(page.locator(".waveform__regenerate")).toHaveCount(0);
+  });
+});
+
+test.describe("the run is the analysis, and the clips read it when it lands", () => {
+  test("the waveforms the sync built appear without a reload", async ({ page }) => {
+    // The owner's second sentence: "even after the sync finished, no waveforms appeared."
+    // Not a separate feature — the same bug's tail. The prewarm map was never cleared and
+    // `WaveformCanvas`'s only re-read trigger was `pending → ready`, so every clip went on
+    // replaying the `cache_missing` rejection it had cached before the run — the run that
+    // had just written the very entries it was rejecting for.
+    await reachSources(page, {
+      ...prewarmHeld(),
+      run_sync: controlled("run_sync"),
+      waveform_meta: waveformMetaWrittenByTheRun(),
+      waveform_level: waveformLevelOk(),
+    });
+    await waitForPending(page, "prewarm_analysis");
+    // Cold cache: nothing to draw, and the clip says so in the only way that is true while
+    // a pass is on it.
+    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toBeVisible();
+
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForPending(page, "run_sync");
+    await rejectControlled(page, "prewarm_analysis", "cancelled");
+
+    // The run does what a run does: it extracts every file's analysis into the cache.
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__E2E_ANALYSIS_WRITTEN__ = true;
+    });
+    await resolveControlled(page, "run_sync", syncOutcome());
+    await waitForResult(page);
+
+    // And every clip goes back and looks, exactly once. No reload, no re-sync, nothing to
+    // press.
+    await expect(clip(page, CAM_A).locator(".clip__waveform canvas")).toBeVisible();
+    await expect(page.locator(".waveform__regenerate")).toHaveCount(0);
+    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toHaveCount(0);
   });
 });
 

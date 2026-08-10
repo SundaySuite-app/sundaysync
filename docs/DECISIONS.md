@@ -2556,6 +2556,204 @@ Verified and deliberately **not** changed:
   the frontend no longer creates, and the failure mode if the cancel loses the race is
   unchanged from today: one drop without background analysis, which the sync then does itself.
 
+## D-064 — V05-W1: a cancelled pre-analysis is not a failed one, and a sync IS the analysis
+
+**The report, verbatim:** a 386-file wedding, mid-sync. Every clip on the timeline showed
+its filename *and* a «Bygg bølgeform på nytt» button, drawn on top of each other inside a
+three-pixel box. And when the sync finished, no waveforms appeared at all.
+
+Two defects, one cause each, and this decision is the first: 386 clips offering to rebuild
+an analysis that the sync in front of them was rebuilding at that very moment. D-065 is the
+second half — why the box was illegible — and neither fix is sufficient alone.
+
+### The chain
+
+Every link was correct on its own, and the suite covered all of them.
+
+1. `scan/done` seeds every scanned file `pending` (D-062) and `App.tsx` fires
+   `prewarm_analysis`.
+2. The operator presses Sync. `run_sync` **preempts** the running prewarm — D-059's whole
+   point, working exactly as designed — so `prewarm_analysis` returns `cancelled` and the
+   JS promise rejects.
+3. `App.tsx` swallowed that rejection with `.catch(() => {})` and then dispatched
+   `prewarm/settled` from a `.then(…)` regardless. The one piece of information the reducer
+   needed was thrown away one line before it was asked for.
+4. `prewarm/settled` rewrote **every remaining `pending` entry to `failed`** — the right
+   answer for a pass that finished, applied to a pass that had been shoved aside.
+5. `failed` is not `pending`, so `WaveformCanvas`'s «Analyserer …» gate stopped matching and
+   the file fell through to the cache-missing branch: a rebuild control, on all 386 clips,
+   for an action that could only have earned the D-046 busy refusal.
+
+### A cancelled pass has no verdict to hand down
+
+`prewarm/settled` now carries a **reason**.
+
+- **`done`** — the pass ran to its own end, or broke. Nothing more is coming for the files
+  it never wrote, and `pending → failed` is right: the regenerate control is the correct
+  offer.
+- **`cancelled`** — preempted by a sync, superseded by a newer drop, or refused the activity
+  slot (`busy:`). Those entries are **deleted**, not failed. The pass never formed an
+  opinion about the files it had not reached, and neither has the app; an absent entry means
+  "no opinion", which is the only true thing to say. Inventing `failed` is exactly what
+  §7.5 forbids, and this is what an invention costs.
+
+The reason is classified through the prefixes the app already depends on — `errors.ts`'s
+`cancelled → notice` mapping (D-030) and `waveformStore.ts`'s `BUSY_PREFIX` (D-046) — never
+a fresh string match. The rejection is still never shown to anyone: a prewarm is an
+optimisation and none of the ways it can end is worth a word on screen. It is now *read*
+before it is discarded.
+
+### A sync IS the analysis, so the clips may say so
+
+`sync/start` marks **every non-`ready` file `pending`**.
+
+This is not a guard bolted on to make the storm unreachable. It is a fact the app was
+failing to state: `run_sync` extracts the analysis audio for every file in the run, so
+during `syncing` an unanalysed file genuinely is being analysed. The existing `pending`
+branch then shows «Analyserer …» — a status, not a button — which is both true and the
+thing the operator wanted to see. That the storm becomes impossible by construction is a
+consequence of saying something true, not the reason for saying it.
+
+Built from the manifest rather than from the old map, because by then the map may be empty:
+the cancelled pass that this very Sync press preempted deleted its own pending entries.
+`ready` is the one status that survives — that file's analysis is already written and the
+run will find it there.
+
+`waveform_meta` is deliberately **not** guarded against a running sync. It is a read, and
+D-046 exempts reads so the timeline and playback keep working while the engine runs; a
+guard there would have "fixed" the storm by making every clip unreadable instead.
+
+### The tail: nothing ever looked again
+
+The missing waveforms were the same bug's other end. The `failed` map was never cleared —
+`sync/done` and `sync/failed` left it standing — and `WaveformCanvas`'s re-read effect was
+narrowed to `pending → ready`. So after the run there was no trigger at all: every clip
+replayed the `cache_missing` rejection it had cached *before* the run, for entries the run
+had just written.
+
+`sync/done` and `sync/failed` now clear the map to `{}`, and `App.tsx` calls a new
+`waveformStore.invalidateAll()` on the same event. The map going empty says "the app is not
+claiming anything about these files"; the invalidation drops every memo. Every canvas then
+re-reads once and shows what is true — a waveform where the cache has one, the rebuild
+control where it does not — and a second sync starts from a clean map.
+
+### The epoch, and why it is a class of bug rather than an instance
+
+Dropping a memo and making a mounted component go back and look are two halves of one job,
+and only the first half had a wire. `waveformStore` gains an **epoch**: `invalidateAll()`
+bumps a module counter published through `subscribe`/`getSnapshot`, `WaveformCanvas` reads
+it with `useSyncExternalStore` (the shape `timeline/playhead.ts` already establishes) and
+includes it in its read's dependencies. One render per mounted clip per invalidation, none
+anywhere else.
+
+This kills "a component holds a stale rejection forever" generally, not just here. It is the
+same seam D-062's `pending → ready` re-read addressed for one specific transition, and the
+same one `waveform.spec.ts`'s zoom-bucket recovery (finding 7) addressed for another: three
+narrow triggers, each added after a bug, each covering one route back to a read. The epoch
+is the route that does not need to be anticipated.
+
+### The tests, and the two that had to change
+
+`state.test.ts`'s prewarm cases were **updated, not bent**: the action's semantics genuinely
+changed, the old expectation ("settling fails everything still pending") is now correct only
+for `reason: "done"`, and the new cases assert the cancelled deletion, the `sync/start`
+re-pend from an empty map, and the `sync/done`/`sync/failed` clear.
+
+`prewarm.spec.ts`'s "pressing Sync mid-pass is silent" test **existed and passed** while the
+owner's screen was covered in rebuild buttons: it only ever checked that no banner appeared.
+It now asserts what the clips actually show — zero `.waveform__regenerate` anywhere, and the
+analysing status on the clips — and a new test proves the waveforms the run built appear
+without a reload. Both fail on the code this decision replaces.
+
+Two e2e fixtures were migrated with the same reasoning: `waveform_meta` fixtures that
+rejected "the first call per file" were standing in for a *cause* with a *count*, and the
+post-sync re-read is now a second legitimate reason to read — which silently consumed the
+rejection a test about the rebuild button needed to see. They are keyed on the cause now
+(the file has been rebuilt; the IO blip has passed), which is both stable and truer.
+
+## D-065 — V05-W1: a clip shows what fits, and the layout makes overlap impossible
+
+The other half of the owner's screenshot. Two independent mistakes stacked, and fixing
+either alone still leaves an unreadable clip.
+
+### (a) Two children, one box, no relationship
+
+`.clip__waveform` was `position: absolute; inset: 0` with its contents flex-centred, and
+`.clip__name` was a normal-flow sibling carrying an inline `transform: translateX(…)`. They
+were positioned independently over the same box and therefore drawn on top of each other at
+*every* width — the status children even carried `z-index: 1` while the name carried none,
+so the filename lost every time. That is not a small-clip bug that a threshold could have
+prevented; it is a missing relationship.
+
+The clip is now two layers:
+
+- `.clip__waveform` — the canvas's containing block, under everything. The canvas places
+  itself in absolute pixels from `barGeometry`, so it cannot be a flex item; keeping the
+  slot as its offsetParent leaves `leftCssPx` meaning exactly what it meant before.
+- `.clip__chrome` — one flex row over it: the name (`flex: 1 1 auto; min-width: 0;
+  text-overflow: ellipsis`) and the status (`flex: 0 0 auto`), with a 4 px gap. A row cannot
+  overlap itself.
+
+The row is `pointer-events: none`, so the clip's own click target is never eaten; only a
+child that is genuinely a control takes its pointer events back. The label-slide that used
+to be a `translateX` on the name is `padding-left` on the row — it shrinks the row from the
+left, where a transform slid one child *across* its sibling. And the per-child `z-index`
+arguments are gone: stacking is a property of the two layers now, not something each child
+has to win separately.
+
+`WaveformCanvas` keeps its identity and its position in the tree through all of this — the
+pre-sync → syncing → result continuity D-061 promises, and `presync-timeline.spec.ts`'s
+mount-tag test, both hold. What moved is where the status is *rendered*: it is described by
+the waveform's own state and laid out by `Clip`, because the name and the status compete for
+the same pixels and neither can be sized by a component that can only see one of them.
+
+### (b) A width rule, in its own pure module
+
+`timeline/clipChrome.ts`, in the style of `geometry.ts`/`hop.ts`:
+
+```
+clipChrome(widthPx, "none" | "control" | "info")
+  → { name: "none" | "ellipsis"; status: "none" | "icon" | "text" }
+```
+
+with `NAME_MIN_PX = 30`, `STATUS_ICON_MIN_PX = 22`, `STATUS_TEXT_MIN_PX = 150`,
+`NAME_PLUS_STATUS_GAP_PX = 8`, and the two composites they add up to —
+`NAME_AND_ICON_MIN_PX = 60` and `NAME_AND_TEXT_MIN_PX = 188` — named rather than written
+out as constants, so the arithmetic is checkable instead of magic.
+
+- **control** (rebuild / busy-retry): the operator has to be able to act, so it is the last
+  thing to go. Icon from 22 px, the name joins it at 60 px, the full sentence at 188 px.
+  Between 22 and 60 the name would technically fit on its own — a button nobody can press is
+  worth less than a name nobody asked for.
+- **info** (analysing / unavailable): nothing to press, so nothing to insist on. The
+  sentence at 188 px and otherwise nothing at all; the name keeps its own 30 px floor
+  untouched. **An informational string must never cost the filename** — a row of clips is
+  scanned for names.
+- **none**: the name from 30 px, nothing below it.
+
+Below the box's ability to say it, the sentence moves to the slot's `title`, beside the
+filename, so a hover still tells the truth. `MIN_CLIP_WIDTH_PX` (3 px, `hop.ts`) is
+untouched: a sliver stays a coloured tick, which is a true and useful thing for a clip to
+be. It simply carries no text, because three pixels of text is not text.
+
+### Only pixels are rationed
+
+The icon form keeps `role="button"`, its `tabIndex`, the **whole localized string** as its
+`aria-label` and the engine's own detail in its `title`. A screen reader hears no difference
+between a 22 px clip and a 400 px one; the clip's own `aria-label` still names the file and
+its offset either way. `CLIP_HEIGHT_PX` (27 px) remains the vertical budget and the row
+never wraps to a second line.
+
+The thresholds are unit-tested from **both** sides — a width rule whose boundaries are only
+tested from the roomy side has never been asked the question it exists for, and the question
+that mattered was asked at three pixels. One e2e assertion holds the layout itself: the
+name's box and the control's box are disjoint, in order, and inside the clip.
+
+One spec was migrated: `timeline.spec.ts`'s unknown-duration test addressed its 3 px sliver
+by its text, which a 3 px sliver no longer has. It addresses it by `data-file` now and goes
+on asserting what that clip says — in `aria-label` and `title`, which is where it always
+said it.
+
 ## D-069 — V05-W4a: the preview is one JPEG over binary IPC, and its seek shape is measured
 
 **The ask:** the owner wants to *see* the clip he is about to mark, not only its waveform.

@@ -571,19 +571,58 @@ select:hover, input:hover { border-color: var(--accent-border); }
   color: var(--orange);
   min-width: 3px;
 }
-.clip__name { position: relative; display: inline-block; white-space: nowrap; }
+/* ── The clip's chrome row (V05-W1, D-065) ───────────────────────────────────
+   The name and whatever the waveform has to say are SIBLINGS in one flex row, not two
+   absolutely-placed children hoping not to meet. They met: a 386-file wedding drew every
+   filename and a «Bygg bølgeform på nytt» button on top of each other inside a 3 px box.
+   A row cannot overlap itself.
+
+   `pointer-events: none` on the row, restored only on a child that is genuinely a control
+   (`.waveform__regenerate`): this layer covers the whole clip, which is itself a button,
+   and anything clickable here that is not meant to be pressed would eat the clip's own
+   click. `padding-left` carries the label-slide (Clip.tsx) — it shrinks the row from the
+   left, where a `transform` used to slide one child across another. */
+.clip__chrome {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* Takes the space the status does not, and ellipsises inside it — never pushes the status
+   out of the box, never wraps to a second line (`.clip` is 27 px tall and has one). */
+.clip__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Whatever the status is, it is measured and placed by `clipChrome()`, and it never shrinks
+   below its own content — the width rule already decided it fits. */
+.clip__status { flex: 0 0 auto; }
+/* The icon form: the same control, rationed to a glyph. `aria-label` carries the whole
+   sentence, so this is a change of pixels only. */
+.clip__status--icon {
+  padding: 0 0.2rem;
+  min-width: 18px;
+  text-align: center;
+}
 /* The clip the playhead is standing in (`aria-current="time"`). A left edge rather than a
    full outline: at a wide zoom every clip is adjacent to the next, and a box around one of
    them reads as a selection the app does not have. */
 .clip[aria-current] { box-shadow: inset 2px 0 0 var(--accent); }
-/* Sized here so the clip box does not reflow when the S4 waveform canvas, or its
-   regenerate/status affordance, arrives. */
+/* The waveform LAYER: the canvas's containing block, under the chrome row. Sized here so
+   the clip box does not reflow when the S4 canvas arrives, and no longer a flex centring
+   context — since D-065 nothing but the canvas lives in it, and the canvas places itself
+   in absolute pixels from `barGeometry`. */
 .clip__waveform {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  z-index: 0;
   overflow: hidden;
 }
 .clip:hover { filter: brightness(1.1); }
@@ -638,9 +677,13 @@ select:hover, input:hover { border-color: var(--accent-border); }
   display: block;
   pointer-events: none;
 }
+/* The one thing in `.clip__chrome` that IS meant to be pressed, so the one thing that takes
+   its pointer events back (D-065). Its own `z-index` is gone: it is a flex item in a layer
+   that already sits above the canvas, and the stacking that used to be argued child by
+   child — with the filename, which had none, losing every time — is now a property of the
+   two layers. */
 .waveform__regenerate {
-  position: relative;
-  z-index: 1;
+  pointer-events: auto;
   padding: 0 0.4rem;
   line-height: 1.6;
   font-size: 0.65rem;
@@ -657,29 +700,23 @@ select:hover, input:hover { border-color: var(--accent-border); }
 .waveform__regenerate:hover:not([aria-disabled="true"]) { background: rgba(4, 18, 10, 0.22); }
 .waveform__regenerate[aria-disabled="true"] { opacity: 0.65; cursor: default; }
 .waveform__regenerate:focus-visible { outline: 2px solid var(--accent2); outline-offset: 1px; }
-/* The `other` error state. Deliberately not a control and deliberately click-through:
-   `.clip__waveform` is centred over the whole clip, so anything clickable here would eat
-   the clip's own click. See WaveformCanvas.tsx (finding 7 / D-056). */
+/* The `other` error state. Deliberately not a control, and click-through by inheritance
+   from `.clip__chrome` — it stands over the clip's own click target, and anything
+   clickable there that is not meant to be pressed would eat that click. See
+   WaveformCanvas.tsx (finding 7 / D-056). */
 .waveform__status {
-  position: relative;
-  z-index: 1;
   font-size: 0.65rem;
   opacity: 0.75;
   white-space: nowrap;
-  pointer-events: none;
 }
-/* v0.4 (D-062): the background pass is decoding this very file. Click-through like the
-   status line above, and for the same reason — it stands where the clip's own click
-   target is, and it is not a control: there is nothing to press, only something to
-   wait a moment for. */
+/* v0.4 (D-062): the background pass — or, since D-064, the sync itself — is analysing this
+   very file. Not a control: there is nothing to press, only something to wait a moment
+   for. */
 .waveform__analysing {
-  position: relative;
-  z-index: 1;
   font-size: 0.65rem;
   opacity: 0.6;
   font-style: italic;
   white-space: nowrap;
-  pointer-events: none;
 }
 
 /* ── Unsynced shelf ─────────────────────────────────────────────── */
