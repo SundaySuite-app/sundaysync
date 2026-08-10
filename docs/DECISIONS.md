@@ -2754,6 +2754,106 @@ by its text, which a 3 px sliver no longer has. It addresses it by `data-file` n
 on asserting what that clip says — in `aria-label` and `title`, which is where it always
 said it.
 
+## D-066 — V05-W2: DJI proxies and photographs are skipped before the probe, and counted out loud
+
+**V05-W2.** Measured on the owner's real 386-file wedding, read-only. Two things the scanner
+was doing wrong, and one thing it had been getting away with.
+
+### (a) `.lrf` is `.lrv` under DJI's spelling
+
+`01_FILM/DRONE/` holds **8 `.LRF` files**. Five sit 1:1 beside their originals —
+`DJI_0075.LRF` at 123 MB next to `DJI_0075.MP4` at 817 MB — and three (`DJI_0080–0082.LRF`)
+are orphans whose MP4s are not in the folder at all. `.LRF` is DJI's low-resolution proxy:
+the same object as the `.LRV` that D-045 already skips, carrying the same audio as its
+original. `lrv` was in `SIDECAR_EXTENSIONS`; `lrf` was not, so all eight were ingested as
+real footage and handed to §4.4's device-overlap eviction — a fight nobody started, exactly
+D-045's and D-009's failure, in a new spelling. The constant is now eight members.
+
+The orphans are the worse half. A paired proxy at least loses the eviction to its original;
+an orphan has no original to lose to, so it can win a lane and put a 123 MB preview on the
+timeline where the operator expects the real clip.
+
+Behaviour otherwise unchanged, and deliberately so: an **explicitly passed** `.LRF` is still
+honoured, exactly as for every other sidecar since D-045. Only the recursive walk classifies
+— the walk guesses, the operator does not.
+
+### (b) Stills are a separate constant, because the argument is a different argument
+
+`STILL_IMAGE_EXTENSIONS` is its own list with its own doc comment rather than eighteen more
+members of `SIDECAR_EXTENSIONS`, and the split is the point. A sidecar is a **duplicate by
+construction**: its content is already in the run under another name, which is what makes
+dropping it safe. A still is not a duplicate of anything, and nothing is wrong with it — it
+is simply **not correlatable media**. There is no audio to match on, so no future engine
+improvement will ever place it. Merged into one list, the next person to extend it would
+extend it on whichever argument they happened to read, and the two do not generalise to each
+other.
+
+`01_FILM/STEINAR/IMG_4164.HEIC` is what made it concrete: it was probed, came back with no
+audio stream, and landed on the red unsynced shelf — which reads to an operator as *an error
+about a photograph*. The skip is therefore made on the name, **before the probe**: on a card
+of raws, probing to learn what the extension already said costs one ffprobe per file to
+produce a shelf full of `decode_error`, which is noise dressed as an error. Same
+explicit-pass exemption as the sidecars.
+
+Members: `heic heif jpg jpeg png dng cr2 cr3 nef arw raf orf rw2 tif tiff webp bmp gif` — the
+still formats that actually turn up beside video on a card, including the raw formats of the
+manufacturers whose cameras shot the video in the same folder. Both lists match
+case-insensitively: the drone writes `.LRF`, macOS writes `.heic`.
+
+### (c) The honesty counter, which is the part that matters
+
+Sidecar skips have been invisible since D-045, and that was defensible for exactly one
+reason: a `.lrv`'s original is sitting right there in the list, so nothing appears to have
+gone missing. **A `.HEIC` has no sibling.** Skipping it silently means files the operator can
+see on the card do not appear in the app, and there is nothing on screen that says why —
+which is the same class of failure as the silent truncation §7.3 exists to forbid.
+
+So `ScanManifest` gained `skipped: Vec<SkippedFile>`, with `SkippedFile { file, reason }` and
+`SkipReason::{Sidecar, StillImage}` (`"sidecar"` | `"still_image"`), and the sources panel
+renders **one quiet line** — nb «11 følgefiler og 1 stillbilde ble hoppet over» — with a
+`<details>` listing the files, the same disclosure the problem group and the removed group
+already use.
+
+Deliberately **not** the red unsynced shelf: nothing here failed, and a skipped file on the
+shelf is the app inventing a problem. Deliberately **not** the timeline note either: that
+one is about time. And deliberately absent when the list is empty — a permanent "0 files were
+skipped" is a line the operator must read past on every clean drop.
+
+Hidden dotfiles are *not* counted. `.DS_Store` and the AppleDouble `._*` companions are not
+the operator's files; listing them would be noise wearing honesty's clothes.
+
+### `SCHEMA_VERSION` does **not** move, and here is why
+
+`skipped` is `#[serde(default)]`, which makes it **additive in both directions**:
+
+- **Old manifest, new reader:** JSON written before D-066 has no `skipped` key and
+  deserialises to an empty list rather than failing. Pinned by
+  `a_manifest_written_before_the_skip_list_existed_still_deserialises`.
+- **New manifest, old reader:** serde ignores unknown fields by default (nothing here uses
+  `deny_unknown_fields`), so an older consumer of the `scan` JSON reads the manifest exactly
+  as it did before and simply does not see the new list.
+
+Neither direction breaks, so nothing that reads schema v1 is invalidated — which is the only
+thing `SCHEMA_VERSION` is for. It is also worth being precise about *which* contract this
+is: `SCHEMA_VERSION` lives in `result.rs` and §5 defines it over `SyncResult`. `ScanManifest`
+borrows the number so the two outputs agree, but nothing in §5's frozen shapes changed here.
+A skipped file was never in the run: it has no placement, no device and no §7.3 accounting,
+which is precisely why the list hangs off the *scan* manifest and not off `SyncResult`.
+
+The bump would come the day the field stops being additive — if `skipped` ever became
+required, or a reason were renamed, or a skipped file started appearing in `unsynced` too.
+The two serde tests (`skip_reasons_serialise_as_the_ui_spells_them`, and the older-manifest
+test above) are what make that day loud rather than silent.
+
+### One consequence worth naming
+
+The S-8 file ceiling now counts skipped entries as well as candidates. It exists to bound
+memory, and a skipped file costs the same `PathBuf` a candidate does; a card that is 99 %
+proxies is still a card the walk must not enumerate unboundedly. A *directory* whose name
+happens to end in a skipped extension is passed over unreported and undescended, exactly as
+before — the classes are about files, and a folder called `PHOTOS.HEIC` is not a photograph
+anyone lost.
+
 ## D-069 — V05-W4a: the preview is one JPEG over binary IPC, and its seek shape is measured
 
 **The ask:** the owner wants to *see* the clip he is about to mark, not only its waveform.

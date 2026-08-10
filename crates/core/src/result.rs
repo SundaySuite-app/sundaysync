@@ -122,6 +122,40 @@ pub enum UnsyncedReason {
     DeviceOverlap,
 }
 
+/// One file the scan deliberately never probed.
+///
+/// Not an [`Unsynced`], and the distinction is the whole point: an `Unsynced` file was
+/// *tried* and could not be used, so it belongs on the red shelf. A `SkippedFile` was
+/// never a candidate — nothing went wrong, and reporting it as a failure would invent a
+/// problem out of a camera doing exactly what cameras do (D-066).
+///
+/// It lives beside [`Unsynced`] rather than in `scan.rs` for the same reason `Unsynced`
+/// does: both are shapes the UI has to render, and one module owning every wire type the
+/// UI reads is what keeps the hand-written TS mirror in `app/src/types.ts` in one place.
+/// It is **not** part of §5's `SyncResult` — a skipped file was never in the run, so it
+/// has nothing to say about the timeline, and adding it there would put it inside the
+/// §7.3 accounting that only covers files the engine actually handled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedFile {
+    pub file: PathBuf,
+    pub reason: SkipReason,
+}
+
+/// Why the scan walked past a file (D-066).
+///
+/// Two members, not one, because the justifications do not generalise to each other and
+/// the operator reads them differently — see the two constants in `scan.rs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipReason {
+    /// A camera's own companion to a sibling recording — a low-resolution proxy or an
+    /// index file. A duplicate by construction (`scan::SIDECAR_EXTENSIONS`).
+    Sidecar,
+    /// A photograph. Real media, simply not correlatable: there is no audio to match on
+    /// (`scan::STILL_IMAGE_EXTENSIONS`).
+    StillImage,
+}
+
 /// A non-fatal finding, attached either to one placement or to the run as a whole.
 ///
 /// Modelled as a typed enum rather than free text so the UI can localise it (nb + en,
@@ -286,6 +320,16 @@ mod tests {
             json,
             r#"{"code":"metadata_mismatch","delta_seconds":720.0}"#
         );
+    }
+
+    #[test]
+    fn skip_reasons_serialise_as_the_ui_spells_them() {
+        // D-066: `app/src/types.ts` mirrors these two strings by hand, and the sources
+        // panel switches on them — the same contract `unsynced_reasons_match_the_plan_
+        // spelling` below pins for the red shelf.
+        let as_str = |r: SkipReason| serde_json::to_string(&r).unwrap();
+        assert_eq!(as_str(SkipReason::Sidecar), "\"sidecar\"");
+        assert_eq!(as_str(SkipReason::StillImage), "\"still_image\"");
     }
 
     #[test]

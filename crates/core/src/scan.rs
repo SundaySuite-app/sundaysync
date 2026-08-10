@@ -9,7 +9,9 @@ use crate::error::{Error, Result};
 use crate::extract;
 use crate::probe::{self, AudioStream, Probed, VideoStream};
 use crate::progress::{CancelToken, Progress, ProgressSink, Stage};
-use crate::result::{Device, DeviceKind, Unsynced, UnsyncedReason, SCHEMA_VERSION};
+use crate::result::{
+    Device, DeviceKind, SkipReason, SkippedFile, Unsynced, UnsyncedReason, SCHEMA_VERSION,
+};
 use crate::sidecar::Sidecar;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -30,7 +32,9 @@ const SCAN_PROGRESS_STRIDE: usize = 128;
 const MAX_DEPTH: usize = 32;
 
 /// Total files a single scan will enumerate before it refuses to continue (S-8,
-/// docs/DECISIONS.md D-032).
+/// docs/DECISIONS.md D-032). Counts *every* entry the walk takes a `PathBuf` for —
+/// candidates and D-066 skips alike — because both are held in memory and the ceiling
+/// exists to bound memory, not to bless a card that happens to be 99 % proxies.
 ///
 /// A real multi-camera church service is dozens of clips; a walk that reaches six figures
 /// is a mis-drop — a home directory, a whole disk — not a shoot. Enumerating millions of
@@ -51,6 +55,16 @@ pub struct ScanManifest {
     /// Files that cannot be synced, each with a §5 reason. Reuses the `SyncResult` type
     /// so the reasons the UI must render are identical in both outputs.
     pub unsynced: Vec<Unsynced>,
+    /// Files the walk deliberately did not probe, each with a reason (D-066).
+    ///
+    /// Sorted by path, like every other list here. Kept apart from `unsynced` because
+    /// nothing is wrong with these files — see [`SkippedFile`].
+    ///
+    /// `#[serde(default)]` makes this an **additive** field: a manifest written before
+    /// D-066 still deserialises, so `SCHEMA_VERSION` does not move. See D-066 for the
+    /// full reasoning.
+    #[serde(default)]
+    pub skipped: Vec<SkippedFile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -127,7 +141,7 @@ fn scan_detailed_workers(
         total: inputs.len(),
     });
 
-    let (candidates, missing) = collect(inputs, exclude, progress, cancel)?;
+    let (candidates, missing, skipped) = collect(inputs, exclude, progress, cancel)?;
 
     let mut probed: Vec<Probed> = Vec::new();
     let mut unsynced: Vec<Unsynced> = missing;
@@ -200,6 +214,7 @@ fn scan_detailed_workers(
             devices,
             files,
             unsynced,
+            skipped,
         },
         probed_out,
     ))
@@ -401,18 +416,38 @@ fn probe_candidates(
         .collect()
 }
 
+/// What one walk produced: the files worth probing, and the ones it walked past.
+///
+/// Carried as a struct rather than two `&mut Vec` parameters so the recursion signature
+/// stays readable and the two lists cannot be handed to `walk_capped` the wrong way round.
+#[derive(Debug, Default)]
+struct Walked {
+    files: Vec<PathBuf>,
+    /// D-066: files the walk classified and never probed. Not failures — see
+    /// [`SkippedFile`].
+    skipped: Vec<SkippedFile>,
+}
+
+impl Walked {
+    /// Everything the walk is holding a `PathBuf` for. What the S-8 ceiling bounds.
+    fn enumerated(&self) -> usize {
+        self.files.len() + self.skipped.len()
+    }
+}
+
 /// Expands the inputs into a deduplicated, sorted candidate list.
 ///
-/// Returns the candidates plus `unsynced` entries for inputs that do not exist at all —
-/// a mistyped path must be visible in the output rather than silently dropped, or §7.3's
-/// "every input is accounted for" would quietly not hold.
+/// Returns the candidates, `unsynced` entries for inputs that do not exist at all — a
+/// mistyped path must be visible in the output rather than silently dropped, or §7.3's
+/// "every input is accounted for" would quietly not hold — and the D-066 skips the walk
+/// classified on the way past.
 fn collect(
     inputs: &[PathBuf],
     exclude: Option<&Path>,
     progress: &dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<(Vec<PathBuf>, Vec<Unsynced>)> {
-    let mut files = Vec::new();
+) -> Result<(Vec<PathBuf>, Vec<Unsynced>, Vec<SkippedFile>)> {
+    let mut walked = Walked::default();
     let mut missing = Vec::new();
     // Resolved once, here, rather than per directory inside the walk.
     let exclude = Exclusion::new(exclude);
@@ -422,9 +457,12 @@ fn collect(
             return Err(Error::Cancelled);
         }
         if input.is_dir() {
-            walk(input, 0, &exclude, &mut files, progress, cancel)?;
+            walk(input, 0, &exclude, &mut walked, progress, cancel)?;
         } else if input.is_file() {
-            files.push(input.clone());
+            // D-066/D-045: an explicitly passed file is never second-guessed — not for a
+            // `.lrv`, not for a `.LRF`, not for a `.HEIC`. Only the recursive walk
+            // classifies, exactly as it is only the walk that hides dotfiles.
+            walked.files.push(input.clone());
         } else {
             missing.push(Unsynced {
                 file: input.clone(),
@@ -433,12 +471,20 @@ fn collect(
         }
     }
 
+    let Walked {
+        mut files,
+        mut skipped,
+    } = walked;
     // Sorting before dedup gives a total order independent of directory iteration
     // order, which is not stable across filesystems (§3). Dedup catches a user who
     // dropped both a folder and a file inside it.
     files.sort();
     files.dedup();
-    Ok((files, missing))
+    // The same total order for the skip list, for the same reason: §13.4 demands
+    // byte-identical JSON from identical inputs, and this list is now in that JSON.
+    skipped.sort_by(|a, b| a.file.cmp(&b.file));
+    skipped.dedup_by(|a, b| a.file == b.file);
+    Ok((files, missing, skipped))
 }
 
 /// The directory the walk must not descend into (D-020), resolved once.
@@ -486,7 +532,7 @@ fn walk(
     dir: &Path,
     depth: usize,
     exclude: &Exclusion,
-    out: &mut Vec<PathBuf>,
+    out: &mut Walked,
     progress: &dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<()> {
@@ -499,7 +545,7 @@ fn walk_capped(
     dir: &Path,
     depth: usize,
     exclude: &Exclusion,
-    out: &mut Vec<PathBuf>,
+    out: &mut Walked,
     progress: &dyn ProgressSink,
     cancel: &CancelToken,
     max_files: usize,
@@ -530,18 +576,22 @@ fn walk_capped(
         }
         // S-8: refuse a pathological width/total rather than enumerating unboundedly.
         // Checked before the push so `out` never exceeds the ceiling.
-        if out.len() >= max_files {
+        if out.enumerated() >= max_files {
             return Err(Error::TooManyFiles { limit: max_files });
         }
-        // Both skip tests read the file NAME alone, so they are made before `entry.path()`
-        // builds the full path: on a camera card the AppleDouble `._*` companions macOS
-        // scatters everywhere can be half the entries, and none of them needs a joined
-        // `PathBuf` allocated just to be thrown away.
+        // The dotfile test reads the file NAME alone, so it is made before `entry.path()`
+        // builds the full path and before any syscall: on a camera card the AppleDouble
+        // `._*` companions macOS scatters everywhere can be half the entries, and none of
+        // them needs a joined `PathBuf` allocated just to be thrown away.
         let name = entry.file_name();
         let name = Path::new(&name);
-        if is_hidden(name) || is_proxy_sidecar(name) {
+        if is_hidden(name) {
             continue;
         }
+        // D-066's classes are decided on the name too, but the answer is only *acted on*
+        // below, once the entry's kind is known: a skip has to be reported, and a
+        // directory that happens to end in `.lrv` is not a file the operator lost.
+        let skip = skip_reason(name);
         // `DirEntry::file_type` does not follow links, so a symlink loop cannot trap the
         // walk — a symlink is neither `is_dir` nor `is_file` here and is therefore skipped
         // outright. Linked-in media is rare enough that ignoring links is the safe default.
@@ -553,21 +603,32 @@ fn walk_capped(
         let Ok(kind) = entry.file_type() else {
             continue;
         };
+        if let Some(reason) = skip {
+            // Only a real file is worth a line in the manifest. A *directory* so named is
+            // passed over unreported and undescended, exactly as it was before D-066.
+            if kind.is_file() {
+                out.skipped.push(SkippedFile {
+                    file: entry.path(),
+                    reason,
+                });
+            }
+            continue;
+        }
         if kind.is_dir() {
             let path = entry.path();
             walk_capped(&path, depth + 1, exclude, out, progress, cancel, max_files)?;
         } else if kind.is_file() {
             let path = entry.path();
-            out.push(path);
+            out.files.push(path);
             // P-5: emit a live running count so a large tree no longer sits at "0/1" for
             // the whole walk. The total is unknown mid-walk, so `completed == total` is a
             // rising indeterminate count (docs/DECISIONS.md P-5 note). Throttled by
             // `SCAN_PROGRESS_STRIDE` so a huge directory does not flood the sink.
-            if out.len().is_multiple_of(SCAN_PROGRESS_STRIDE) {
+            if out.files.len().is_multiple_of(SCAN_PROGRESS_STRIDE) {
                 progress.report(Progress {
                     stage: Stage::Scanning,
-                    completed: out.len(),
-                    total: out.len(),
+                    completed: out.files.len(),
+                    total: out.files.len(),
                 });
             }
         }
@@ -587,32 +648,69 @@ fn is_hidden(path: &Path) -> bool {
         .is_some_and(|n| n.starts_with('.'))
 }
 
-/// D-045 (closes D-009's open question): skips low-resolution proxy sidecars.
+/// The closed set of camera-sidecar extensions the walk skips (D-045, extended by
+/// D-050 after three corpora confirmed each member, and by D-066 for `.lrf`): files that
+/// *describe* a sibling recording rather than being one. `.lrv` (GoPro/Insta360 low-res
+/// proxy — duplicate audio), `.lrf` (the same thing under DJI's spelling), `.thm`
+/// (GoPro/DSLR thumbnail JPEGs), and the AVCHD index family (`.cpi`/`.bdm`/`.mpl`/
+/// `.tdt`/`.tid`) that litters every `PRIVATE/` card dump and showed up as nine spurious
+/// `decode_error`s on the first 2013 corpus.
 ///
-/// GoPro and Insta360 cameras write a small `.lrv` preview file NEXT TO every original —
-/// the E10 corpus's Insta360 X paired `VID_…_00_007.insv` with `LRV_…_11_007.lrv`, and
-/// GoPros pair `GX010042.MP4` with `GL010042.LRV`. The proxy carries the SAME audio as
-/// its original, so scanning both puts duplicate, time-overlapping content on one device;
-/// §4.4's overlap eviction then has to arbitrate a fight the user never meant to start,
-/// and D-009's "ghost device" is the same file family surfacing twice.
+/// `.lrf` came from the owner's 386-file wedding: `01_FILM/DRONE/` held **8 `.LRF`
+/// files** — five sitting 1:1 beside their originals (`DJI_0075.LRF`, 123 MB, next to
+/// `DJI_0075.MP4`, 817 MB) and three orphans (`DJI_0080–0082.LRF`) whose MP4s were not in
+/// the folder at all. Every one of them was being ingested as real footage, which is
+/// D-045's fight handed to §4.4 all over again — and the orphans are worse than the pairs,
+/// because there is no original for the overlap eviction to prefer.
 ///
 /// This is a deliberate, narrow exception to §4.1's no-extension-filtering rule and is
-/// classified like the dotfile skip above: `.lrv` is not "media we doubt", it is a
+/// classified like the dotfile skip above: a sidecar is not "media we doubt", it is a
 /// *duplicate by construction* of a sibling original. A user who genuinely wants to sync
-/// a bare `.lrv` (original lost) can still pass the FILE explicitly — only the recursive
-/// folder walk skips it, exactly as it treats hidden files.
-fn is_proxy_sidecar(path: &Path) -> bool {
-    /// The closed set of camera-sidecar extensions the walk skips (D-045, extended by
-    /// D-050 after three corpora confirmed each member): files that *describe* a sibling
-    /// recording rather than being one. `.lrv` (GoPro/Insta360 low-res proxy — duplicate
-    /// audio), `.thm` (GoPro/DSLR thumbnail JPEGs), and the AVCHD index family
-    /// (`.cpi`/`.bdm`/`.mpl`/`.tdt`/`.tid`) that litters every `PRIVATE/` card dump and
-    /// showed up as nine spurious `decode_error`s on the first 2013 corpus. Still a
-    /// deliberate, narrow exception to §4.1 — an explicitly passed file is honoured.
-    const SIDECAR_EXTENSIONS: [&str; 7] = ["lrv", "thm", "cpi", "bdm", "mpl", "tdt", "tid"];
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| SIDECAR_EXTENSIONS.iter().any(|s| e.eq_ignore_ascii_case(s)))
+/// a bare `.lrv` or `.LRF` (original lost — three of the drone's were) can still pass the
+/// FILE explicitly; only the recursive folder walk skips it, exactly as it treats hidden
+/// files.
+const SIDECAR_EXTENSIONS: [&str; 8] = ["lrv", "lrf", "thm", "cpi", "bdm", "mpl", "tdt", "tid"];
+
+/// D-066: photographs, which the walk skips **before probing them**.
+///
+/// A separate constant from [`SIDECAR_EXTENSIONS`] with a separate reason, because the two
+/// justifications do not generalise to each other and merging them would let a future
+/// reader extend one list on the other's argument. A sidecar is a *duplicate by
+/// construction* — its content is already in the run under another name. A still is not a
+/// duplicate of anything and nothing is wrong with it; it is simply **not correlatable
+/// media**: there is no audio to match on, so it can never be placed on a timeline no
+/// matter how the engine improves.
+///
+/// Before this, the walk probed them: the owner's `01_FILM/STEINAR/IMG_4164.HEIC` cost an
+/// ffprobe, came back with no audio stream, and landed on the red unsynced shelf — which
+/// reads to an operator as *an error about a photo*. On a card dump of raws that is one
+/// child process per file to produce a shelf full of `decode_error`, which is noise dressed
+/// as an error. The skip is therefore made on the name, before the probe pool ever sees it.
+///
+/// Members are the still formats that turn up beside video on a real card: Apple's
+/// `heic`/`heif`, the ordinary web set, and the raw formats of the manufacturers whose
+/// cameras also shoot the video in these folders (`dng`, Canon `cr2`/`cr3`, Nikon `nef`,
+/// Sony `arw`, Fuji `raf`, Olympus `orf`, Panasonic `rw2`). Same explicit-pass exemption as
+/// the sidecars: pass the FILE and it is honoured, however little sense that makes.
+const STILL_IMAGE_EXTENSIONS: [&str; 18] = [
+    "heic", "heif", "jpg", "jpeg", "png", "dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2",
+    "tif", "tiff", "webp", "bmp", "gif",
+];
+
+/// Classifies one directory entry's NAME into a D-066 skip class, or `None` to probe it.
+///
+/// Extensions are matched case-insensitively: the drone writes `.LRF`, macOS writes
+/// `.heic`, and a card that has been through Windows can carry either.
+fn skip_reason(path: &Path) -> Option<SkipReason> {
+    let ext = path.extension().and_then(|e| e.to_str())?;
+    let has = |set: &[&str]| set.iter().any(|s| ext.eq_ignore_ascii_case(s));
+    if has(&SIDECAR_EXTENSIONS) {
+        Some(SkipReason::Sidecar)
+    } else if has(&STILL_IMAGE_EXTENSIONS) {
+        Some(SkipReason::StillImage)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -688,7 +786,7 @@ mod tests {
         fs::write(dir.join(".DS_Store"), b"junk").unwrap();
         fs::write(dir.join("._C0001.MP4"), b"appledouble").unwrap();
         fs::write(dir.join("real.bin"), b"x").unwrap();
-        let (found, _) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
+        let (found, _, _) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
         assert_eq!(found.len(), 1);
         assert!(found[0].ends_with("real.bin"));
     }
@@ -713,7 +811,7 @@ mod tests {
         ] {
             fs::write(dir.join(junk), b"sidecar").unwrap();
         }
-        let (found, _) = collect(
+        let (found, _, skipped) = collect(
             std::slice::from_ref(&dir),
             None,
             &NoProgress,
@@ -726,9 +824,16 @@ mod tests {
             "only the original survives the walk: {found:?}"
         );
         assert!(found[0].ends_with("VID_20260405_110428_00_007.insv"));
+        // D-066: skipping is no longer silent. Every one of them is reported as a sidecar.
+        assert_eq!(
+            skipped.len(),
+            8,
+            "every sidecar is accounted for: {skipped:?}"
+        );
+        assert!(skipped.iter().all(|s| s.reason == SkipReason::Sidecar));
 
         let explicit = dir.join("LRV_20260405_110428_11_007.lrv");
-        let (found, _) = collect(
+        let (found, _, skipped) = collect(
             std::slice::from_ref(&explicit),
             None,
             &NoProgress,
@@ -740,6 +845,203 @@ mod tests {
             vec![explicit],
             "an explicit file is never second-guessed"
         );
+        assert!(
+            skipped.is_empty(),
+            "an honoured file is not also reported as skipped"
+        );
+    }
+
+    // ---- D-066: DJI proxies and still images --------------------------------------
+
+    #[test]
+    fn dji_lrf_proxies_are_skipped_paired_or_orphaned_and_reported() {
+        // The exact shape measured on the owner's wedding: `01_FILM/DRONE/` held five
+        // `.LRF` proxies sitting 1:1 beside their `.MP4` originals, and three orphans whose
+        // MP4s were not in the folder at all. Before D-066 all eight were ingested as real
+        // footage and handed to §4.4's overlap eviction.
+        let dir = scratch("d066-lrf");
+        for n in 75..=79 {
+            fs::write(dir.join(format!("DJI_00{n}.MP4")), b"original").unwrap();
+            fs::write(dir.join(format!("DJI_00{n}.LRF")), b"proxy").unwrap();
+        }
+        for n in 80..=82 {
+            fs::write(dir.join(format!("DJI_00{n}.LRF")), b"orphan proxy").unwrap();
+        }
+        // Case-insensitive: a card that has been through another tool can carry either.
+        fs::write(dir.join("DJI_0083.lrf"), b"lowercase proxy").unwrap();
+
+        let (found, _, skipped) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
+
+        assert_eq!(found.len(), 5, "only the five originals survive: {found:?}");
+        assert!(found
+            .iter()
+            .all(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4"))));
+        assert_eq!(
+            skipped.len(),
+            9,
+            "the orphans count too — nothing vanishes: {skipped:?}"
+        );
+        assert!(skipped.iter().all(|s| s.reason == SkipReason::Sidecar));
+        assert!(
+            skipped.iter().any(|s| s.file.ends_with("DJI_0080.LRF")),
+            "an orphaned proxy is skipped and reported like any other"
+        );
+        assert!(
+            skipped.iter().any(|s| s.file.ends_with("DJI_0083.lrf")),
+            "lowercase `.lrf` is the same extension"
+        );
+    }
+
+    #[test]
+    fn a_still_image_of_each_family_is_skipped_before_it_is_ever_probed() {
+        // `01_FILM/STEINAR/IMG_4164.HEIC` used to cost an ffprobe, come back with no audio
+        // stream and land on the red unsynced shelf — an error message about a photograph.
+        // One member per family the constant covers, in the case each writes.
+        let dir = scratch("d066-stills");
+        let stills = [
+            "IMG_4164.HEIC",
+            "IMG_4165.heif",
+            "DSC0001.JPG",
+            "DSC0002.jpeg",
+            "grab.png",
+            "A001.DNG",
+            "IMG_0001.CR2",
+            "IMG_0002.CR3",
+            "DSC_0003.NEF",
+            "DSC00004.ARW",
+            "DSCF0005.RAF",
+            "P1000006.ORF",
+            "P1000007.RW2",
+            "scan.tif",
+            "scan2.TIFF",
+            "web.webp",
+            "old.bmp",
+            "anim.gif",
+        ];
+        for name in stills {
+            fs::write(dir.join(name), b"not media we can correlate").unwrap();
+        }
+        fs::write(dir.join("C0001.MP4"), b"real footage").unwrap();
+
+        let (found, _, skipped) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
+
+        assert_eq!(found.len(), 1, "the video is the only candidate: {found:?}");
+        assert!(found[0].ends_with("C0001.MP4"));
+        assert_eq!(skipped.len(), stills.len());
+        assert!(
+            skipped.iter().all(|s| s.reason == SkipReason::StillImage),
+            "a photo is not a sidecar — the two reasons carry different arguments: {skipped:?}"
+        );
+    }
+
+    #[test]
+    fn an_explicitly_passed_still_is_honoured_like_an_explicitly_passed_proxy() {
+        // The same exemption D-045 granted, for the same reason: the walk guesses, the user
+        // does not. A file the operator named is theirs to name, however little sense it
+        // makes — the probe will report `no_audio` and the shelf will say so honestly.
+        let dir = scratch("d066-explicit");
+        let heic = dir.join("IMG_4164.HEIC");
+        let lrf = dir.join("DJI_0080.LRF");
+        fs::write(&heic, b"photo").unwrap();
+        fs::write(&lrf, b"proxy").unwrap();
+
+        let (found, _, skipped) = collect(
+            &[heic.clone(), lrf.clone()],
+            None,
+            &NoProgress,
+            &CancelToken::new(),
+        )
+        .unwrap();
+
+        assert_eq!(found, vec![lrf, heic], "sorted, and both honoured");
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn a_mixed_folder_counts_each_class_separately() {
+        // What the sources panel's one quiet line is counting. A drop with both classes in
+        // it must produce both counts, and must not let one class borrow the other's reason.
+        let dir = scratch("d066-mixed");
+        fs::write(dir.join("C0001.MP4"), b"footage").unwrap();
+        fs::write(dir.join("ZOOM0001.WAV"), b"audio").unwrap();
+        fs::write(dir.join("DJI_0075.LRF"), b"proxy").unwrap();
+        fs::write(dir.join("GX010042.LRV"), b"proxy").unwrap();
+        fs::write(dir.join("GX010042.THM"), b"thumb").unwrap();
+        fs::write(dir.join("IMG_4164.HEIC"), b"photo").unwrap();
+        fs::write(dir.join(".DS_Store"), b"junk").unwrap();
+
+        let (found, _, skipped) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
+
+        assert_eq!(found.len(), 2, "the two real recordings: {found:?}");
+        let sidecars = skipped
+            .iter()
+            .filter(|s| s.reason == SkipReason::Sidecar)
+            .count();
+        let stills = skipped
+            .iter()
+            .filter(|s| s.reason == SkipReason::StillImage)
+            .count();
+        assert_eq!((sidecars, stills), (3, 1), "got {skipped:?}");
+        assert!(
+            skipped.windows(2).all(|w| w[0].file < w[1].file),
+            "the list is sorted by path like every other list in the manifest"
+        );
+        assert!(
+            !skipped.iter().any(|s| s.file.ends_with(".DS_Store")),
+            "hidden OS metadata stays invisible: it is not the operator's file, so \
+             counting it would be noise, not honesty"
+        );
+    }
+
+    #[test]
+    fn a_directory_named_like_a_skip_class_is_not_reported_as_a_skipped_file() {
+        // The classes are about files. A folder called `PHOTOS.HEIC` is not a photograph
+        // the operator lost, and putting it on the skipped list would be a lie about a
+        // directory. (It is still not descended, exactly as before D-066.)
+        let dir = scratch("d066-dir-named");
+        fs::create_dir_all(dir.join("PHOTOS.HEIC")).unwrap();
+        fs::write(dir.join("PHOTOS.HEIC").join("inside.mp4"), b"x").unwrap();
+        fs::write(dir.join("C0001.MP4"), b"footage").unwrap();
+
+        let (found, _, skipped) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
+
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].ends_with("C0001.MP4"));
+        assert!(skipped.is_empty(), "got {skipped:?}");
+    }
+
+    #[test]
+    fn a_scan_reports_its_skips_in_the_manifest() {
+        // End to end through `scan`, not just `collect`: the field has to reach the JSON
+        // the CLI prints and the UI reads, and it has to stay out of `unsynced` — nothing
+        // is wrong with these files, and the red shelf is for things that are.
+        let Some(sidecar) = require_ffprobe() else {
+            return;
+        };
+        let dir = scratch("d066-manifest");
+        write_wav(&dir.join("ZOOM0001.WAV"), 0.5);
+        fs::write(dir.join("DJI_0075.LRF"), b"proxy").unwrap();
+        fs::write(dir.join("IMG_4164.HEIC"), b"photo").unwrap();
+
+        let m = scan(&[dir], &sidecar, &NoProgress, &CancelToken::new()).unwrap();
+
+        assert_eq!(m.files.len(), 1);
+        assert!(m.unsynced.is_empty(), "got {:?}", m.unsynced);
+        assert_eq!(m.skipped.len(), 2);
+        let json = serde_json::to_value(&m).unwrap();
+        assert_eq!(json["skipped"][0]["reason"], "sidecar");
+        assert_eq!(json["skipped"][1]["reason"], "still_image");
+    }
+
+    #[test]
+    fn a_manifest_written_before_the_skip_list_existed_still_deserialises() {
+        // Why `SCHEMA_VERSION` does not move (D-066): `skipped` is additive, so v1 JSON
+        // from any earlier build reads back as an empty list rather than a parse error.
+        // If this ever stops holding, the field has become breaking and the version must.
+        let json = r#"{"schema":1,"devices":[],"files":[],"unsynced":[]}"#;
+        let m: ScanManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(m.schema, SCHEMA_VERSION);
+        assert!(m.skipped.is_empty());
     }
 
     #[test]
@@ -765,7 +1067,7 @@ mod tests {
             differently_spelled, cache,
             "the two spellings must really differ, or this test proves nothing"
         );
-        let (found, _) = collect(
+        let (found, _, _) = collect(
             std::slice::from_ref(&dir),
             Some(&differently_spelled),
             &NoProgress,
@@ -795,7 +1097,7 @@ mod tests {
         let link = dir.join("shortcut");
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
-        let (found, _) = collect(
+        let (found, _, _) = collect(
             std::slice::from_ref(&link),
             Some(&cache),
             &NoProgress,
@@ -825,7 +1127,7 @@ mod tests {
         // A link back to the walk's own root: following it would recurse forever.
         std::os::unix::fs::symlink(&dir, dir.join("loop")).unwrap();
 
-        let (found, _) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
+        let (found, _, _) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
         let names: Vec<String> = found
             .iter()
             .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
@@ -836,7 +1138,7 @@ mod tests {
 
     #[test]
     fn a_nonexistent_input_is_reported_not_dropped() {
-        let (found, missing) = collect(
+        let (found, missing, _) = collect(
             &[PathBuf::from("/no/such/file.mp4")],
             None,
             &NoProgress,
@@ -853,7 +1155,7 @@ mod tests {
         let dir = scratch("dedup");
         let file = dir.join("a.bin");
         fs::write(&file, b"x").unwrap();
-        let (found, _) =
+        let (found, _, _) =
             collect(&[dir.clone(), file], None, &NoProgress, &CancelToken::new()).unwrap();
         assert_eq!(found.len(), 1);
     }
@@ -1023,7 +1325,7 @@ mod tests {
         for n in 1..=6 {
             write_wav(&dir.join(format!("C000{n}.WAV")), 0.3);
         }
-        let (candidates, _) = collect(
+        let (candidates, _, _) = collect(
             std::slice::from_ref(&dir),
             None,
             &NoProgress,
@@ -1057,7 +1359,7 @@ mod tests {
             fs::write(dir.join(format!("f{i:05}.bin")), b"x").unwrap();
         }
         let rec = Rec(StdMutex::new(Vec::new()));
-        let (found, _) = collect(&[dir], None, &rec, &CancelToken::new()).unwrap();
+        let (found, _, _) = collect(&[dir], None, &rec, &CancelToken::new()).unwrap();
         assert_eq!(found.len(), n);
 
         let scanning: Vec<usize> = rec
@@ -1153,6 +1455,7 @@ mod tests {
             ],
             files: vec![a, b, z],
             unsynced: vec![],
+            skipped: vec![],
         }
     }
 
@@ -1338,6 +1641,12 @@ mod tests {
         }
         assert!(entry["audio"].get("sample_rate").is_some());
         assert!(entry["video"].get("fps").is_some());
+        // D-066's list is part of that same mirror, and it is always emitted — the
+        // `#[serde(default)]` is about *reading* an older manifest, not about writing.
+        assert!(
+            json.get("skipped").is_some(),
+            "the skip list is always written"
+        );
     }
 
     #[test]
@@ -1359,7 +1668,7 @@ mod tests {
         for n in 0..25 {
             fs::write(dir.join(format!("f{n}.bin")), b"x").unwrap();
         }
-        let mut out = Vec::new();
+        let mut out = Walked::default();
         let r = walk_capped(
             &dir,
             0,
@@ -1374,9 +1683,9 @@ mod tests {
             "expected a named ceiling error, got {r:?}"
         );
         assert!(
-            out.len() <= 10,
+            out.files.len() <= 10,
             "the ceiling must bound `out`, found {}",
-            out.len()
+            out.files.len()
         );
     }
 
@@ -1387,7 +1696,7 @@ mod tests {
         for n in 0..8 {
             fs::write(dir.join(format!("f{n}.bin")), b"x").unwrap();
         }
-        let mut out = Vec::new();
+        let mut out = Walked::default();
         let r = walk_capped(
             &dir,
             0,
@@ -1398,7 +1707,7 @@ mod tests {
             100,
         );
         assert!(r.is_ok(), "a small tree must scan cleanly, got {r:?}");
-        assert_eq!(out.len(), 8);
+        assert_eq!(out.files.len(), 8);
     }
 
     #[test]
@@ -1425,7 +1734,7 @@ mod tests {
         let flag = cancel.clone();
         let handle = std::thread::spawn(move || flag.cancel());
         let start = std::time::Instant::now();
-        let mut out = Vec::new();
+        let mut out = Walked::default();
         let r = walk_capped(
             &dir,
             0,
@@ -1439,12 +1748,12 @@ mod tests {
         assert!(
             matches!(r, Err(Error::Cancelled)),
             "a cancel during the drain must stop the walk, got {r:?} after {} entries",
-            out.len()
+            out.files.len()
         );
         assert!(
-            out.len() < 20_000,
+            out.files.len() < 20_000,
             "the walk drained the whole directory instead of stopping early: {} entries",
-            out.len()
+            out.files.len()
         );
         assert!(
             start.elapsed() < std::time::Duration::from_secs(5),

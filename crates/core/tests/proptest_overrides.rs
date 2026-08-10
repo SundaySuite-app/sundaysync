@@ -49,6 +49,7 @@ fn manifest_with_files(n: usize) -> ScanManifest {
         devices: vec![device],
         files,
         unsynced: Vec::new(),
+        skipped: Vec::new(),
     }
 }
 
