@@ -1,30 +1,36 @@
 /**
- * Pre-sync clip layout, from the scan manifest alone (v0.4, D-061).
+ * Pre-sync clip layout, from the scan manifest alone (v0.4, D-061; rewritten V05-W3).
  *
- * The timeline is the main view now, not the result view: files land on it the moment
- * they are dropped, before anything has been correlated. What positions them until then
- * is the only clock the app has without listening — the creation timestamp the camera
- * wrote into the container (`FileEntry.creation_time`, ISO-8601 UTC on MP4/MOV, absent on
- * WAV/BWF).
+ * The timeline is the main view now, not the result view: files land on it the moment they
+ * are dropped, before anything has been correlated. What positions them until then is the
+ * only clock the app has without listening — and as of D-067 that is not one field but a
+ * *ladder* (`recordingTime.ts`): a container `creation_time`, a BWF's split date + time, a
+ * timestamp spelled into the filename, or the file's own mtime minus its duration. This
+ * module takes the ladder's answer and turns it into boxes.
  *
- * That is a *provisional* placement and the UI says so (`clip--pre`, and the note the
- * caller renders when `unknownStart` is non-empty). This module's whole job is to be
- * honest about the difference between the two cases:
+ * Three cases, and being honest about the difference between them is the whole job:
  *
- *   - **A parseable `creation_time`** — the clip sits at its real distance from the
- *     earliest file in the drop. On a multi-camera shoot where every card has a roughly
- *     right clock, that is already close to the answer, and the "hop" to the solved
- *     positions after a sync is small.
- *   - **No `creation_time` (or an unparseable one)** — the clip sits at zero and its file
- *     is returned in `unknownStart`. It is NOT given an invented position: a recorder that
- *     wrote no timestamp has told us nothing about when it started, and stacking those
- *     files end to end would draw an order the app does not know. They pile at the start,
- *     and the caller says why in words.
- *   - **A `creation_time` that parses but cannot be true** (V04-U5) — a flat battery leaves
- *     a camera reading 1970, and it writes that as confidently as any other date. Those are
- *     treated exactly like a missing stamp rather than being believed; see
- *     `PLAUSIBLE_SPREAD_MS` for what "cannot be true" means and why the alternative was a
- *     timeline the operator would read as broken.
+ *   - **A usable recording time** — the clip sits at its real distance from the earliest
+ *     placed file in the drop. On a multi-camera shoot where every card has a roughly right
+ *     clock that is already close to the answer, and the "hop" to the solved positions
+ *     after a sync is small. The UI marks anything below the top rung as an estimate.
+ *   - **No usable time at all** (D-068) — the file is laid out **in filename order** on its
+ *     own device's row, end to end with no gap, starting where that device's last placed
+ *     clip ended. This is the owner's choice, and it is a claim the app can actually make:
+ *     the camera numbered the files, so their *order* is known even when their *times* are
+ *     not. The previous behaviour stacked all of them at zero, where a 14-take Zoom folder
+ *     drew fourteen lanes of boxes on top of each other and said only "N files have no
+ *     recording time" about the pile.
+ *   - **A time the session gate rejected** (D-071) — a flat battery leaves a recorder
+ *     reading 2020, and a June drone folder inside a July wedding is a different shoot.
+ *     Those keep their stamp (the UI names the date) but not their position, and they lay
+ *     out sequentially like the untimed ones. Nothing is auto-removed: D-062's per-file
+ *     removal already exists and is the operator's to use.
+ *
+ * Because the sequential files are laid end to end they do not overlap, so `stackClips`
+ * returns **one row** for them — the 14-lane Zoom stack disappears as arithmetic rather
+ * than as a special case, and a genuine two-clip overlap on one camera still stacks into
+ * two lanes exactly as it did.
  *
  * Kept pure and React-free like its neighbours (`geometry.ts`, `laneLayout.ts`,
  * `viewport.ts`) — the arithmetic that is easy to get quietly wrong is the arithmetic that
@@ -32,77 +38,43 @@
  */
 
 import type { ClipSpan } from "./laneLayout";
+import { sortNatural } from "./naturalSort";
+import { recordingTimes, type TimeSource } from "./recordingTime";
 import type { Device, ScanManifest } from "../types";
 
-/**
- * The widest spread of recording times this app will lay out as one drop (V04-U5).
- *
- * A stamp that parses is not the same thing as a stamp that means something. A camera
- * whose battery went flat comes back reading 1970-01-01 (or its firmware's build date),
- * writes that into every container it records, and reports it as confidently as a camera
- * with a GPS lock. Before this gate, one such file in a drop set the origin decades before
- * the rest: `contentBounds` returned a span of ~1.8 × 10¹² ms, `fitPxPerMs` clamped to
- * `MIN_PX_PER_MS`, and the operator got a timeline showing twelve hours of empty grid with
- * the dud clip at the far left and every real file fifty-six years off the right edge —
- * with nothing on screen saying why. "The app did not read my card" is exactly the wrong
- * conclusion for it to invite, and it is the one it invited.
- *
- * A day is the honest bound: SundaySync exists to line up sources that were **recording at
- * the same time**, so anything the correlator could ever match is inside one session. Two
- * files a day apart are not a shoot the engine can sync no matter what their clocks say,
- * and drawing them a day apart is not information — it is two invisible slivers.
- */
-export const PLAUSIBLE_SPREAD_MS = 24 * 60 * 60 * 1000;
-
-/**
- * The subset of `stamps` that can be read as one session, as a `[lo, hi]` bound in ms.
- *
- * The largest run of stamps that fits inside `PLAUSIBLE_SPREAD_MS`, found by a sliding
- * window over the sorted times. Ties go to the LATER window on purpose: a clock that is
- * wrong is almost always wrong *early* (an epoch, a factory date, a battery-pull default),
- * because a camera with no time to restore falls back to a fixed past, never to a fixed
- * future.
- *
- * `null` when there is nothing to bound.
- */
-function plausibleWindow(stamps: number[]): [number, number] | null {
-  if (stamps.length === 0) return null;
-  const sorted = [...stamps].sort((a, b) => a - b);
-  let best: [number, number] | null = null;
-  let bestCount = 0;
-  let lo = 0;
-  for (let hi = 0; hi < sorted.length; hi++) {
-    while (sorted[hi] - sorted[lo] > PLAUSIBLE_SPREAD_MS) lo++;
-    const count = hi - lo + 1;
-    // `>=` rather than `>`: scanning left to right, a later window of equal size replaces
-    // an earlier one, which is the tie-break described above.
-    if (count >= bestCount) {
-      bestCount = count;
-      best = [sorted[lo], sorted[hi]];
-    }
-  }
-  return best;
-}
+export type { TimeSource } from "./recordingTime";
+export { PLAUSIBLE_SPREAD_MS } from "./recordingTime";
 
 /** One device's pre-sync row: the device itself, and its files as timeline-ms spans. */
 export interface SourceTrack {
   device: Device;
-  /** Origin-relative ms: 0 is the earliest *known* recording time in the whole drop. */
+  /** Origin-relative ms: 0 is the earliest *placed* recording time in the whole drop. */
   spans: ClipSpan[];
 }
 
 export interface SourceLayout {
   /** Devices in manifest order, minus any the override overlay emptied. */
   tracks: SourceTrack[];
-  /** Files placed at 0 because nothing usable in them said when they started — either no
-   *  `creation_time` at all, or one this drop cannot read as part of the same session
-   *  (`PLAUSIBLE_SPREAD_MS`). Both are the same fact to everyone downstream: the app has
-   *  no honest opinion about when this file started. */
+  /**
+   * Files nothing in the drop could time, laid out in filename order (D-068).
+   *
+   * Since D-071 this is only the files that offered **no** evidence — the ones whose
+   * evidence was rejected are in {@link outsideWindow} instead. Both are laid out the same
+   * way; they are two different sentences to say about it.
+   */
   unknownStart: Set<string>;
+  /** Files carrying a timestamp from outside this session (D-071). Also laid out in order,
+   *  but the UI names the date they claim rather than calling them untimed. */
+  outsideWindow: Set<string>;
+  /** The distinct days those files claim, as local-midnight ms, ascending. What the legend
+   *  names — «14 filer er tidsstemplet 13.06.2023, utenfor denne økta». */
+  outsideWindowDays: number[];
+  /** Which rung of the ladder placed each file (D-067) — what the clip marking reads. */
+  timeSource: Map<string, TimeSource>;
 }
 
 /**
- * Group a scan manifest into per-device spans positioned by creation time.
+ * Group a scan manifest into per-device spans positioned by recording time.
  *
  * `overrides` is applied as the same view-layer overlay `SourcesPanel` uses (D-027/D-028),
  * so moving a file to another device before syncing regroups it on the timeline too — the
@@ -110,61 +82,95 @@ export interface SourceLayout {
  * A device the overlay leaves empty disappears, exactly as it does in the panel; a file
  * whose effective device is not in the manifest at all is skipped rather than inventing a
  * track for it.
+ *
+ * Note that the *ladder* reads a file's own device (`FileEntry.device`), not its override:
+ * midnight rollover is a fact about the recorder that wrote the files, and regrouping them
+ * in the UI does not change which machine's clock stood still.
  */
 export function sourceSpans(
   manifest: ScanManifest,
   overrides: Record<string, string>,
 ): SourceLayout {
-  // Parse once. `Date.parse` answers NaN for both a null-ish and a malformed stamp, and
-  // `Number.isFinite` is the one check that rejects both without pretending 0 is a time.
-  const startedAt = new Map<string, number>();
-  for (const entry of manifest.files) {
-    if (entry.creation_time === null) continue;
-    const parsed = Date.parse(entry.creation_time);
-    if (Number.isFinite(parsed)) startedAt.set(entry.file, parsed);
-  }
+  const times = recordingTimes(manifest.files);
 
-  // A stamp that parses still has to be *usable* (V04-U5): one dead camera clock reading
-  // 1970 would otherwise set the origin and push every real file off the right edge of a
-  // maximally-zoomed-out timeline. Stamps outside the drop's plausible session window are
-  // dropped here and join the no-stamp files at zero, where the UI says so in words.
-  const window = plausibleWindow([...startedAt.values()]);
-  if (window !== null) {
-    const [lo, hi] = window;
-    for (const [file, ms] of [...startedAt]) {
-      if (ms < lo || ms > hi) startedAt.delete(file);
-    }
-  }
-
-  // The earliest USABLE start is t=0. Files with no stamp cannot move it — otherwise a
-  // single WAV would drag the whole drop's origin to the epoch.
+  // The earliest PLACED start is t=0. A file the ladder could not time cannot move it —
+  // otherwise a single untimed WAV would drag the whole drop's origin.
   let origin = Number.POSITIVE_INFINITY;
-  for (const ms of startedAt.values()) if (ms < origin) origin = ms;
+  for (const { startMs } of times.values()) {
+    if (startMs !== null && startMs < origin) origin = startMs;
+  }
   const haveOrigin = Number.isFinite(origin);
 
   const byId = new Map<string, SourceTrack>();
   for (const device of manifest.devices) byId.set(device.id, { device, spans: [] });
 
   const unknownStart = new Set<string>();
+  const outsideWindow = new Set<string>();
+  const outsideDays = new Set<number>();
+  const timeSource = new Map<string, TimeSource>();
+
+  /** Files with no position, per effective device — laid out after the placed ones. */
+  const pending = new Map<string, { file: string; durationMs: number }[]>();
+
   for (const entry of manifest.files) {
-    const track = byId.get(overrides[entry.file] ?? entry.device);
+    const deviceId = overrides[entry.file] ?? entry.device;
+    const track = byId.get(deviceId);
     if (!track) continue;
-    const started = startedAt.get(entry.file);
-    let startMs = 0;
-    if (started !== undefined && haveOrigin) {
-      startMs = started - origin;
+    const time = times.get(entry.file) ?? { startMs: null, source: "none" as const };
+    timeSource.set(entry.file, time.source);
+    const durationMs = Math.max(0, entry.duration_seconds) * 1000;
+
+    if (time.startMs !== null && haveOrigin) {
+      const startMs = time.startMs - origin;
+      track.spans.push({ file: entry.file, startMs, endMs: startMs + durationMs });
+      continue;
+    }
+
+    if (time.outsideWindowMs !== undefined) {
+      outsideWindow.add(entry.file);
+      outsideDays.add(localMidnight(time.outsideWindowMs));
     } else {
       unknownStart.add(entry.file);
     }
-    track.spans.push({
-      file: entry.file,
-      startMs,
-      endMs: startMs + entry.duration_seconds * 1000,
-    });
+    const list = pending.get(deviceId) ?? [];
+    list.push({ file: entry.file, durationMs });
+    pending.set(deviceId, list);
+  }
+
+  // ---- D-068: the untimed files, end to end, in the order the camera numbered them ------
+  //
+  // On the device's OWN row, starting where its last placed clip ended, so a card whose
+  // clips were half timed and half not reads as one continuous strip rather than as a pile
+  // at the start overlapping the clips that were placed. Zero gap between them: a gap would
+  // be a duration nobody measured, and the only claim being made here is the order.
+  for (const [deviceId, files] of pending) {
+    const track = byId.get(deviceId);
+    if (!track) continue;
+    let cursor = 0;
+    for (const span of track.spans) cursor = Math.max(cursor, span.endMs);
+    const order = new Map(sortNatural(files.map((f) => f.file)).map((f, i) => [f, i]));
+    const ordered = [...files].sort(
+      (a, b) => (order.get(a.file) ?? 0) - (order.get(b.file) ?? 0),
+    );
+    for (const { file, durationMs } of ordered) {
+      track.spans.push({ file, startMs: cursor, endMs: cursor + durationMs });
+      cursor += durationMs;
+    }
   }
 
   return {
     tracks: Array.from(byId.values()).filter((track) => track.spans.length > 0),
     unknownStart,
+    outsideWindow,
+    outsideWindowDays: [...outsideDays].sort((a, b) => a - b),
+    timeSource,
   };
+}
+
+/** Local midnight of an absolute ms — the *day* a rejected stamp claims, which is what the
+ *  operator will recognise («the June drone folder»). Local because that is the calendar
+ *  the person reading the screen is holding. */
+function localMidnight(ms: number): number {
+  const at = new Date(ms);
+  return new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime();
 }

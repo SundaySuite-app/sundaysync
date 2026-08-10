@@ -86,6 +86,20 @@ export interface FileEntry {
   audio: AudioStream | null;
   video: VideoStream | null;
   creation_time: string | null;
+  /**
+   * D-067. The container's `date` tag, verbatim — the other half of a BWF's timestamp
+   * (`date=2026-07-25` beside a `creation_time` of `16:12:29`). Optional here for the same
+   * reason it is `#[serde(default)]` in Rust: the field is additive in both directions, so
+   * a manifest written before D-067 is still a valid v1 manifest.
+   */
+  date_tag?: string | null;
+  /**
+   * D-067. The file's mtime as ISO-8601 UTC, from `std::fs::metadata` — the last rung of
+   * the recording-time ladder, and the only clock on a container that carries no tags at
+   * all. It is the **end** of the write; `timeline/recordingTime.ts` subtracts the
+   * duration. Additive, like `date_tag`.
+   */
+  modified_time?: string | null;
 }
 
 /**

@@ -103,13 +103,52 @@ export const nb = {
   // …og linja over er en påstand som ikke holder når ingen av filene har et brukbart
   // tidsstempel: da er det ingen plassering å ha fra tidsstempler i det hele tatt, alt
   // ligger på null (V04-U5).
-  presyncMetaNoClock: "Ingen brukbare tidsstempler — klippene ligger på start til synken plasserer dem",
+  presyncMetaNoClock:
+    "Ingen brukbare tidsstempler — klippene ligger i filnavn-rekkefølge til synken plasserer dem",
   presyncStart: "starter",
-  presyncStartUnknown: "ukjent opptakstidspunkt",
-  presyncUnknownStart: (n: number) =>
-    n === 1
-      ? "1 fil mangler opptakstidspunkt og vises fra start."
-      : `${n} filer mangler opptakstidspunkt og vises fra start.`,
+
+  // Opptakstidspunktet er en stige, ikke et ja/nei (V05-W3, D-067). Klippet sier hvilket
+  // trinn tallet kom fra — «anslått» er ikke det samme som «målt», og en app som viser
+  // begge deler likt påstår noe den ikke vet.
+  presyncStartEstimated: "anslått",
+  presyncSourceBwf: "tid fra opptakerens dato + klokkeslett",
+  presyncSourceFilename: "tid fra filnavnet",
+  presyncSourceModified: "anslått fra filens endringstidspunkt",
+  presyncSourceNone: "rekkefølge fra filnavn — tidspunkt ukjent",
+  // D-071: fila har et tidsstempel, men fra en annen dag enn økta.
+  presyncOffSessionClip: "tidsstemplet utenfor økta",
+
+  // Én linje bygget av tellinger, i stedet for den gamle «N filer mangler
+  // opptakstidspunkt». Poenget er at de fire tallene er fire ULIKE påstander, og at
+  // summen er hele slippet: ingenting forsvinner ut av regnskapet (§7.3).
+  presyncLegend: (counts: {
+    placed: number;
+    estimated: number;
+    ordered: number;
+    offSession: number;
+  }) => {
+    const parts: string[] = [];
+    if (counts.placed > 0) parts.push(`${counts.placed} plassert fra tidsstempel`);
+    if (counts.estimated > 0) parts.push(`${counts.estimated} anslått`);
+    if (counts.ordered > 0) parts.push(`${counts.ordered} bare rekkefølge`);
+    if (counts.offSession > 0) parts.push(`${counts.offSession} utenfor økta`);
+    return `${parts.join(" · ")}.`;
+  },
+  // …og datoen sies rett ut, for det er den som gjør linja handlingsbar: eieren kjenner
+  // igjen «juni-dronemappa» øyeblikkelig, men ikke «14 filer».
+  presyncOffSession: (n: number, days: string[]) => {
+    const when =
+      days.length <= 2 ? days.join(" og ") : `${days.slice(0, 2).join(", ")} og ${days.length - 2} andre datoer`;
+    return n === 1
+      ? `1 fil er tidsstemplet ${when}, utenfor denne økta, og er ikke plassert etter klokka.`
+      : `${n} filer er tidsstemplet ${when}, utenfor denne økta, og er ikke plassert etter klokka.`;
+  },
+  /** dd.mm.åååå — norsk datoformat, uten Intl så det er likt i test og i app. */
+  presyncDay: (ms: number) => {
+    const at = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(at.getDate())}.${pad(at.getMonth() + 1)}.${at.getFullYear()}`;
+  },
 
   // Per-clip waveforms (v0.3 S4, D-052)
   waveformRegenerate: "Bygg bølgeform på nytt",
@@ -402,13 +441,45 @@ export const en: Strings = {
   clipDurationUnknown: "Length unknown",
 
   presyncMeta: "Provisional positions from the files' own timestamps",
-  presyncMetaNoClock: "No usable timestamps — the clips sit at the start until the sync places them",
+  presyncMetaNoClock:
+    "No usable timestamps — the clips lie in filename order until the sync places them",
   presyncStart: "starts at",
-  presyncStartUnknown: "unknown recording time",
-  presyncUnknownStart: (n: number) =>
-    n === 1
-      ? "1 file has no recording time and is shown from the start."
-      : `${n} files have no recording time and are shown from the start.`,
+
+  // V05-W3 (D-067/D-068/D-071) — see the nb comments above.
+  presyncStartEstimated: "estimated",
+  presyncSourceBwf: "time from the recorder's date + clock",
+  presyncSourceFilename: "time from the filename",
+  presyncSourceModified: "estimated from the file's modification time",
+  presyncSourceNone: "order from the filename — recording time unknown",
+  presyncOffSessionClip: "timestamped outside this session",
+
+  presyncLegend: (counts: {
+    placed: number;
+    estimated: number;
+    ordered: number;
+    offSession: number;
+  }) => {
+    const parts: string[] = [];
+    if (counts.placed > 0) parts.push(`${counts.placed} placed from a timestamp`);
+    if (counts.estimated > 0) parts.push(`${counts.estimated} estimated`);
+    if (counts.ordered > 0) parts.push(`${counts.ordered} in filename order only`);
+    if (counts.offSession > 0) parts.push(`${counts.offSession} outside this session`);
+    return `${parts.join(" · ")}.`;
+  },
+  presyncOffSession: (n: number, days: string[]) => {
+    const when =
+      days.length <= 2 ? days.join(" and ") : `${days.slice(0, 2).join(", ")} and ${days.length - 2} other dates`;
+    return n === 1
+      ? `1 file is timestamped ${when}, outside this session, and is not placed by the clock.`
+      : `${n} files are timestamped ${when}, outside this session, and are not placed by the clock.`;
+  },
+  /** ISO `yyyy-mm-dd` — the unambiguous English form, and no Intl so it is the same in a
+   *  test as in the app. */
+  presyncDay: (ms: number) => {
+    const at = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+  },
 
   // Per-clip waveforms (v0.3 S4, D-052)
   waveformRegenerate: "Rebuild waveform",

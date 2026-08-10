@@ -76,6 +76,84 @@ pub struct FileEntry {
     pub audio: Option<AudioStream>,
     pub video: Option<VideoStream>,
     pub creation_time: Option<String>,
+    /// The container's `date` tag, verbatim (V05-W3, D-067).
+    ///
+    /// On a BWF this is the other half of the timestamp: `date=2026-07-25` beside a
+    /// `creation_time` of `16:12:29`. Absent on every container that writes a full ISO
+    /// `creation_time`, which is why it is additive rather than a replacement.
+    ///
+    /// `#[serde(default)]`, additive in both directions — see D-067 for why
+    /// `SCHEMA_VERSION` does not move.
+    #[serde(default)]
+    pub date_tag: Option<String>,
+    /// The file's modification time, as ISO-8601 UTC to the second (V05-W3, D-067).
+    ///
+    /// From `std::fs::metadata` — no ffprobe call and no extra spawn, because it is not
+    /// container metadata at all. It is the last rung of the recording-time ladder: on the
+    /// owner's 136 AVCHD `.MTS` files there are **no container tags whatsoever**, and the
+    /// mtime is the only clock left. Measured on that corpus, it is the **end** of the
+    /// write (`02106` at 14:12:08 for a 30.7 s clip, `02107` at 14:12:58 for an 11 s one),
+    /// so the frontend subtracts the duration; birth time is deliberately NOT read, since
+    /// on those same files it is the date they were *copied* — a confident wrong answer.
+    ///
+    /// `None` when the metadata cannot be read or the platform has no mtime.
+    ///
+    /// `#[serde(default)]`, additive in both directions — see D-067.
+    #[serde(default)]
+    pub modified_time: Option<String>,
+}
+
+/// Whole-second ISO-8601 UTC (`1970-01-01T00:00:00Z`) for a Unix timestamp.
+///
+/// Hand-rolled rather than pulling in a date crate: `core` has five dependencies and each
+/// one is a licence, a build and a supply chain the engine has to justify (§3). This is
+/// Howard Hinnant's `civil_from_days`, which is exact for every representable day and has
+/// no notion of a timezone to get wrong — the string this produces is UTC by construction,
+/// which is precisely the contract `recordingTime.ts` reads it under.
+fn iso8601_utc(unix_seconds: i64) -> String {
+    let days = unix_seconds.div_euclid(86_400);
+    let secs_of_day = unix_seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let (h, m, s) = (
+        secs_of_day / 3600,
+        (secs_of_day % 3600) / 60,
+        secs_of_day % 60,
+    );
+    format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
+/// Days since the Unix epoch → `(year, month, day)`. Hinnant's algorithm, civil calendar.
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    // Shift the era origin to 0000-03-01 so leap days land at the end of a year.
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11], March-based
+    let day = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (year, month, day)
+}
+
+/// A file's mtime as ISO-8601 UTC, or `None` when the filesystem will not say.
+///
+/// Takes a path and nothing else — no [`Sidecar`], no process, no ffprobe. That is not an
+/// implementation detail: the whole point of this rung is that it costs a `stat` on files
+/// where every container tag is missing, so a version that spawned anything would defeat
+/// its own reason for existing.
+fn modified_time_iso(path: &Path) -> Option<String> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let seconds = match modified.duration_since(std::time::UNIX_EPOCH) {
+        Ok(after) => i64::try_from(after.as_secs()).ok()?,
+        // Before 1970 — a clock wrong in the other direction, but still a fact about the
+        // file. Truncated toward the epoch; sub-second precision is noise at this rung.
+        Err(before) => i64::try_from(before.duration().as_secs())
+            .ok()
+            .map(|s| -s)?,
+    };
+    Some(iso8601_utc(seconds))
 }
 
 /// Probes every input and builds the inventory.
@@ -193,12 +271,17 @@ fn scan_detailed_workers(
                 .iter()
                 .find(|d| d.files.contains(&p.path))
                 .map_or_else(String::new, |d| d.id.clone());
+            // D-067: read the mtime here, where the path is still in hand and the
+            // filesystem is already being touched, and before `p.path` is moved.
+            let modified_time = modified_time_iso(&p.path);
             FileEntry {
                 device,
                 file: p.path,
                 duration_seconds: p.duration_seconds,
                 format_name: p.format_name,
                 creation_time: p.tags.get("creation_time").cloned(),
+                date_tag: p.tags.get("date").cloned(),
+                modified_time,
                 audio: p.audio,
                 video: p.video,
             }
@@ -1045,6 +1128,109 @@ mod tests {
     }
 
     #[test]
+    fn a_file_entry_written_before_the_time_ladder_existed_still_deserialises() {
+        // D-067 applies D-066's test to its own two fields: `date_tag` and `modified_time`
+        // are `#[serde(default)]`, so a manifest from any earlier build reads back with
+        // both absent rather than failing — which is what keeps `SCHEMA_VERSION` at 1.
+        let json = r#"{"schema":1,"devices":[],"unsynced":[],"files":[
+            {"file":"/x/a.MP4","device":"cam-a","duration_seconds":1.0,
+             "format_name":"mov,mp4","audio":null,"video":null,"creation_time":null}]}"#;
+        let m: ScanManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(m.files.len(), 1);
+        assert_eq!(m.files[0].date_tag, None);
+        assert_eq!(m.files[0].modified_time, None);
+    }
+
+    #[test]
+    fn a_new_manifest_still_reads_under_a_reader_that_ignores_the_new_fields() {
+        // The other direction of "additive". Nothing here sets `deny_unknown_fields`, so an
+        // older consumer of the scan JSON sees exactly the manifest it always did. Modelled
+        // by deserialising into a struct that predates the two fields.
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct OldEntry {
+            file: PathBuf,
+            device: String,
+            duration_seconds: f64,
+            creation_time: Option<String>,
+        }
+        let mut m = manifest_for_overrides();
+        m.files[0].date_tag = Some("2026-07-25".into());
+        m.files[0].modified_time = Some("2026-07-25T14:12:08Z".into());
+        let json = serde_json::to_string(&m).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let old: OldEntry = serde_json::from_value(value["files"][0].clone()).unwrap();
+        assert_eq!(old.creation_time, None);
+    }
+
+    #[test]
+    fn iso8601_utc_is_exact_at_the_days_that_break_naive_arithmetic() {
+        // The epoch, a leap day, the century that is NOT a leap year (1900) and the one
+        // that IS (2000), and a time before 1970 — the five places a hand-rolled civil
+        // calendar goes wrong.
+        assert_eq!(iso8601_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(iso8601_utc(1), "1970-01-01T00:00:01Z");
+        assert_eq!(iso8601_utc(-1), "1969-12-31T23:59:59Z");
+        assert_eq!(iso8601_utc(951_782_400), "2000-02-29T00:00:00Z");
+        assert_eq!(iso8601_utc(-2_208_988_800), "1900-01-01T00:00:00Z");
+        // The measured mtime of the owner's `02106.MTS`: 2026-07-25T14:12:08 in CEST, and
+        // therefore 12:12:08 in the UTC this function is contractually in.
+        assert_eq!(iso8601_utc(1_784_981_528), "2026-07-25T12:12:08Z");
+    }
+
+    #[test]
+    fn the_mtime_rung_is_a_stat_and_nothing_else() {
+        // D-067: this rung exists because 136 of the owner's files carry no container tags
+        // at all, so it must not cost a spawn. The signature is the assertion — there is no
+        // `Sidecar` to hand it — and this pins the shape of what it answers.
+        let dir = scratch("mtime-rung");
+        let path = dir.join("not-media.txt");
+        fs::write(&path, b"ffprobe would reject this").unwrap();
+        let iso = modified_time_iso(&path).expect("a file that exists has an mtime");
+        assert!(
+            regex_lite_iso(&iso),
+            "expected ISO-8601 UTC to the second, got {iso}"
+        );
+        assert_eq!(modified_time_iso(&dir.join("absent.txt")), None);
+    }
+
+    /// `YYYY-MM-DDTHH:MM:SSZ`, checked by shape — `core` has no regex dependency and is
+    /// not about to grow one for a test.
+    fn regex_lite_iso(s: &str) -> bool {
+        let b = s.as_bytes();
+        b.len() == 20
+            && b[4] == b'-'
+            && b[7] == b'-'
+            && b[10] == b'T'
+            && b[13] == b':'
+            && b[16] == b':'
+            && b[19] == b'Z'
+            && [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
+                .iter()
+                .all(|&i| b[i].is_ascii_digit())
+    }
+
+    #[test]
+    fn a_real_scan_carries_the_mtime_and_leaves_the_date_tag_alone() {
+        // End to end: the two fields are populated by the scan itself, not merely present
+        // on the struct. A generated WAV has no `date` tag, so `date_tag` is None — and
+        // that is the honest answer, not a hole.
+        let Some(sidecar) = require_ffprobe() else {
+            return;
+        };
+        let dir = scratch("scan-time-ladder");
+        write_wav(&dir.join("C0001.WAV"), 0.5);
+        let m = scan(&[dir], &sidecar, &NoProgress, &CancelToken::new()).unwrap();
+        let entry = &m.files[0];
+        assert!(
+            entry.modified_time.as_deref().is_some_and(regex_lite_iso),
+            "the scan must carry an ISO mtime, got {:?}",
+            entry.modified_time
+        );
+        assert_eq!(entry.date_tag, None);
+    }
+
+    #[test]
     fn the_cache_is_excluded_by_identity_not_by_spelling() {
         // D-020: the exclusion and the walk's own paths arrive from different routes —
         // the cache dir is assembled from `$HOME` or typed by the user, the walk's path is
@@ -1421,6 +1607,8 @@ mod tests {
                 fps: Rational::new(25, 1),
             }),
             creation_time: None,
+            date_tag: None,
+            modified_time: None,
         };
         let audio = |path: &str| FileEntry {
             video: None,
@@ -1636,6 +1824,10 @@ mod tests {
             "audio",
             "video",
             "creation_time",
+            // D-067's two rungs. Always written, like `skipped` — the `#[serde(default)]`
+            // is about reading an older manifest, not about writing this one.
+            "date_tag",
+            "modified_time",
         ] {
             assert!(entry.get(key).is_some(), "missing key {key}");
         }

@@ -59,6 +59,21 @@ impl Probed {
         self.tags.get("creation_time").map(String::as_str)
     }
 
+    /// The container's `date` tag, when there is one (V05-W3, D-067).
+    ///
+    /// Separate from [`Self::creation_time`] because on a BWF the two are **halves of one
+    /// timestamp**: a Zoom F6 writes `date=2026-07-25` and `creation_time=16:12:29`, and
+    /// neither is a time on its own. Cameras that write a full ISO `creation_time` do not
+    /// write this at all, so nothing that reads `creation_time` changes shape.
+    ///
+    /// Verbatim, unparsed. The engine has no opinion about it; `app/src/timeline/
+    /// recordingTime.ts` is the one place that decides what a date string means, and a
+    /// getter that "helpfully" normalised here would be a second such place.
+    #[must_use]
+    pub fn date_tag(&self) -> Option<&str> {
+        self.tags.get("date").map(String::as_str)
+    }
+
     /// Best available human name for the recording device (§4.5 heuristic 2).
     ///
     /// Checks the QuickTime-namespaced keys Apple and several camera vendors write
@@ -301,6 +316,23 @@ mod tests {
         assert_eq!(p.duration_seconds, 3600.5);
         assert_eq!(p.creation_time(), Some("2026-07-27T10:00:00.000000Z"));
         assert_eq!(p.video.as_ref().unwrap().fps, Rational::new(25, 1));
+        // A camera that writes a full ISO stamp writes no separate `date` (D-067).
+        assert_eq!(p.date_tag(), None);
+    }
+
+    #[test]
+    fn reads_a_bwf_whose_timestamp_arrives_in_two_halves() {
+        // Measured on the owner's Zoom F6: `date` and `creation_time` are one timestamp
+        // split across two tags, and `creation_time` alone is a time of day with no day
+        // (D-067). ffprobe reports exactly this shape for `260725_001_Tr1.WAV`.
+        let p = parse(
+            r#"{"streams":[{"codec_type":"audio","codec_name":"pcm_s24le","sample_rate":"48000","channels":1}],
+                "format":{"format_name":"wav","duration":"14.014",
+                          "tags":{"date":"2026-07-25","creation_time":"16:12:29"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(p.date_tag(), Some("2026-07-25"));
+        assert_eq!(p.creation_time(), Some("16:12:29"));
     }
 
     #[test]

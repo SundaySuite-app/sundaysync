@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { sourceSpans } from "./sourceLayout";
+import { stackClips } from "./laneLayout";
+import { contentBounds } from "./viewport";
 import type { Device, FileEntry, ScanManifest } from "../types";
 
-// The pre-sync layout (v0.4, D-061). What is worth testing here is exactly what the
-// timeline would otherwise lie about: which clock positions a clip, what happens when a
-// file has no clock at all, and whether a device override moves a clip on the timeline the
-// same way it moves a row in the panel.
+// The pre-sync layout (v0.4, D-061; rewritten V05-W3 for D-067/D-068/D-071). What is worth
+// testing here is exactly what the timeline would otherwise lie about: which clock
+// positions a clip, what happens to a file no clock could reach, and whether a device
+// override moves a clip on the timeline the same way it moves a row in the panel.
 
 function device(id: string, kind: Device["kind"] = "video"): Device {
   return { id, label: id, kind, files: [] };
@@ -18,12 +20,19 @@ function file(over: Partial<FileEntry> & { file: string; device: string }): File
     audio: { codec: "aac", sample_rate: 48000, channels: 2 },
     video: null,
     creation_time: null,
+    date_tag: null,
+    modified_time: null,
     ...over,
   };
 }
 
 function manifest(devices: Device[], files: FileEntry[]): ScanManifest {
   return { schema: 1, devices, files, unsynced: [] };
+}
+
+/** Every drawn span, whichever track it landed on. */
+function spansOf(layout: ReturnType<typeof sourceSpans>) {
+  return new Map(layout.tracks.flatMap((t) => t.spans).map((s) => [s.file, s]));
 }
 
 describe("sourceSpans", () => {
@@ -73,41 +82,25 @@ describe("sourceSpans", () => {
     expect(byFile.get("/a/late.MP4")!.startMs).toBe(60_000);
   });
 
-  it("puts a file with no creation time at zero and reports it as unknown", () => {
-    const { tracks, unknownStart } = sourceSpans(
+  it("reports which rung of the ladder positioned each file", () => {
+    // D-067 in one assertion: the layout carries the provenance, so the clip can say it.
+    const layout = sourceSpans(
       manifest(
         [device("cam-a"), device("rec", "audio")],
         [
+          file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "2026-08-09T10:00:00Z" }),
+          file({ file: "/a/C2.MP4", device: "cam-a", creation_time: "2026-08-09T10:30:00Z" }),
           file({
-            file: "/a/C1.MP4",
-            device: "cam-a",
-            creation_time: "2026-08-09T10:05:00Z",
-            duration_seconds: 120,
+            file: "/r/uirec-20260809_113000.wav",
+            device: "rec",
+            duration_seconds: 600,
           }),
-          // A WAV/BWF from a field recorder: no container timestamp at all.
-          file({ file: "/r/ZOOM0001.WAV", device: "rec", duration_seconds: 3600 }),
         ],
       ),
       {},
     );
-
-    expect(unknownStart.has("/r/ZOOM0001.WAV")).toBe(true);
-    expect(unknownStart.size).toBe(1);
-    const rec = tracks.find((t) => t.device.id === "rec")!;
-    expect(rec.spans).toEqual([{ file: "/r/ZOOM0001.WAV", startMs: 0, endMs: 3_600_000 }]);
-    // …and the timestamped file keeps its own zero: a file with no clock must not drag
-    // the origin (it would otherwise be "before the epoch" and push everything off-screen).
-    const cam = tracks.find((t) => t.device.id === "cam-a")!;
-    expect(cam.spans[0].startMs).toBe(0);
-  });
-
-  it("treats an unparseable creation time exactly like a missing one", () => {
-    const { tracks, unknownStart } = sourceSpans(
-      manifest([device("cam-a")], [file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "not a date" })]),
-      {},
-    );
-    expect(unknownStart.has("/a/C1.MP4")).toBe(true);
-    expect(tracks[0].spans[0].startMs).toBe(0);
+    expect(layout.timeSource.get("/a/C1.MP4")).toBe("container");
+    expect(layout.timeSource.get("/r/uirec-20260809_113000.wav")).toBe("filename");
   });
 
   it("regroups under the override overlay, dropping a device it empties", () => {
@@ -138,9 +131,206 @@ describe("sourceSpans", () => {
   });
 
   it("answers an empty manifest with no tracks and nothing unknown", () => {
-    const { tracks, unknownStart } = sourceSpans(manifest([], []), {});
+    const { tracks, unknownStart, outsideWindow } = sourceSpans(manifest([], []), {});
     expect(tracks).toEqual([]);
     expect(unknownStart.size).toBe(0);
+    expect(outsideWindow.size).toBe(0);
+  });
+});
+
+// ── D-068: files with no usable time are laid out in filename order ─────────────────────
+//
+// The owner's choice. The old behaviour put every untimed file at zero, which on a
+// 14-take Zoom folder drew fourteen boxes on top of each other and called it a position.
+// Order is a claim the app can actually make: the camera numbered the files.
+
+describe("files nothing could time are laid out in order, not in a pile", () => {
+  const untimedDrop = () =>
+    manifest(
+      [device("cam-a"), device("rec", "audio")],
+      [
+        file({
+          file: "/a/C1.MP4",
+          device: "cam-a",
+          creation_time: "2026-08-09T10:00:00Z",
+          duration_seconds: 120,
+        }),
+        file({
+          file: "/a/C2.MP4",
+          device: "cam-a",
+          creation_time: "2026-08-09T10:05:00Z",
+          duration_seconds: 60,
+        }),
+        // Three takes with nothing in them at all: no tags, no timestamp in the name.
+        file({ file: "/r/T3.WAV", device: "rec", duration_seconds: 30 }),
+        file({ file: "/r/T1.WAV", device: "rec", duration_seconds: 10 }),
+        file({ file: "/r/T2.WAV", device: "rec", duration_seconds: 20 }),
+      ],
+    );
+
+  it("lays them end to end with no gap, in filename order", () => {
+    const layout = sourceSpans(untimedDrop(), {});
+    const rec = layout.tracks.find((t) => t.device.id === "rec")!;
+    expect(rec.spans).toEqual([
+      { file: "/r/T1.WAV", startMs: 0, endMs: 10_000 },
+      { file: "/r/T2.WAV", startMs: 10_000, endMs: 30_000 },
+      { file: "/r/T3.WAV", startMs: 30_000, endMs: 60_000 },
+    ]);
+    expect([...layout.unknownStart].sort()).toEqual(["/r/T1.WAV", "/r/T2.WAV", "/r/T3.WAV"]);
+  });
+
+  it("collapses to ONE lane, because end-to-end clips do not overlap", () => {
+    // The 14-lane Zoom stack disappears as arithmetic rather than as a special case: this
+    // is `stackClips` on the same spans the component gets, with nothing else in between.
+    const layout = sourceSpans(untimedDrop(), {});
+    const rec = layout.tracks.find((t) => t.device.id === "rec")!;
+    expect(stackClips(rec.spans)).toHaveLength(1);
+  });
+
+  it("starts a device's strip where its own last PLACED clip ended", () => {
+    // A card that is half timed and half not reads as one continuous strip, rather than as
+    // a pile at the start sitting on top of the clips that were placed.
+    const scan = untimedDrop();
+    scan.files.push(file({ file: "/a/C9.MP4", device: "cam-a", duration_seconds: 45 }));
+    const layout = sourceSpans(scan, {});
+    const cam = layout.tracks.find((t) => t.device.id === "cam-a")!;
+    const c9 = cam.spans.find((s) => s.file === "/a/C9.MP4")!;
+    // C1 runs 0–120 s, C2 runs 300–360 s. The untimed take follows C2.
+    expect(c9.startMs).toBe(360_000);
+    expect(c9.endMs).toBe(405_000);
+    expect(stackClips(cam.spans)).toHaveLength(1);
+  });
+
+  it("starts at timeline zero for a device that has nothing placed", () => {
+    const layout = sourceSpans(untimedDrop(), {});
+    const rec = layout.tracks.find((t) => t.device.id === "rec")!;
+    expect(rec.spans[0].startMs).toBe(0);
+  });
+
+  it("grows contentBounds only by what a device's strip actually adds", () => {
+    // R2, as an assertion rather than as a hope. The session here is 360 s and the untimed
+    // recorder's strip is 60 s, laid from zero — so the drawn span is still the session's.
+    const layout = sourceSpans(untimedDrop(), {});
+    const all = layout.tracks.flatMap((t) => t.spans);
+    expect(contentBounds(all).spanMs).toBe(360_000);
+
+    // …and when a device's strip DOES run past the session, the span grows to hold it,
+    // because a clip drawn outside the bounds would be a clip nobody can scroll to.
+    const scan = untimedDrop();
+    scan.files.push(file({ file: "/r/T4.WAV", device: "rec", duration_seconds: 600 }));
+    const grown = sourceSpans(scan, {});
+    expect(contentBounds(grown.tracks.flatMap((t) => t.spans)).spanMs).toBe(660_000);
+  });
+
+  it("still stacks two genuinely overlapping PLACED clips into two lanes", () => {
+    // The guard on the guard: D-068 must not turn the real overlap case into one row.
+    const layout = sourceSpans(
+      manifest(
+        [device("cam-a")],
+        [
+          file({
+            file: "/a/C1.MP4",
+            device: "cam-a",
+            creation_time: "2026-08-09T10:00:00Z",
+            duration_seconds: 600,
+          }),
+          file({
+            file: "/a/C2.MP4",
+            device: "cam-a",
+            creation_time: "2026-08-09T10:01:00Z",
+            duration_seconds: 600,
+          }),
+        ],
+      ),
+      {},
+    );
+    expect(stackClips(layout.tracks[0].spans)).toHaveLength(2);
+  });
+});
+
+// ── D-071: a stamp from another day is named, not removed ───────────────────────────────
+
+describe("files stamped outside the session", () => {
+  const strayDrop = () =>
+    manifest(
+      [device("cam-a"), device("drone")],
+      [
+        file({
+          file: "/a/C1.MP4",
+          device: "cam-a",
+          creation_time: "2026-07-25T10:00:00Z",
+          duration_seconds: 600,
+        }),
+        file({
+          file: "/a/C2.MP4",
+          device: "cam-a",
+          creation_time: "2026-07-25T10:30:00Z",
+          duration_seconds: 600,
+        }),
+        file({
+          file: "/d/DJI_0075.MP4",
+          device: "drone",
+          creation_time: "2023-06-13T20:43:05Z",
+          duration_seconds: 84,
+        }),
+        file({
+          file: "/d/DJI_0076.MP4",
+          device: "drone",
+          creation_time: "2023-06-13T20:46:12Z",
+          duration_seconds: 230,
+        }),
+      ],
+    );
+
+  it("keeps them out of `unknownStart` — they are a different sentence", () => {
+    const layout = sourceSpans(strayDrop(), {});
+    expect([...layout.outsideWindow].sort()).toEqual(["/d/DJI_0075.MP4", "/d/DJI_0076.MP4"]);
+    expect(layout.unknownStart.size).toBe(0);
+  });
+
+  it("names the day they claim, so the line can say it out loud", () => {
+    const layout = sourceSpans(strayDrop(), {});
+    expect(layout.outsideWindowDays).toHaveLength(1);
+    const day = new Date(layout.outsideWindowDays[0]);
+    expect(day.getFullYear()).toBe(2023);
+    expect(day.getMonth()).toBe(5);
+    expect(day.getDate()).toBe(13);
+  });
+
+  it("lists more than one outlier day when a drop has more than one", () => {
+    const scan = strayDrop();
+    scan.devices.push(device("rec", "audio"));
+    scan.files.push(
+      file({
+        file: "/r/200101_001.WAV",
+        device: "rec",
+        date_tag: "2020-01-01",
+        creation_time: "00:01:58",
+        duration_seconds: 30,
+      }),
+    );
+    const layout = sourceSpans(scan, {});
+    expect(layout.outsideWindowDays).toHaveLength(2);
+    // Ascending, so the line reads in the order a calendar does.
+    expect(layout.outsideWindowDays[0]).toBeLessThan(layout.outsideWindowDays[1]);
+  });
+
+  it("removes nothing — every file is still on a track", () => {
+    // §7.3, and D-071 explicitly: naming a stray folder is the app's job, deciding what to
+    // do about it is the operator's (D-062's per-file removal already exists).
+    const layout = sourceSpans(strayDrop(), {});
+    expect(spansOf(layout).size).toBe(4);
+    const drone = layout.tracks.find((t) => t.device.id === "drone")!;
+    expect(drone.spans).toEqual([
+      { file: "/d/DJI_0075.MP4", startMs: 0, endMs: 84_000 },
+      { file: "/d/DJI_0076.MP4", startMs: 84_000, endMs: 314_000 },
+    ]);
+  });
+
+  it("does not let a rejected stamp define the origin", () => {
+    const layout = sourceSpans(strayDrop(), {});
+    expect(spansOf(layout).get("/a/C1.MP4")!.startMs).toBe(0);
+    expect(spansOf(layout).get("/a/C2.MP4")!.startMs).toBe(30 * 60 * 1000);
   });
 });
 
@@ -166,15 +356,17 @@ describe("sourceSpans and clocks that cannot be true", () => {
       ],
     );
 
-    const { tracks, unknownStart } = sourceSpans(scan, {});
+    const layout = sourceSpans(scan, {});
 
-    expect([...unknownStart]).toEqual(["/d/C3.MP4"]);
-    const startOf = (file: string) =>
-      tracks.flatMap((t) => t.spans).find((s) => s.file === file)!.startMs;
+    // Since D-071 it is named rather than merely "unknown": it HAS a stamp, from 1970.
+    expect([...layout.outsideWindow]).toEqual(["/d/C3.MP4"]);
+    const startOf = (file: string) => spansOf(layout).get(file)!.startMs;
     // The two real cards keep their true ten-minute separation, and the earliest of THEM
     // is zero — the dud does not get to define the origin.
     expect(startOf("/a/C1.MP4")).toBe(0);
     expect(startOf("/b/C2.MP4")).toBe(10 * 60 * 1000);
+    // …and the dud lays out on its own row, from zero, because that device has nothing
+    // placed to follow.
     expect(startOf("/d/C3.MP4")).toBe(0);
   });
 
@@ -187,11 +379,10 @@ describe("sourceSpans and clocks that cannot be true", () => {
         file({ file: "/b/C2.MP4", device: "cam-b", creation_time: "2026-08-09T14:00:00Z" }),
       ],
     );
-    const { unknownStart, tracks } = sourceSpans(scan, {});
-    expect(unknownStart.size).toBe(0);
-    expect(tracks.flatMap((t) => t.spans).find((s) => s.file === "/b/C2.MP4")!.startMs).toBe(
-      6 * 60 * 60 * 1000,
-    );
+    const layout = sourceSpans(scan, {});
+    expect(layout.unknownStart.size).toBe(0);
+    expect(layout.outsideWindow.size).toBe(0);
+    expect(spansOf(layout).get("/b/C2.MP4")!.startMs).toBe(6 * 60 * 60 * 1000);
   });
 
   it("keeps the LATER of two equally-sized clusters — a broken clock reads early", () => {
@@ -204,7 +395,7 @@ describe("sourceSpans and clocks that cannot be true", () => {
     );
     // Neither file has company, so size cannot decide. A camera that lost its clock falls
     // back to a fixed date in the past; nothing makes one jump forward.
-    expect([...sourceSpans(scan, {}).unknownStart]).toEqual(["/a/C1.MP4"]);
+    expect([...sourceSpans(scan, {}).outsideWindow]).toEqual(["/a/C1.MP4"]);
   });
 
   it("believes the majority when one card is the odd one out", () => {
@@ -231,7 +422,7 @@ describe("sourceSpans and clocks that cannot be true", () => {
         }),
       ],
     );
-    expect([...sourceSpans(scan, {}).unknownStart]).toEqual(["/dud.MP4"]);
+    expect([...sourceSpans(scan, {}).outsideWindow]).toEqual(["/dud.MP4"]);
   });
 
   it("leaves a single stamped file alone — one clock cannot contradict itself", () => {
@@ -241,6 +432,9 @@ describe("sourceSpans and clocks that cannot be true", () => {
     );
     // Absurd on its face, but there is nothing to compare it with, and it positions
     // nothing: it is the origin, it sits at zero, and the sync is about to answer anyway.
-    expect(sourceSpans(scan, {}).unknownStart.size).toBe(0);
+    const layout = sourceSpans(scan, {});
+    expect(layout.outsideWindow.size).toBe(0);
+    expect(layout.unknownStart.size).toBe(0);
+    expect(layout.timeSource.get("/a/C1.MP4")).toBe("container");
   });
 });

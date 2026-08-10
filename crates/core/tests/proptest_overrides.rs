@@ -36,6 +36,8 @@ fn manifest_with_files(n: usize) -> ScanManifest {
             }),
             video: None,
             creation_time: None,
+            date_tag: None,
+            modified_time: None,
         })
         .collect();
     let device = Device {

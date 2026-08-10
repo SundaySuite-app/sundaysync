@@ -3030,3 +3030,254 @@ are currently *skipped by the scanner* (D-009), so using one as a preview source
 teaching the shell a source→proxy mapping, deciding what happens when the proxy is stale or
 absent, and accepting that the picture shown is not the picture that will be cut. None of
 that belongs in the stage that establishes the mechanism.
+
+## D-067 — V05-W3: recording time is a ladder with provenance, not a boolean
+
+**V05-W3.** Measured on the owner's real wedding drop,
+`/Volumes/Delt Fossland/LINNEA&SIGURD/`, read-only.
+
+The pre-sync timeline (D-061) positioned clips by one field — the container's
+`creation_time` — and put everything else at zero. On that drop, **174 of 386 files** landed
+at position zero in one indistinguishable pile, under one sentence: "N files have no
+recording time". That sentence was true and it was useless, because it described five
+different situations as if they were one.
+
+What ffprobe actually reports, per device:
+
+| Device | Files | What it carries |
+|---|---|---|
+| Fujifilm X-H2 | 246 `.MOV` | `creation_time=2026-07-25T20:41:12Z` |
+| AVCHD camera | 136 `.MTS` | **no container tags at all**; mtime `2026-07-25T14:12:08` |
+| Zoom F6 | 16 `.WAV` | `date=2026-07-25` **and** `creation_time=16:12:29` |
+| Mixer | 11 `.wav` | **no tags whatsoever**; the name `uirec-20260725_125533.wav` |
+| Zoom F2 | 5 `.WAV` | `date=2020-01-01`, and another reads `2023-03-26` |
+| DJI drone | 5 `.MP4` | `2023-06-13T20:43:05Z`, in a folder called `SÆVIK DRONE JUNI23` |
+
+Four of those six are placeable, and only one of the four was being placed.
+
+### The ladder
+
+`app/src/timeline/recordingTime.ts` — pure, React-free, and the one place in the app that
+decides what a date string means. Five rungs, tried in order:
+
+1. **`container`** — `creation_time` parses as a full ISO datetime. Guarded by requiring a
+   date part explicitly, not by asking whether `Date.parse` liked it: the F6's
+   `creation_time` really is `16:12:29`, and a "does it parse?" guard is one forgiving
+   engine away from reading a time of day as a datetime.
+2. **`bwf`** — `creation_time` matches `^\d{2}:\d{2}:\d{2}$`. The date is sought in the
+   `date` tag, then in a date token in the basename or any parent folder segment
+   (`260725_001.TAKE/`), then in the day the tier-1 stamps agree on. Each fallback is
+   weaker than the one before, and if all three fail the file gets **no** time rather than
+   an invented one.
+3. **`filename`** — `YYYYMMDD[_-]HHMMSS` or `YYMMDD[_-]HHMMSS` in the basename. Found by
+   walking adjacent *digit runs* rather than by a regex over the whole name, so a nine-digit
+   run cannot be sliced into a false eight-digit date.
+4. **`modified`** — `modified_time − duration_seconds`. Measured, not assumed: on the AVCHD
+   series the mtime is the **end** of the write, consistent to the second (`02106` at
+   14:12:08 for a 30.7 s clip, `02107` at 14:12:58 for an 11 s one, `02109` at 14:41:58 for
+   692 s). **Birth time is deliberately not used**: on those same files it is the date they
+   were copied off the card (2026-07-27) — a confident wrong answer, which is worse here
+   than no answer.
+5. **`none`** — nothing usable. D-068's sequential layout is the answer to that.
+
+The result is 407 of 423 media files placed on the real drop, against 244 before.
+
+### Local wall time versus UTC, said out loud
+
+A container `creation_time` is **UTC**. A BWF's `date` + `creation_time` and a timestamp in
+a filename are **LOCAL wall time**. `16:12:29` on a Zoom is what the front panel said;
+`2026-07-25T20:41:12Z` on the Fuji is not. Combining them naively puts the F6 two hours from
+the camera pointed at the same bride, and the difference between the two readings in
+JavaScript is a single trailing letter — `Date.parse("…T16:12:29")` means local,
+`Date.parse("…T16:12:29Z")` means UTC.
+
+So the two families go through deliberately different doors, each at its own commented call
+site: `Date.UTC`-based parsing for the absolute ones, the `new Date(y, m, d, …)` local
+constructor for the wall-clock ones. A zoneless container stamp is read as UTC rather than
+as local, because ffprobe writes container times in UTC and merely omits the `Z` on some
+containers.
+
+`vitest.config.ts` pins `TZ: Europe/Oslo` and `playwright.config.ts` pins
+`timezoneId: "Europe/Oslo"`, with a guard test that fails loudly if either is dropped: on a
+CI box set to UTC the two doors are indistinguishable and every one of these tests would
+pass while the app was two hours wrong for the people it is for.
+
+### Six digits are a date twice over — decided by measurement, then by evidence
+
+`260725` is 2026-07-25 read `YYMMDD` and 2025-07-26 read `DDMMYY`. On this corpus the F6's
+folder token `260725` sits beside that same recorder's own `date=2026-07-25` and beside the
+Fuji's ISO `2026-07-25`: **`YYMMDD` reproduces both, `DDMMYY` matches nothing in the drop.**
+
+That is the default, not a hardcoding. Both readings are computed, invalid dates are
+discarded, and when both survive the one nearer the median day of the tier-1 stamps wins.
+Only with no tier-1 stamps at all does the measured default stand unchallenged. Both
+readings are tested.
+
+### Midnight rollover
+
+Rungs 2 and 3 are a *date* and a *time of day* that were written down separately, so a
+recorder that starts a take at 23:50 and the next at 00:10 may keep writing yesterday's date
+into the folder name. Within one device, in natural filename order, a backwards jump of more
+than twelve hours is that — and the correction is cumulative: everything from the crossing
+onward is a day later. Container stamps and mtimes are left alone, because both carry their
+own date and a backwards jump there is a genuine disagreement for the gate to judge.
+
+The device is the file's **own** `FileEntry.device`, not its UI override: whose clock stood
+still is a fact about the machine that wrote the files, and regrouping them on screen does
+not change it.
+
+### The gate runs over the ladder's output, and grows rather than clamps
+
+V04-U5's plausible-session window used to sit over `creation_time` alone. It now sits over
+the whole ladder, which is what lets the lower rungs be aggressive without being reckless.
+
+The **reference tier** is the highest-confidence tier that produced at least two stamps —
+two being the least that can corroborate anything; with no tier at two, the single most
+trustworthy stamp anchors instead, since one clock cannot contradict itself. That tier's own
+24-hour sliding window (ties to the later window, because a broken clock reads *early*) is
+the seed. Every other stamp is then offered in order of distance from the seed's centre and
+admitted only if the whole admitted set still fits inside 24 hours.
+
+**Growing rather than testing against a fixed hull is load-bearing.** On the real drop the
+AVCHD camera's first clip starts an hour *before* the earliest container stamp; a hull test
+would have thrown away 136 correctly-timed files. The same mechanism still refuses the
+2020 F2 clock, the June drone folder and the mixer's day-before file, because admitting any
+of them would stretch the set past a day.
+
+A file the gate rejects is **not** retried on a lower rung. Its evidence was read and it
+said somewhere else; asking a weaker source for a different answer is how an app talks
+itself into one.
+
+### `SCHEMA_VERSION` does **not** move — D-066's test, applied
+
+`FileEntry` gains `date_tag: Option<String>` and `modified_time: Option<String>`, both
+`#[serde(default)]`, and both are **additive in both directions** exactly as D-066's
+`skipped` is:
+
+- **Old manifest, new reader:** JSON written before D-067 has neither key and deserialises
+  with both `None` (`a_file_entry_written_before_the_time_ladder_existed_still_deserialises`).
+- **New manifest, old reader:** nothing here uses `deny_unknown_fields`, so an older
+  consumer reads the manifest exactly as it did
+  (`a_new_manifest_still_reads_under_a_reader_that_ignores_the_new_fields`).
+
+Neither direction breaks, so nothing that reads schema v1 is invalidated — which is the only
+thing `SCHEMA_VERSION` is for. §5's frozen `SyncResult` shapes are untouched.
+
+### The mtime costs a `stat`, not a spawn
+
+`modified_time` is read in `scan.rs` with `std::fs::metadata`, at the point where the path is
+already in hand and the filesystem is already being touched. No ffprobe call, no extra
+process — which matters, because the whole reason this rung exists is that it is cheap on
+files where every container tag is missing. The helper takes a `&Path` and nothing else;
+there is no `Sidecar` to hand it, and that signature is the assertion.
+
+ISO-8601 UTC is formatted by a hand-rolled `civil_from_days` rather than by adding a date
+crate: `core` has five dependencies and each one is a licence, a build and a supply chain to
+justify. It is pinned at the epoch, a leap day, 1900 (not a leap year), 2000 (one) and a
+pre-1970 time.
+
+### What the UI says
+
+`SourceLayout` carries `timeSource: Map<string, TimeSource>`. A non-`container` source marks
+the clip `clip--est` — a dashed top edge, reusing the vocabulary `clip--nodur` already taught
+the eye — and **appends the source in words** to the accessible name: «starter 12:34.000 —
+anslått: anslått fra filens endringstidspunkt». A screen reader that heard only "12:34" would
+have been told a measurement.
+
+The note above the timeline is now a legend built from counts, replacing the bare
+`presyncUnknownStart`: «**204 plassert fra tidsstempel · 163 anslått · 5 bare rekkefølge · 14
+utenfor økta.**» Four counts, four different claims, summing to every clip on screen — §7.3's
+accounting rule applied to the sentence the operator reads. Zero-valued parts are omitted, so
+an ordinary drop still reads as one short line.
+
+## D-068 — V05-W3: files without a usable time are laid out in order, not in a pile
+
+**The owner's choice, and it is the right one**: the app knows something about an untimed
+file even when it does not know when it started. The camera *numbered* it. Order is a claim
+the app can actually make, and drawing fourteen Zoom takes on top of each other at position
+zero was a claim nobody made about any of them.
+
+So a file the ladder could not time (or whose stamp the gate refused, D-071) is laid out
+**end to end, zero gap, on its own device's row**, starting at that device's last *placed*
+`endMs` — or at timeline 0 when it has nothing placed. Zero gap because a gap would be a
+duration nobody measured; the device's own row because a card that is half timed and half not
+should read as one continuous strip rather than as a pile sitting on top of its own placed
+clips.
+
+Order comes from a new pure `app/src/timeline/naturalSort.ts`: digit runs compare as numbers
+(`DSCF640 < DSCF6408 < DSCF10000`, `02106 < 02118`), directory segments compare before the
+basename (so the F6's `260725_001.TAKE/` … `_007.TAKE/` come out in take order), and it is
+locale-free. `Intl.Collator(…, { numeric: true })` gets the digits right and brings a locale
+with it — a layout that changes with the operator's system language is not a layout anyone
+can reason about. Digit runs are compared by length-then-lexicographically after stripping
+leading zeros rather than via `Number()`, so a run past 2⁵³ cannot collapse into a float that
+equals its neighbour and hand two files' order to the sort's stability.
+
+**The fourteen lanes disappear as arithmetic, not as a special case.** End-to-end clips do
+not overlap, so `stackClips` returns one row for them — with no branch anywhere saying
+"untimed files get one lane". The genuinely-overlapping case (§4.4's multitrack exemption)
+still stacks into two, and `timeline.spec.ts:145-147` still asserts it.
+
+### R2, measured rather than assumed
+
+The risk named in the plan: a device with everything unplaced stretches `contentBounds` and
+makes every clip narrower, fighting W1's legibility work.
+
+**Measured on the real 423-file drop** by running the shipped layout over the corpus's own
+ffprobe output and mtimes:
+
+| | span |
+|---|---|
+| Session (placed clips only) | **15.43 h** |
+| Shipped layout (per-device, from each device's placed end) | **15.54 h** |
+| Fallback layout (every strip from timeline 0) | 15.43 h |
+
+**+0.7 %, a factor of 1.008.** It does not bite, and the shipped layout is the per-device
+one. The reason it is so small on this drop is worth writing down: the F2's five files total
+**12.4 hours** — nearly the whole session on their own — but that device has *nothing*
+placed, so its strip starts at zero and lies entirely inside a session that is longer. The
+fallback (all strips from 0) stays available and is four lines away if a future drop puts a
+long unplaced strip on a device whose placed clips already run to the end.
+
+`contentBounds` still grows to hold whatever the strips need, because a clip drawn outside
+the bounds is a clip nobody can scroll to.
+
+### The vertical safety net, which is independent of all of the above
+
+`.timeline__frame` had `overflow: hidden` and no height, so twelve devices at two lanes each
+grew the **body** and pushed the sources panel and the sync button off a laptop screen. The
+tracks now scroll inside `.timeline__scroll` (`max-height: 60vh; overflow-y: auto`), with the
+ruler row `position: sticky; top: 0` inside it — the ruler is the only thing on screen that
+says what the horizontal axis means — and the horizontal scrollbar row left outside as the
+sibling it already was.
+
+**R5 was real and the test caught it.** Wrapping the tracks in a scrolling element changes
+the containing block for every absolutely-positioned overlay in the timeline, the D-063 fade
+ghosts included; a ghost placed without accounting for the scroll offset is drawn
+`scrollTop` pixels from the clip it stands in for, and **every existing hop assertion would
+still pass, because they all run at scroll 0.** `hop.spec.ts` now scrolls the container
+before the outcome lands and asserts the ghost's position against the track column's own
+origin. (The layout as shipped is correct — the ghost layer lives inside `.timeline__body`
+and scrolls with it — but "correct" and "asserted" are different states.)
+
+## D-071 — V05-W3: files stamped outside the session are named, not removed
+
+A stamp the gate refuses is not the same thing as no stamp, and the app now stops calling
+them the same thing. `outsideWindow` splits out of `unknownStart` and gets three surfaces:
+
+- **A clip badge**, `clip--offsession` — dashed amber, aria «tidsstemplet utenfor økta».
+  Amber rather than the neutral slate of the other pre-sync marks because, unlike them, this
+  one is usually a folder that should not have been dropped.
+- **A legend line that names the actual date**: «14 filer er tidsstemplet 13.06.2023, utenfor
+  denne økta, og er ikke plassert etter klokka.» Naming the date is what makes the line
+  actionable — the owner recognises the June drone folder instantly and would recognise
+  nothing at all in "14 filer". More than one outlier day is normal (the real drop has
+  seven), so the line lists two and counts the rest rather than picking one and lying by
+  omission.
+- **Nothing auto-removed.** D-062's per-file removal already exists and it is the operator's.
+  An app that quietly drops files the operator can see on the card is the silent truncation
+  §7.3 forbids, whatever its reason.
+
+Two session days in one drop falls out of the same mechanism rather than needing its own: the
+smaller day is demoted by the window gate, counted, and named. No silent merge, and no
+invented origin.

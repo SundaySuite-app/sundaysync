@@ -460,6 +460,104 @@ export function presyncScanManifest(): Record<string, unknown> {
   };
 }
 
+/**
+ * The owner's wedding drop in miniature — one file per rung of the recording-time ladder
+ * (V05-W3, D-067), plus the two kinds of file the ladder deliberately refuses to place.
+ *
+ * Every shape here was measured on `/Volumes/Delt Fossland/LINNEA&SIGURD/`, read-only:
+ *
+ * | Device | What it carries | Rung |
+ * |---|---|---|
+ * | `fuji` | `creation_time=2026-07-25T20:41:12Z` | container |
+ * | `f6` | `date=2026-07-25` **and** `creation_time=16:12:29` | bwf |
+ * | `mikser` | nothing but the name `uirec-20260725_125533.wav` | filename |
+ * | `johnny` | **no container tags at all**; an mtime, which is end-of-write | modified |
+ * | `johnny` (`MUSIC_01.WAV`) | nothing whatsoever, not even an mtime | none |
+ * | `f2` | `date=2020-01-01` — the clock was never set | rejected |
+ * | `drone` | `2023-06-13` — a different shoot in the same folder | rejected |
+ *
+ * The mix is the point: it is the smallest drop for which the four legend counts are all
+ * non-zero and the off-session line has two distinct dates to name.
+ */
+export function ladderScanManifest(): Record<string, unknown> {
+  const base = "/Users/e2e/shoot";
+  const media = (over: Record<string, unknown>): Record<string, unknown> => ({
+    duration_seconds: 60,
+    format_name: "wav",
+    audio: { codec: "pcm_s16le", sample_rate: 48000, channels: 2 },
+    video: null,
+    creation_time: null,
+    date_tag: null,
+    modified_time: null,
+    ...over,
+  });
+  const files = [
+    media({
+      file: `${base}/FUJI/DSCF6408.MOV`,
+      device: "fuji",
+      duration_seconds: 1200,
+      format_name: "mov,mp4",
+      video: { codec: "h264", width: 1920, height: 1080, fps: "25/1" },
+      creation_time: "2026-07-25T20:41:12.000000Z",
+    }),
+    media({
+      file: `${base}/F6/260725_001.TAKE/260725_001_Tr1.WAV`,
+      device: "f6",
+      duration_seconds: 900,
+      date_tag: "2026-07-25",
+      creation_time: "16:12:29",
+    }),
+    media({
+      file: `${base}/MIKSER/uirec-20260725_125533.wav`,
+      device: "mikser",
+      duration_seconds: 1572,
+    }),
+    media({
+      file: `${base}/JOHNNY/02106.MTS`,
+      device: "johnny",
+      duration_seconds: 1800,
+      format_name: "mpegts",
+      video: { codec: "h264", width: 1920, height: 1080, fps: "50/1" },
+      // End of write: 14:12 local on 25 July, so the clip STARTS half an hour earlier.
+      modified_time: "2026-07-25T12:12:08Z",
+    }),
+    // Nothing at all — the file that can only be laid out in filename order (D-068).
+    media({ file: `${base}/JOHNNY/MUSIC_01.WAV`, device: "johnny", duration_seconds: 300 }),
+    // A recorder whose clock was never set: a real timestamp, from 2020 (D-071).
+    media({
+      file: `${base}/F2/200101_001.WAV`,
+      device: "f2",
+      duration_seconds: 600,
+      date_tag: "2020-01-01",
+      creation_time: "00:01:58",
+    }),
+    // A June drone folder that travelled inside a July wedding (D-071).
+    media({
+      file: `${base}/DRONE/DJI_0075.MP4`,
+      device: "drone",
+      duration_seconds: 84,
+      format_name: "mov,mp4",
+      video: { codec: "h264", width: 3840, height: 2160, fps: "30/1" },
+      creation_time: "2023-06-13T20:43:05.000000Z",
+    }),
+  ];
+  const labels: Record<string, [string, string]> = {
+    fuji: ["Fujifilm X-H2", "video"],
+    f6: ["Zoom F6", "audio"],
+    mikser: ["Mikser", "audio"],
+    johnny: ["AVCHD-kamera", "video"],
+    f2: ["Zoom F2", "audio"],
+    drone: ["Drone", "video"],
+  };
+  const devices = Object.entries(labels).map(([id, [label, kind]]) => ({
+    id,
+    label,
+    kind,
+    files: files.filter((f) => f.device === id).map((f) => f.file as string),
+  }));
+  return { schema: 1, devices, files, unsynced: [], skipped: [] };
+}
+
 export function syncOutcome(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
     result: {

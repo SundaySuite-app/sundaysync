@@ -129,6 +129,50 @@ async function reachSources(page: Page) {
 }
 
 /**
+ * `hopOutcome(omit)`, but with every device the scan reported — including the fillers.
+ *
+ * §7.5 already says a device that synced nothing stays visible; stating it here keeps the
+ * track column exactly as tall after the sync as before it, which is what lets the scrolled
+ * ghost assertion compare two viewport positions rather than two different layouts.
+ */
+function outcomeOverAllDevices(omit: string): Record<string, unknown> {
+  const outcome = hopOutcome(omit);
+  const result = outcome.result as Record<string, unknown>;
+  return {
+    ...outcome,
+    result: { ...result, devices: manifestWithFillerDevices(8).devices },
+  };
+}
+
+/**
+ * The three-device fixture plus `n` more devices, each with one untimed file.
+ *
+ * Only the height matters: eleven devices is 396 px of tracks, which overflows the
+ * `max-height: 60vh` scroll box in a 560 px window. The extra files carry no timestamp, so
+ * they lay out in filename order (D-068) and do not disturb the three the hop is about.
+ */
+function manifestWithFillerDevices(n: number): Record<string, unknown> {
+  const base = presyncScanManifest();
+  const devices = [...(base.devices as Record<string, unknown>[])];
+  const files = [...(base.files as Record<string, unknown>[])];
+  for (let i = 0; i < n; i++) {
+    const id = `filler-${i}`;
+    const file = `/Users/e2e/shoot/Filler${i}/TRACK.WAV`;
+    devices.push({ id, label: `Filler ${i}`, kind: "audio", files: [file] });
+    files.push({
+      file,
+      device: id,
+      duration_seconds: 60,
+      format_name: "wav",
+      audio: { codec: "pcm_s16le", sample_rate: 48000, channels: 2 },
+      video: null,
+      creation_time: null,
+    });
+  }
+  return { ...base, devices, files };
+}
+
+/**
  * Record what the timeline DOES, rather than what it looks like at some instant.
  *
  * `attributeOldValue` is the load-bearing option: the hop sets a transform and clears it
@@ -342,5 +386,73 @@ test.describe("the clips hop into place when the sync lands", () => {
       settled,
       0,
     );
+  });
+
+  // ── R5: the hop with the tracks SCROLLED (V05-W3) ────────────────────────────────────
+  //
+  // The vertical safety net wraps the tracks in a scrolling box, which changes the
+  // containing block every absolutely-positioned overlay in the timeline resolves against
+  // — the fade ghosts included. A ghost placed by arithmetic that did not account for the
+  // scroll offset would be drawn `scrollTop` pixels away from the clip it stands in for,
+  // and every existing hop assertion would still pass, because they all run at scroll 0.
+  test("a fade ghost lands on its clip's box even when the tracks are scrolled", async ({
+    page,
+  }) => {
+    // A tall drop in a short window, so there is genuinely something to scroll: the three
+    // fixture devices plus eight more, which is an ordinary church rig and exactly the
+    // shape the safety net exists for.
+    await page.setViewportSize({ width: 1280, height: 560 });
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: manifestWithFillerDevices(8),
+        run_sync: controlled("run_sync"),
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await expect(page.locator(".clip")).toHaveCount(11);
+
+    const scroller = page.locator(".timeline__scroll");
+    await scroller.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    const scrolled = await scroller.evaluate((el) => el.scrollTop);
+    expect(scrolled).toBeGreaterThan(0);
+
+    // Where Camera B's box is right now, measured against the SCROLLED track column rather
+    // than against the viewport. The column's own top is the right frame of reference here:
+    // the note above the frame is a pre-sync line and disappears when the result lands, so
+    // viewport coordinates would be comparing two different page layouts. What R5 is about
+    // is narrower and this is exactly it — does the ghost land on the clip's box inside the
+    // scrolled column, or `scrollTop` pixels away from it?
+    const inColumn = async (locator: ReturnType<Page["locator"]>) => {
+      const box = (await locator.boundingBox())!;
+      const body = (await page.locator(".timeline__body").boundingBox())!;
+      return { x: box.x - body.x, y: box.y - body.y };
+    };
+    const before = await inColumn(page.locator(`.clip[data-file="${CAM_B}"]`));
+
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForPending(page, "run_sync");
+    // Camera B is left unplaced, so it is the clip that fades. The result carries the SAME
+    // device list as the scan, so the track column keeps its height and the scroll offset
+    // stays where the operator put it.
+    await resolveControlled(page, "run_sync", outcomeOverAllDevices(CAM_B));
+
+    const ghost = page.locator(`.clip--ghost[data-file="${CAM_B}"]`);
+    await expect(ghost).toBeAttached();
+    expect(await scroller.evaluate((el) => el.scrollTop)).toBe(scrolled);
+    const after = await inColumn(ghost);
+    // A ghost layer that did not scroll with the tracks would be off by `scrollTop`, and
+    // every other hop assertion in this file would still pass, because they all run at
+    // scroll 0.
+    expect(after.y).toBeCloseTo(before.y, 0);
+    expect(after.x).toBeCloseTo(before.x, 0);
+
+    // …and it still cleans up after itself.
+    await waitForResult(page);
+    await expect(page.locator(".clip--ghost")).toHaveCount(0);
   });
 });

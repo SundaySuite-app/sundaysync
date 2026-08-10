@@ -6,6 +6,7 @@ import { formatTimecode, msToX, type TimelineView } from "../../timeline/geometr
 import { MIN_CLIP_WIDTH_PX } from "../../timeline/hop";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import { usePlayheadInsideSpan } from "../../timeline/playhead";
+import type { TimeSource } from "../../timeline/recordingTime";
 import { basename } from "../../types";
 import type { Placement } from "../../types";
 import { ClipStatus, useClipWaveform, WaveformCanvas } from "./WaveformCanvas";
@@ -39,7 +40,8 @@ export const Clip = memo(function Clip({
   placement,
   view,
   durationUnknown = false,
-  startUnknown = false,
+  timeSource = null,
+  offSession = false,
   analysisStatus = null,
   onSelect,
 }: {
@@ -50,8 +52,13 @@ export const Clip = memo(function Clip({
   view: TimelineView;
   /** The outcome carries no duration for this file — see the `clip--nodur` note below. */
   durationUnknown?: boolean;
-  /** Pre-sync only: nothing in the file said when it started, so it sits at zero. */
-  startUnknown?: boolean;
+  /** Pre-sync only: which rung of the recording-time ladder positioned this file (D-067).
+   *  Null after a sync, where the engine's own answer replaces every rung of it. Passed as
+   *  one string rather than as the layout's map because this component is `memo`ised, and a
+   *  map would be a fresh prop identity on every render of every clip. */
+  timeSource?: TimeSource | null;
+  /** Pre-sync only (D-071): this file carries a timestamp, from another day. */
+  offSession?: boolean;
   /** Where the background pre-analysis is with this file (v0.4, D-062) — passed straight
    *  through to the waveform slot, which is the only thing that behaves differently. One
    *  file's status rather than the whole prewarm map on purpose: this component is
@@ -103,22 +110,51 @@ export const Clip = memo(function Clip({
   // accessible name, in the tooltip, and as a dashed box the eye reads as "not a
   // measurement". The width is left alone on purpose — inventing one would be drawing a
   // duration the app does not know.
+  //
+  // V05-W3 (D-067/D-068/D-071) adds three more marks, all of them about *where the number
+  // came from* rather than about the number:
+  //   - `clip--est`  — the start is an estimate, from a lower rung of the ladder. Dashed
+  //     top edge, reusing the vocabulary `clip--nodur` already taught the eye.
+  //   - `clip--seq`  — there is no start at all; the box is here because of its filename's
+  //     place in its device's sequence (D-068).
+  //   - `clip--offsession` — there IS a timestamp and it belongs to another day (D-071).
+  const estimated = timeSource !== null && timeSource !== "container" && timeSource !== "none";
+  const sequential = timeSource === "none";
   const className = [
     "clip",
     placement === null ? "clip--pre" : "",
     hasWarnings ? "clip--warn" : "",
     durationUnknown ? "clip--nodur" : "",
+    estimated ? "clip--est" : "",
+    sequential ? "clip--seq" : "",
+    offSession ? "clip--offsession" : "",
   ]
     .filter(Boolean)
     .join(" ");
   // Pre-sync the name reads the file's OWN start on this timeline (or says there isn't
-  // one) rather than an offset from a reference that has not been chosen yet.
+  // one) rather than an offset from a reference that has not been chosen yet — and, since
+  // D-067, says which rung of the ladder produced it. "12:34, estimated from the file's
+  // modification time" is a different claim from "12:34", and a screen reader that heard
+  // only the second one would have been told a measurement.
+  const sourceWords =
+    timeSource === "bwf"
+      ? t.presyncSourceBwf
+      : timeSource === "filename"
+        ? t.presyncSourceFilename
+        : timeSource === "modified"
+          ? t.presyncSourceModified
+          : null;
+  const presyncLabel = sequential
+    ? `${name}, ${t.presyncSourceNone}`
+    : sourceWords !== null
+      ? `${name}, ${t.presyncStart} ${formatTimecode(span.startMs)} — ${t.presyncStartEstimated}: ${sourceWords}`
+      : `${name}, ${t.presyncStart} ${formatTimecode(span.startMs)}`;
   const baseLabel =
     placement !== null
       ? `${name}, ${t.offsetLabel} ${placement.offset_seconds.toFixed(1)} s`
-      : startUnknown
-        ? `${name}, ${t.presyncStartUnknown}`
-        : `${name}, ${t.presyncStart} ${formatTimecode(span.startMs)}`;
+      : offSession
+        ? `${presyncLabel} — ${t.presyncOffSessionClip}`
+        : presyncLabel;
 
   return (
     <button

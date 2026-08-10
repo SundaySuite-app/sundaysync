@@ -2,7 +2,40 @@
 
 ## Unreleased — v0.5
 
+### New
+
+- **The timeline knows when your files were recorded, even when the camera did not write it
+  down (D-067).** On a real 386-file wedding, 174 files used to land in one pile at the very
+  start of the timeline under a single line: "174 filer mangler opptakstidspunkt". Almost all
+  of them did have a recording time — just not in the one place the app was looking. It now
+  reads four kinds of evidence, in order of how much they can be trusted: the camera's own
+  timestamp; a recorder's date and clock written as two separate tags (the Zoom F6 does this);
+  a timestamp spelled into the filename (`uirec-20260725_125533.wav`); and, when a file
+  carries no tags at all — every one of the 136 AVCHD `.MTS` files on that drop — the file's
+  own modification time, minus its length, because that is when the recording *finished*. On
+  the owner's drop that is 407 files placed where 244 were before.
+- **Every clip says which of those it is.** A start the app *measured* looks different from a
+  start it *worked out*: an estimated one gets a dashed top edge, and its spoken description
+  says where the number came from — «anslått fra filens endringstidspunkt». The line above the
+  timeline is now four counts instead of one: «204 plassert fra tidsstempel · 163 anslått · 5
+  bare rekkefølge · 14 utenfor økta.»
+- **Files nothing can time are laid out in the order the camera numbered them (D-068).** They
+  used to stack at position zero — fourteen Zoom takes drawn on top of each other, which said
+  nothing about any of them. They now sit end to end on their own device's row, after that
+  device's last placed clip. The app does not know when they started; it does know what
+  followed what, and that is what it draws. The stack of lanes goes with it.
+- **A folder from another day is named, not silently mixed in (D-071).** A June drone folder
+  that travelled inside a July wedding, or a recorder whose clock was never set and reports
+  2020, is not placed by its clock — and the app says so *with the date*: «14 filer er
+  tidsstemplet 13.06.2023, utenfor denne økta, og er ikke plassert etter klokka.» Nothing is
+  removed on your behalf; you already have per-file removal if you want it.
+
 ### Fixed
+
+- **The timeline stops growing the page when you drop a lot of devices.** Twelve devices used
+  to push the sources panel and the Sync button off the bottom of a laptop screen. The tracks
+  now scroll inside their own box, with the time ruler stuck to the top of it so you can still
+  read what the clips line up against.
 
 - **The clips stop offering to rebuild a waveform the sync is already building (D-064).**
   Press Sync while the app is still pre-analysing your files and every clip on the timeline

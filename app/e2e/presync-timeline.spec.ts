@@ -4,6 +4,7 @@ import {
   BOOT_FIXTURES,
   controlled,
   PRESYNC_B_OFFSET_SEC,
+  ladderScanManifest,
   presyncScanManifest,
   resolveControlled,
   scanManifest,
@@ -90,14 +91,24 @@ test.describe("clips appear on the timeline before any sync", () => {
   test("a file with no recording time says so instead of pretending", async ({ page }) => {
     await reachSources(page);
 
-    // One of the three files (the WAV) has no container timestamp.
-    await expect(page.locator(".timeline__note")).toHaveText(en.presyncUnknownStart(1));
+    // Same intent as before V05-W3 — a file the app cannot time must SAY so rather than
+    // reading as "this began with the others" — but the sentence is now a legend built
+    // from counts, because the drop divides into more than two cases (D-067).
+    // One of the three files (the WAV) carries nothing at all: no container timestamp, no
+    // date tag, no timestamp in its name, no mtime.
+    await expect(page.locator(".timeline__note").first()).toHaveText(
+      en.presyncLegend({ placed: 2, estimated: 0, ordered: 1, offSession: 0 }),
+    );
     await expect(clip(page, WAV)).toHaveAttribute(
       "aria-label",
-      new RegExp(en.presyncStartUnknown),
+      new RegExp(en.presyncSourceNone),
     );
-    // The timestamped ones read their own start instead.
+    // …and it is marked as laid out by order rather than by a clock (D-068).
+    await expect(clip(page, WAV)).toHaveClass(/clip--seq/);
+    // The timestamped ones read their own start instead, and are NOT marked as estimates:
+    // a container stamp is the top rung.
     await expect(clip(page, CAM_B)).toHaveAttribute("aria-label", new RegExp(en.presyncStart));
+    await expect(clip(page, CAM_B)).not.toHaveClass(/clip--est/);
   });
 
   // ── V04-U5 QA: honesty about the clocks themselves ───────────────────────────────────
@@ -121,7 +132,9 @@ test.describe("clips appear on the timeline before any sync", () => {
     await expect(page.locator(".clip")).toHaveCount(2);
 
     await expect(page.locator(".result__meta span").first()).toHaveText(en.presyncMetaNoClock);
-    await expect(page.locator(".timeline__note")).toHaveText(en.presyncUnknownStart(2));
+    await expect(page.locator(".timeline__note").first()).toHaveText(
+      en.presyncLegend({ placed: 0, estimated: 0, ordered: 2, offSession: 0 }),
+    );
   });
 
   test("one dead camera clock does not push the whole shoot off the screen", async ({
@@ -162,13 +175,23 @@ test.describe("clips appear on the timeline before any sync", () => {
     await page.getByRole("button", { name: en.dropFolder }).click();
     await expect(page.locator(".clip")).toHaveCount(4);
 
-    // The dud is treated as a file with no usable time: it joins the WAV at the start and
-    // is counted in the note, rather than defining where zero is.
-    await expect(page.locator(".timeline__note")).toHaveText(en.presyncUnknownStart(2));
+    // The dud does not define where zero is. Since D-071 it is not merely "unknown"
+    // either: it HAS a timestamp, from another day, and the app names the day rather than
+    // lumping it in with the WAV that carries nothing at all. Two files, two sentences.
+    const notes = page.locator(".timeline__note");
+    await expect(notes.first()).toHaveText(
+      en.presyncLegend({ placed: 2, estimated: 0, ordered: 1, offSession: 1 }),
+    );
+    await expect(page.locator(".timeline__note--offsession")).toHaveText(
+      en.presyncOffSession(1, ["1970-01-01"]),
+    );
+    await expect(clip(page, dud)).toHaveClass(/clip--offsession/);
     await expect(clip(page, dud)).toHaveAttribute(
       "aria-label",
-      new RegExp(en.presyncStartUnknown),
+      new RegExp(en.presyncOffSessionClip),
     );
+    // …and nothing was removed: all four files are still on the timeline (D-071).
+    await expect(page.locator(".clip")).toHaveCount(4);
 
     // And the two cards that DO agree keep their real ten-minute separation, on screen,
     // at a readable width — the whole point of the gate.
@@ -194,6 +217,143 @@ test.describe("clips appear on the timeline before any sync", () => {
     await expect(page.getByRole("group", { name: en.trackAria("Camera B") })).toBeHidden();
     const camA = page.getByRole("group", { name: en.trackAria("Camera A") });
     await expect(camA.locator(`.clip[data-file="${CAM_B}"]`)).toBeVisible();
+  });
+});
+
+// ── The ladder, end to end (V05-W3, D-067/D-068/D-071) ─────────────────────────────────
+//
+// `ladderScanManifest()` is the owner's 386-file wedding in miniature: one file per rung,
+// plus a dead recorder clock and a June drone folder. No unit test can make these claims —
+// they are about what the operator sees on one screen when all five cases are in one drop.
+
+test.describe("a drop with one file per rung of the recording-time ladder", () => {
+  const F = "/Users/e2e/shoot";
+  const FUJI = `${F}/FUJI/DSCF6408.MOV`;
+  const F6 = `${F}/F6/260725_001.TAKE/260725_001_Tr1.WAV`;
+  const MIKSER = `${F}/MIKSER/uirec-20260725_125533.wav`;
+  const MTS = `${F}/JOHNNY/02106.MTS`;
+  const MUSIC = `${F}/JOHNNY/MUSIC_01.WAV`;
+  const F2 = `${F}/F2/200101_001.WAV`;
+  const DRONE = `${F}/DRONE/DJI_0075.MP4`;
+
+  async function reachLadder(page: Page) {
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": [F],
+        scan_inputs: ladderScanManifest(),
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await expect(page.locator(".clip")).toHaveCount(7);
+  }
+
+  test("the legend counts all four cases, and they sum to every clip on screen", async ({
+    page,
+  }) => {
+    await reachLadder(page);
+    // One placed from a container stamp; three estimated (a BWF's date + clock, a
+    // timestamp in a filename, an mtime minus its duration); one with no evidence at all;
+    // two carrying stamps from other days. 1 + 3 + 1 + 2 = the seven clips above.
+    await expect(page.locator(".timeline__note").first()).toHaveText(
+      en.presyncLegend({ placed: 1, estimated: 3, ordered: 1, offSession: 2 }),
+    );
+  });
+
+  test("the off-session line NAMES the dates, which is what makes it actionable", async ({
+    page,
+  }) => {
+    await reachLadder(page);
+    // «2 files are timestamped 2020-01-01 and 2023-06-13 …» — the owner recognises the
+    // June drone folder instantly and would recognise nothing at all in "2 files".
+    await expect(page.locator(".timeline__note--offsession")).toHaveText(
+      en.presyncOffSession(2, ["2020-01-01", "2023-06-13"]),
+    );
+    // Named, never removed (D-071): both are still drawn, on their own devices.
+    await expect(clip(page, F2)).toHaveClass(/clip--offsession/);
+    await expect(clip(page, DRONE)).toHaveClass(/clip--offsession/);
+  });
+
+  test("each rung marks its clips as the kind of evidence they are", async ({ page }) => {
+    await reachLadder(page);
+
+    // The top rung is a measurement and is not marked as an estimate.
+    await expect(clip(page, FUJI)).not.toHaveClass(/clip--est/);
+    await expect(clip(page, FUJI)).toHaveAttribute("aria-label", new RegExp(en.presyncStart));
+
+    // The three lower rungs are, and each says which one in words.
+    for (const [file, words] of [
+      [F6, en.presyncSourceBwf],
+      [MIKSER, en.presyncSourceFilename],
+      [MTS, en.presyncSourceModified],
+    ] as const) {
+      await expect(clip(page, file)).toHaveClass(/clip--est/);
+      // `toContain` rather than a regex: these sentences contain `+` and `—`, and
+      // `new RegExp(...)` on a translated string is a metacharacter waiting to happen.
+      expect(await clip(page, file).getAttribute("aria-label")).toContain(words);
+      expect(await clip(page, file).getAttribute("aria-label")).toContain(
+        en.presyncStartEstimated,
+      );
+    }
+
+    // And the file nothing could time claims an order, not a time.
+    await expect(clip(page, MUSIC)).toHaveClass(/clip--seq/);
+    await expect(clip(page, MUSIC)).toHaveAttribute(
+      "aria-label",
+      new RegExp(en.presyncSourceNone),
+    );
+  });
+
+  test("the ladder puts the day in the right order across UTC and local sources", async ({
+    page,
+  }) => {
+    await reachLadder(page);
+    // The mixer's `125533` is 12:55 on the wall (10:55 UTC), the AVCHD camera's mtime puts
+    // its clip at 11:42 UTC, the Zoom's `16:12:29` is 14:12 UTC, and the Fuji's stamp is
+    // 20:41 UTC as written. Reading every source through one door would put the two
+    // wall-clock devices two hours out and reorder the morning — this is the assertion
+    // that catches it, in pixels.
+    const x = async (file: string) => (await clip(page, file).boundingBox())!.x;
+    expect(await x(MIKSER)).toBeLessThan(await x(MTS));
+    expect(await x(MTS)).toBeLessThan(await x(F6));
+    expect(await x(F6)).toBeLessThan(await x(FUJI));
+  });
+
+  test("a device laid out in order gets ONE lane, not one lane per file", async ({ page }) => {
+    await reachLadder(page);
+    // The 14-lane Zoom stack of the old layout: end-to-end clips do not overlap, so
+    // `stackClips` returns a single row and the stack disappears as arithmetic.
+    for (const label of ["AVCHD-kamera", "Zoom F2", "Drone"]) {
+      const track = page.getByRole("group", { name: en.trackAria(label) });
+      await expect(track.locator(".track__lane")).toHaveCount(1);
+    }
+    // …and the AVCHD camera's untimed take follows its placed clip rather than sitting on
+    // top of it: same row, further right, no overlap.
+    const placed = (await clip(page, MTS).boundingBox())!;
+    const ordered = (await clip(page, MUSIC).boundingBox())!;
+    expect(ordered.y).toBeCloseTo(placed.y, 0);
+    expect(ordered.x).toBeGreaterThanOrEqual(placed.x + placed.width - 1);
+  });
+
+  test("the tracks scroll inside the frame instead of growing the page", async ({ page }) => {
+    // Six devices is already more than fits comfortably; twelve is a real drop. The frame
+    // had `overflow: hidden` and no height, so the BODY grew and pushed the sync button
+    // off a laptop screen.
+    await page.setViewportSize({ width: 1280, height: 620 });
+    await reachLadder(page);
+    const box = (await page.locator(".timeline__scroll").boundingBox())!;
+    expect(box.height).toBeLessThanOrEqual(620 * 0.6 + 1);
+    // The sync button is still reachable without scrolling the whole document to it.
+    await expect(page.getByRole("button", { name: en.syncButton })).toBeVisible();
+    // …and the ruler stays put when the tracks are scrolled — it is the only thing on
+    // screen that says what the horizontal axis means.
+    const rulerBefore = (await page.locator(".track--ruler").boundingBox())!;
+    await page.locator(".timeline__scroll").evaluate((el) => {
+      el.scrollTop = 200;
+    });
+    const rulerAfter = (await page.locator(".track--ruler").boundingBox())!;
+    expect(rulerAfter.y).toBeCloseTo(rulerBefore.y, 0);
   });
 });
 
