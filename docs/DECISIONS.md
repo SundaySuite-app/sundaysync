@@ -1398,7 +1398,9 @@ at the tightest useful zoom a clip is about one pixel per 10 ms, so finer bins w
 bytes nobody can see. It also divides 12 kHz exactly, keeping bin edges on whole
 milliseconds. Each level merges pairs — peak = max of the children, RMS = √(mean of the
 children's mean-squares) — until a bin reaches ~2.5 s. That is **9 levels, 10 ms → 2.56 s**:
-every zoom from a syllable to a whole service on one screen. The ladder length does not
+every zoom from a syllable to a whole service on one screen. *(Superseded by D-056: the
+bound is the renderer's, not a musical one, and 2.5 s did not reach the timeline's zoom
+floor. The ladder now runs to 40.96 s — 13 levels — and the merge is sample-weighted.)* The ladder length does not
 depend on clip duration, so a level index means the same zoom for every clip.
 
 Two numbers per bin, not one. Peak keeps transients alive through downsampling (the drum
@@ -1528,11 +1530,17 @@ duration is a fixed function of level index (`ANALYSIS_RATE` is one constant for
 pipeline, mirrored as `waveformDraw.ts`'s own `ANALYSIS_RATE_HZ`) — no need to thread
 `SyncResult.parameters.analysis_rate` down through `Clip`'s props for this.
 
-The bin→pixel mapping used for actually drawing (`barGeometry`) deliberately does NOT use
+~~The bin→pixel mapping used for actually drawing (`barGeometry`) deliberately does NOT use
 that constant: it derives a bin's on-screen position from `totalSamples` and the clip's own
 drawn width (`span.endMs - span.startMs`) instead, so the waveform always exactly fills the
 box `Clip.tsx` already drew — immune to the few-millisecond disagreements ffprobe's
-duration and the analysis cache's sample count can have.
+duration and the analysis cache's sample count can have.~~
+
+**Reversed by D-056.** The two figures are not one quantity measured twice; dividing by
+their ratio time-warps the whole waveform (up to 400 ms mid-clip on a one-hour file, by a
+different amount per camera) rather than absorbing a rounding difference. `barGeometry`
+now positions every bin from `ANALYSIS_RATE_HZ` alone, and `pickLevel` is fed DEVICE pixels
+per ms rather than CSS pixels. See D-056.
 
 ### Symmetric peak+RMS, not Clypra's single-direction bars
 
@@ -1693,3 +1701,121 @@ trains actually land — sample-exact at the start, across a chunk seam, and at 
 is as close to listening as a headless run gets. **Acoustics remain a manual smoke test**
 (two real files, one delayed; correct = phasey doubling, wrong = echo) **and the S7
 listening protocol.**
+
+## D-056 — V03-R2: the waveform is anchored to real time, and level selection is per DEVICE pixel
+
+**Review round 2 on the v0.3 timeline work.** Two of the fixes overturn intent that D-052
+and D-054 wrote down deliberately, so they need a record of their own rather than a quiet
+edit to those entries.
+
+### The waveform is anchored to real time; the box may legitimately disagree at the tail
+
+D-054 had `barGeometry` derive its sample→pixel mapping from `meta.totalSamples` and the
+clip's own drawn width, and said so approvingly: the waveform then "always exactly fills
+the box `Clip.tsx` already drew — immune to the few-millisecond disagreements ffprobe's
+duration and the analysis cache's sample count can have."
+
+That is backwards. The two numbers are not two measurements of one quantity with a small
+error between them; they measure different things. `span.endMs - span.startMs` is ffprobe's
+**container** duration (`probe.rs` → `SyncOutcome.durations`); `totalSamples` is the decoded
+length of the **first audio stream** in the `.f32` cache (`extract.rs` — no `-t`, no
+padding). AAC encoder priming, edit lists, frame-rounded container durations and audio that
+simply stops before the video all separate them, routinely by hundreds of milliseconds on a
+service-length clip. Dividing one by the other does not absorb the disagreement; it
+**time-warps the whole waveform** to close it. A 60-minute clip whose container says
+3600.0 s and whose audio decodes to 3599.2 s drew its last bin 799.5 ms out of place and
+its middle 400 ms out. Even an 80 ms discrepancy skews mid-clip content by ~40 ms.
+
+And the warp factor is per-file, so each camera warps by a different amount. On a view
+whose entire purpose is judging alignment by eye, correctly-synced clips could be made to
+*look* misaligned by the drawing code. That is the worst failure mode this view has: it
+does not look like a bug, it looks like a sync error.
+
+So the invariant is inverted. Bin `i` of level `L` covers samples `[i·binSamples,
+(i+1)·binSamples)`, i.e. clip-relative time `i · binSamples / ANALYSIS_RATE`, and is drawn
+at `span.startMs +` that. `totalSamples` no longer takes part in positioning at all.
+`ANALYSIS_RATE_HZ` is now the single authority for bin↔time, for selection *and* for
+drawing. The existing `Math.min(lvl.bins, …)` clamps do the rest honestly: an analysis
+shorter than the container leaves the clip's tail **unpainted**, and one longer than it is
+clipped at the box's edge. Both are true statements about what was decoded. A waveform that
+stops a few pixels short of a clip's right edge is information; a waveform stretched to
+hide that is a lie that costs the view its whole purpose.
+
+### `MAX_BINS_PER_PX` counts DEVICE pixels
+
+`pickLevel` was fed `view.pxPerMs` — CSS pixels. Two consequences, one visible and one
+silent.
+
+The visible one: `barWidthPx` was floored at 1 device pixel while the `xs` spacing was not
+floored at all, so any level whose bins were under one device pixel wide had every bar
+overpainting its neighbour — measured at dpr 1, 0.0125 px/ms: spacing 0.5, width 1.0, a
+100 % overlap. Retina hid it (dpr 2 doubles the bin width); an external 1× monitor did not.
+The existing DPR test passed only because its single fixture zoom never engaged the floor.
+
+The silent one: the ceiling is a claim about what the *display* can resolve, and a retina
+panel genuinely resolves twice the detail at the same zoom. Selecting against CSS pixels
+threw that away.
+
+`pickLevel` now takes `view.pxPerMs * devicePixelRatio`. That guarantees the chosen level's
+bins are at least `1 / MAX_BINS_PER_PX` device pixels wide, which makes the width floor
+unreachable by construction — it is kept, at exactly that value, as a defensive floor that
+can never exceed its own spacing.
+
+### The ladder reaches the zoom floor, and the renderer strides anyway
+
+D-052 stopped the pyramid at `MAX_BIN_SECONDS = 2.5`, chosen against what a bin *means* ("a
+two-and-a-half-second bin already renders as a near-solid bar"). But the number that
+matters is the renderer's: with 2 bins/px as the ceiling and `MIN_PX_PER_MS = 0.00002`, a
+bin has to last 25 s before one bar covers half a pixel. A 3-hour clip fully zoomed out was
+drawing **19.5 bins per pixel** — a 4219-element `xs` array, per clip, per rAF, to paint
+216 px — and ~4.7 bins/px even at the default fit view of a normal service.
+
+The ladder now runs to 40.96 s (13 levels). Each level is half the size of the one below,
+so the four added levels cost ~0.4 % of the pyramid; D-052's memory figures are restated
+honestly with them (the ladder converges to just under **2×** the base level — ~1.44 MB per
+audio-hour, ~11.5 MB for an eight-hour shoot — not the "under 1.5×" D-052 claimed, which
+was already wrong for nine levels).
+
+`barGeometry` additionally strides — one bar summarising `ceil(1 / (2 · binWidthDevicePx))`
+bins, max of the group — whenever the coarsest available level is still finer than the
+display. That is belt and braces, not the fix: it bounds `xs.length` at ~2 per device pixel
+regardless of what ladder the engine hands over, including an older cache built before this
+change.
+
+### Smaller corrections in the same round
+
+- **RMS merged with sample weights.** `merge_pairs` averaged children's mean-squares as
+  equals, but the last bin of every level is short whenever the clip does not divide evenly
+  (`base_level` correctly divides it by what it actually holds). 120 silent samples then 30
+  at full scale has a true RMS of √(30/150) = 0.447; the unweighted mean gave 0.707, 58 %
+  high — one bin per level, always at the clip's end, which is exactly where someone is
+  checking whether a camera stopped early. `FloatLevel` now carries a per-bin sample weight
+  and merges `Σ(wᵢ·msᵢ) / Σwᵢ`.
+- **The scrollbar thumb no longer freezes before the end.** `offsetFrac` was a fraction of
+  the *content* clamped to `1 - thumbFrac`; once the 2 % minimum thumb width inflated the
+  thumb — i.e. at deep zoom, exactly when it matters — the clamp pinned it. Measured: 3
+  hours at maximum zoom sat at 0.9800 for both 99 % and 100 % of maximum scroll, stationary
+  across the last ~4 minutes. It is now a fraction of the thumb's own **travel**, exact at
+  both ends by construction and needing no clamp.
+- **An unexpected waveform error is no longer permanent.** The draw effect is gated on
+  `!error` and only `loadMeta` cleared it, so one transient level-fetch failure killed that
+  clip's waveform for the session. Recovery is now automatic on a material zoom change
+  (quantized to powers of two — ~17 buckets across the whole range, and gated on *leaving*
+  the bucket the error was raised at, so a reproducible failure settles rather than
+  looping). Deliberately **not** a click target: `.clip__waveform` is centred over the
+  whole clip, so a control there would sit where the user aims to click the clip itself and
+  would swallow that click. The cache-miss and busy states earn that cost because clicking
+  them is the only way back; this one does not.
+- **The busy refusal speaks the user's language.** `classifyWaveformError` routed the D-046
+  `busy:` prefix through `mapEngineError`, which has no busy branch — so it fell to
+  `errUnknown` and a Norwegian UI read «Noe gikk galt: busy: sync in progress»: English
+  engine text, crash-shaped wording for an expected self-clearing condition, in a ~28 px
+  slot that cannot wrap. There is a `waveformBusy` string now; the raw detail moves to the
+  control's `title` rather than being dropped.
+- **A short level buffer can no longer draw `NaN`.** `metaCache` and `levelCache` are
+  filled by two independent `invoke`s and the pyramid on disk can be rebuilt between them.
+  Indexing past the end gave `undefined / 255` = `NaN`, and `NaN <= 0` is *false*, so the
+  guard let every one through to `fillRect(x, NaN, w, NaN)` — 1800 of 1800 bins in the
+  reproduction. Canvas ignores non-finite arguments, so it degraded silently: luck, not
+  design. The read is now a bounds-checked pure function (`barAmplitudes`) and the guards
+  are `!(h > 0)`.

@@ -79,15 +79,43 @@ export interface ScrollbarMetrics {
   offsetFrac: number;
 }
 
+/** Smallest thumb we will draw, as a fraction of the trough — below this it stops being
+ *  a grabbable target. At a 3-hour result and maximum zoom the honest figure is ~0.00005. */
+const MIN_THUMB_FRAC = 0.02;
+
+/**
+ * Thumb width and position.
+ *
+ * `offsetFrac` is the scroll position expressed as a fraction of the thumb's own
+ * TRAVEL (`1 - thumbFrac`), not of the content. Those are the same thing only while the
+ * thumb is its natural width; once `MIN_THUMB_FRAC` inflates it — which is exactly the
+ * deep-zoom case — a raw `scrollMs / span` runs past the end of the travel and the old
+ * `Math.min(1 - thumbFrac, …)` clamp then pinned it there. Measured: a 3-hour result at
+ * maximum zoom sat at `offsetFrac === 0.98` for everything from 99 % of maximum scroll to
+ * the very end, so the thumb was visibly frozen across the last ~4 minutes of material
+ * while the timeline underneath kept moving (finding 10).
+ *
+ * Scaling by the travel instead makes both ends exact by construction — 0 at the start,
+ * `1 - thumbFrac` at the end (thumb flush right), monotonic in between — and needs no
+ * clamp to stay inside the trough.
+ *
+ * **Contract for the grab-offset fix still to come** (finding 5, `TimelineView.tsx`):
+ * this is the inverse of "thumb left edge → scroll", i.e. `scrollMs = offsetFrac /
+ * (1 - thumbFrac) * maxScrollMs`. A drag that tracks where the thumb was *grabbed*
+ * should therefore convert the pointer's trough fraction into a thumb-LEFT-EDGE fraction
+ * (subtract the grab offset within the thumb) and invert this — not treat the pointer as
+ * the thumb's centre, which is what `scrollbarFracToScrollMs` below does for a bare click.
+ */
 export function scrollbarMetrics(
   view: TimelineView,
   contentSpanMs: number,
 ): ScrollbarMetrics {
   const span = Math.max(1, contentSpanMs);
   const visibleMs = view.widthPx / view.pxPerMs;
-  const thumbFrac = Math.min(1, Math.max(0.02, visibleMs / span));
-  const offsetFrac = Math.min(1 - thumbFrac, Math.max(0, view.scrollMs / span));
-  return { thumbFrac, offsetFrac };
+  const thumbFrac = Math.min(1, Math.max(MIN_THUMB_FRAC, visibleMs / span));
+  const maxScrollMs = Math.max(0, span - visibleMs);
+  const scrolledFrac = maxScrollMs > 0 ? Math.min(1, Math.max(0, view.scrollMs / maxScrollMs)) : 0;
+  return { thumbFrac, offsetFrac: scrolledFrac * (1 - thumbFrac) };
 }
 
 /**

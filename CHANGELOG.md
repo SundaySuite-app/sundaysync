@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **Fixed: the waveform inside each clip is now drawn against real time (D-056).** It used
+  to be stretched to fill the clip's box exactly, which sounds harmless and is not: the
+  box's width comes from the container's duration and the waveform's bins come from the
+  decoded audio, and those two disagree by anything from a few milliseconds to most of a
+  second on a normal camera file. Closing that gap by stretching moved everything in the
+  middle of the clip too — up to 400 ms out of place on a one-hour clip, and by a different
+  amount on each camera. On a view whose whole job is letting you see whether clips line
+  up, that meant correctly-synced material could be drawn looking misaligned. Waveforms are
+  now anchored to real time; if a camera's audio ends before its video, the last stretch of
+  the clip is simply left unpainted, which is the truth.
+- **Fixed: waveform bars no longer smear together on a non-retina display (D-056).** At
+  some zoom levels each bar was drawn twice as wide as its slot and painted over its
+  neighbour — invisible on a built-in retina screen, plainly visible on an external
+  monitor. Detail is now chosen against the screen's actual pixels, so a retina display
+  also gets the finer waveform it can genuinely show.
+- **Fixed: the timeline scrollbar no longer freezes before the end (D-056).** Zoomed in far
+  on a long service, the thumb stopped moving over the last few minutes of material while
+  the timeline underneath kept scrolling.
+- **Fixed: a waveform that fails to load is no longer stuck for the session (D-056).** A
+  one-off read failure used to leave that clip permanently blank; changing the zoom now
+  gives it another go. A clip with an unreadable waveform can also still be clicked to open
+  its details — the "unavailable" line no longer swallows the click.
+- **Fixed: "already busy" now says so in Norwegian (D-056).** Asking to rebuild a waveform
+  while a sync is running showed the engine's own English message dressed up as a crash
+  («Noe gikk galt: busy: sync in progress»). It now reads as what it is — an expected wait
+  — with the technical detail on hover.
+- **Fixed: the end of a clip is no longer drawn louder than it is (D-056).** The last bin of
+  every zoom level averaged a short trailing piece of audio as if it were full length, which
+  could show the final fraction of a second up to ~58 % too loud.
+- **Fixed: zoomed all the way out on a multi-hour shoot, the timeline was doing far more
+  work than it drew (D-056).** The waveform detail ladder now goes coarse enough for the
+  widest zoom, so a 3-hour clip stops computing ~19 bars for every pixel it paints.
+
 - **You can now hear whether the sync is right, before exporting (D-055).** The timeline
   has a transport: press play (or Space) and every clip sounds at once, at the offsets the
   engine worked out. Two recordings of the same room that are correctly aligned sound
@@ -42,8 +75,8 @@
 - **Internal: waveform peaks pipeline for the v0.3 interactive timeline (D-052).** Added
   `crates/core/src/peaks.rs` — a streamed multi-resolution peak+RMS pyramid built from
   the analysis audio the sync engine has *already* cached, so drawing waveforms costs
-  **zero ffmpeg spawns** and no second decode of the source media. Nine levels span 10 ms
-  to 2.56 s per bin; level data reaches the UI as raw bytes (an `ArrayBuffer`), not JSON.
+  **zero ffmpeg spawns** and no second decode of the source media. Thirteen levels span
+  10 ms to 40.96 s per bin (D-056 raised the ceiling from 2.56 s); level data reaches the UI as raw bytes (an `ArrayBuffer`), not JSON.
   Three new shell commands (`waveform_meta`, `waveform_level`, `regenerate_analysis`) with
   a 64-entry in-memory cache. Reading a waveform is read-only and deliberately does not
   block, or get blocked by, a running sync (D-046); a clip whose cache entry has been

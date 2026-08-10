@@ -24,8 +24,10 @@
 //!
 //! [`Pyramid`] is a ladder of [`Level`]s. Level 0 bins 120 samples (10 ms at 12 kHz —
 //! roughly one screen pixel at the tightest zoom anyone edits at); each coarser level
-//! merges pairs, doubling the bin, until a bin covers ~2.5 s. Nine levels span 10 ms to
-//! 2.56 s, which is every zoom from "a syllable" to "a whole service on one screen".
+//! merges pairs, doubling the bin, until a bin covers ~40 s. Thirteen levels span 10 ms
+//! to 40.96 s, which is every zoom the timeline allows — from "a syllable" to the
+//! zoomed-all-the-way-out view of a multi-hour shoot. The bound is the *renderer's*, not
+//! a musical one: see [`MAX_BIN_SECONDS`].
 //!
 //! Each bin carries two numbers, both quantized to `u8`:
 //!
@@ -39,10 +41,12 @@
 //!
 //! # Memory
 //!
-//! Two bytes per 10 ms bin is 200 B/s, i.e. ~720 KB per audio-hour for the base level,
-//! and the whole ladder is under 1.5× that (each level halves). An eight-hour shoot is
-//! well under 12 MB — nothing against §7.7's 4 GB ceiling, and small enough that the
-//! shell can keep a handful of clips resident and simply recompute the rest.
+//! Two bytes per 10 ms bin is 200 B/s, i.e. ~720 KB per audio-hour for the base level.
+//! Each level halves, so the whole ladder is a geometric series that converges to just
+//! under 2× the base however deep it goes — ~1.44 MB per audio-hour, and the four levels
+//! added past 2.56 s contribute ~0.4 % of that between them. An eight-hour shoot is
+//! ~11.5 MB — nothing against §7.7's 4 GB ceiling, and small enough that the shell can
+//! keep a handful of clips resident and simply recompute the rest.
 
 use crate::error::{Error, Result};
 use crate::request::ANALYSIS_RATE;
@@ -58,10 +62,28 @@ pub const BASE_BIN_SAMPLES: u32 = 120;
 
 /// Coarsest bin a level is allowed to cover, in seconds.
 ///
-/// Past this, one bin spans more than a musical phrase and the waveform stops carrying
-/// information — a two-and-a-half-second bin already renders as a near-solid bar. The
-/// ladder stops at the first level that reaches it.
-const MAX_BIN_SECONDS: f64 = 2.5;
+/// Set by the *display*, not by musical meaning. The frontend picks the finest level with
+/// at most 2 bins per device pixel (`app/src/timeline/waveformDraw.ts` `pickLevel`), so
+/// the ladder has to reach a bin duration of `1 / (2 · minimum px-per-ms)` or the coarsest
+/// level is still finer than the screen and the renderer builds thousands of `xs` entries
+/// per clip per frame to paint a couple of hundred pixels. At the timeline's zoom floor
+/// (`geometry.ts` `MIN_PX_PER_MS` = 0.00002 px/ms) that is 25 s, so the ladder runs to
+/// 40.96 s — the first power-of-two step past it.
+///
+/// The old bound was 2.5 s, chosen against what a bin "means" rather than against the
+/// zoom range, and it left a 3-hour clip drawing ~19 bins per pixel fully zoomed out (and
+/// ~4 even at the default fit view of a normal service). Four extra levels cost almost
+/// nothing: each level is half the size of the one below it, so levels 9–12 together add
+/// under 0.4 % to the ladder — see the module's Memory note.
+const MAX_BIN_SECONDS: f64 = 40.0;
+
+/// How many levels [`pyramid_from_cache_file`] builds: 10 ms doubling to 40.96 s.
+///
+/// A consequence of [`BASE_BIN_SAMPLES`], [`ANALYSIS_RATE`] and [`MAX_BIN_SECONDS`], not an
+/// independent knob — stated as a constant only so callers (and the shell's wire-shape
+/// test) can name it instead of hard-coding a number they do not own.
+/// `the_ladder_spans_ten_milliseconds_to_forty_seconds` holds the two in agreement.
+pub const LEVEL_COUNT: usize = 13;
 
 /// Bytes per `f32le` frame in a cache file.
 const FRAME_BYTES: usize = 4;
@@ -146,9 +168,20 @@ struct FloatLevel {
     bin_samples: u32,
     peak: Vec<f32>,
     /// Mean of the squared samples in the bin. `sqrt` of this is the RMS; keeping the
-    /// *mean square* rather than the RMS is what makes the pairwise merge a plain
+    /// *mean square* rather than the RMS is what makes the pairwise merge a weighted
     /// average instead of a root-of-sum-of-squares dance.
     mean_square: Vec<f32>,
+    /// How many source samples each bin's `mean_square` was averaged over.
+    ///
+    /// Almost always `bin_samples`, but the *last* bin of every level is short whenever
+    /// the clip does not divide evenly (`base_level` divides the trailing bin by what it
+    /// actually holds, and every merge inherits that). Without this, `merge_pairs` would
+    /// average a full child against a nearly-empty one as if they were equal — 120 silent
+    /// samples followed by 30 at full scale has a true RMS of √(30/150) = 0.447, and the
+    /// unweighted mean gives √((0 + 1)/2) = 0.707, 58 % high. One bin per level, always
+    /// at the clip's end, which is precisely where a user is checking whether a camera
+    /// ran out before the others.
+    weight: Vec<f64>,
 }
 
 impl FloatLevel {
@@ -203,9 +236,10 @@ pub fn pyramid_from_cache_file(path: &Path) -> Result<Pyramid> {
     let total_samples = base.0;
     let mut levels = vec![base.1];
 
-    // Nine levels: 120 samples (10 ms) doubling to 30 720 (2.56 s). The bound is on the
-    // bin *duration*, not the level count, so changing ANALYSIS_RATE or BASE_BIN_SAMPLES
-    // keeps the ladder covering the same span of zooms rather than silently re-scaling it.
+    // Thirteen levels: 120 samples (10 ms) doubling to 491 520 (40.96 s). The bound is on
+    // the bin *duration*, not the level count, so changing ANALYSIS_RATE or
+    // BASE_BIN_SAMPLES keeps the ladder covering the same span of zooms rather than
+    // silently re-scaling it.
     let max_bin = MAX_BIN_SECONDS * f64::from(ANALYSIS_RATE);
     while f64::from(
         levels
@@ -246,6 +280,7 @@ fn base_level(path: &Path) -> Result<(u64, FloatLevel)> {
 
     let mut peak: Vec<f32> = Vec::with_capacity(expected_bins);
     let mut mean_square: Vec<f32> = Vec::with_capacity(expected_bins);
+    let mut weight: Vec<f64> = Vec::with_capacity(expected_bins);
 
     // The bin being filled. `sum_sq` is f64: 120 squared f32s is well within f32's range,
     // but the accumulator is free to widen and a silent precision loss in the quietest
@@ -286,6 +321,7 @@ fn base_level(path: &Path) -> Result<(u64, FloatLevel)> {
             if fill == BASE_BIN_SAMPLES {
                 peak.push(bin_peak);
                 mean_square.push((sum_sq / f64::from(fill)) as f32);
+                weight.push(f64::from(fill));
                 fill = 0;
                 bin_peak = 0.0;
                 sum_sq = 0.0;
@@ -303,6 +339,7 @@ fn base_level(path: &Path) -> Result<(u64, FloatLevel)> {
     if fill > 0 {
         peak.push(bin_peak);
         mean_square.push((sum_sq / f64::from(fill)) as f32);
+        weight.push(f64::from(fill));
     }
 
     Ok((
@@ -311,6 +348,7 @@ fn base_level(path: &Path) -> Result<(u64, FloatLevel)> {
             bin_samples: BASE_BIN_SAMPLES,
             peak,
             mean_square,
+            weight,
         },
     ))
 }
@@ -319,7 +357,11 @@ fn base_level(path: &Path) -> Result<(u64, FloatLevel)> {
 ///
 /// Peak is the max of the children — the loudest transient survives all the way up the
 /// ladder, which is the entire reason peak is stored separately from RMS. Mean-square is
-/// the mean of the children's mean-squares, so `sqrt` of it is the RMS over the union.
+/// the **sample-weighted** mean of the children's mean-squares, `Σ(wᵢ·msᵢ) / Σwᵢ`, so
+/// `sqrt` of it is the true RMS over the union of the children's samples at every level.
+/// The weights matter for exactly one bin per level — the last one, where a short
+/// trailing child would otherwise be averaged as if it were as long as its sibling; see
+/// [`FloatLevel::weight`] for the worked example.
 ///
 /// An odd bin count leaves one childless parent, which simply inherits its single child
 /// rather than being averaged against a phantom silent one — the alternative halves the
@@ -338,28 +380,44 @@ fn merge_pairs(previous: &FloatLevel) -> FloatLevel {
     let out_bins = previous.peak.len().div_ceil(2);
     let mut peak = Vec::with_capacity(out_bins);
     let mut mean_square = Vec::with_capacity(out_bins);
+    let mut weight = Vec::with_capacity(out_bins);
 
     // `chunks(2)` rather than indexed pairs: it cannot run off the end, and it yields the
     // odd tail as a one-element chunk, which is exactly the "inherit the single child"
-    // rule stated above — the divisor is what the chunk holds, never a hard 2.
-    for (peaks, squares) in previous
+    // rule stated above — the divisor is the chunk's total weight, never a hard 2.
+    for ((peaks, squares), weights) in previous
         .peak
         .chunks(2)
         .zip(previous.mean_square.chunks(2))
+        .zip(previous.weight.chunks(2))
         .take(out_bins)
     {
         peak.push(peaks.iter().copied().fold(0.0f32, f32::max));
-        let n = squares.len().max(1) as f32;
-        mean_square.push(squares.iter().sum::<f32>() / n);
+        let total: f64 = weights.iter().sum();
+        let energy: f64 = squares
+            .iter()
+            .zip(weights)
+            .map(|(ms, w)| f64::from(*ms) * w)
+            .sum();
+        // A zero-weight chunk cannot occur (`base_level` never pushes a bin it did not
+        // fill), but dividing by it would poison the whole level with NaN, so it reads as
+        // silence instead.
+        mean_square.push(if total > 0.0 {
+            (energy / total) as f32
+        } else {
+            0.0
+        });
+        weight.push(total);
     }
 
     FloatLevel {
         // Saturating so a hypothetical ladder deep enough to overflow would stop growing
-        // rather than wrap to a tiny bin — unreachable at nine levels, but `* 2` on a
+        // rather than wrap to a tiny bin — unreachable at thirteen levels, but `* 2` on a
         // public field is not the place to rely on "unreachable".
         bin_samples: previous.bin_samples.saturating_mul(2),
         peak,
         mean_square,
+        weight,
     }
 }
 
@@ -522,29 +580,58 @@ mod tests {
 
         assert_eq!(p.total_samples, 0);
         assert_eq!(p.duration_seconds(), 0.0);
-        assert_eq!(p.levels.len(), 9);
+        assert_eq!(p.levels.len(), LEVEL_COUNT);
         assert!(p.levels.iter().all(|l| l.bins() == 0));
     }
 
     #[test]
-    fn the_ladder_spans_ten_milliseconds_to_two_and_a_half_seconds() {
+    fn the_ladder_spans_ten_milliseconds_to_forty_seconds() {
         let (_dir, path) = cache_file(&vec![0.1f32; 1000]);
         let p = pyramid_from_cache_file(&path).unwrap();
 
-        assert_eq!(p.levels.len(), 9);
+        assert_eq!(p.levels.len(), LEVEL_COUNT);
         assert_eq!(p.levels[0].bin_samples, BASE_BIN_SAMPLES);
         for pair in p.levels.windows(2) {
             assert_eq!(pair[1].bin_samples, pair[0].bin_samples * 2);
         }
-        // Coarsest bin covers ≥ 2.5 s, and the one below it does not — the ladder stops
-        // at the first level that reaches the bound, never one short and never one over.
-        let coarsest = f64::from(p.levels[8].bin_samples) / f64::from(ANALYSIS_RATE);
+        let last = p.levels.len() - 1;
+        // Coarsest bin covers ≥ MAX_BIN_SECONDS, and the one below it does not — the
+        // ladder stops at the first level that reaches the bound, never one short and
+        // never one over.
+        let coarsest = f64::from(p.levels[last].bin_samples) / f64::from(ANALYSIS_RATE);
         assert!(
             coarsest >= MAX_BIN_SECONDS,
             "coarsest bin only {coarsest} s"
         );
-        let previous = f64::from(p.levels[7].bin_samples) / f64::from(ANALYSIS_RATE);
-        assert!(previous < MAX_BIN_SECONDS, "level 7 already {previous} s");
+        let previous = f64::from(p.levels[last - 1].bin_samples) / f64::from(ANALYSIS_RATE);
+        assert!(
+            previous < MAX_BIN_SECONDS,
+            "level {} already {previous} s",
+            last - 1
+        );
+    }
+
+    #[test]
+    fn the_ladder_reaches_the_renderers_coarsest_useful_bin() {
+        // Finding 11: the frontend picks the finest level with ≤ 2 bins per DEVICE pixel
+        // (waveformDraw.ts `pickLevel`/`MAX_BINS_PER_PX`). At the timeline's zoom floor
+        // (geometry.ts MIN_PX_PER_MS = 0.00002 px/ms) a bin has to last 1 / (2 · 0.00002)
+        // = 25 000 ms before one bar covers half a pixel; a ladder that stops short of
+        // that leaves the renderer cramming bins nobody can see. Stated here, in the
+        // engine that owns the ladder, because raising MAX_BIN_SECONDS is the fix and
+        // lowering it again is the regression.
+        const MIN_PX_PER_MS: f64 = 0.00002;
+        const MAX_BINS_PER_PX: f64 = 2.0;
+        let needed_ms = 1.0 / (MAX_BINS_PER_PX * MIN_PX_PER_MS);
+
+        let (_dir, path) = cache_file(&vec![0.1f32; 1000]);
+        let p = pyramid_from_cache_file(&path).unwrap();
+        let coarsest_ms =
+            f64::from(p.levels.last().unwrap().bin_samples) / f64::from(ANALYSIS_RATE) * 1000.0;
+        assert!(
+            coarsest_ms >= needed_ms,
+            "coarsest bin {coarsest_ms} ms — the renderer needs ≥ {needed_ms} ms at the zoom floor"
+        );
     }
 
     #[test]
@@ -617,6 +704,61 @@ mod tests {
         assert_eq!(p.levels[1].bins(), 2);
         assert_eq!(p.levels[1].peak[1], q(0.9), "the odd child was diluted");
         assert!(p.levels[1].rms[1].abs_diff(q(0.9)) <= 1);
+    }
+
+    #[test]
+    fn a_short_trailing_bin_is_weighted_by_what_it_holds_when_it_is_merged_up() {
+        // The trailing-partial rule has to survive the merge, not just the base level.
+        // 120 silent samples then 30 at full scale: the true RMS over all 150 is
+        // sqrt(30/150) = 0.447. Averaging the two bins' mean-squares as equals — which is
+        // what an unweighted `sum / n` does — gives sqrt((0 + 1)/2) = 0.707, 58 % high,
+        // once per level and always at the clip's end.
+        let mut samples = vec![0.0f32; BASE_BIN_SAMPLES as usize];
+        samples.resize(BASE_BIN_SAMPLES as usize + 30, 1.0);
+        let (_dir, path) = cache_file(&samples);
+        let p = pyramid_from_cache_file(&path).unwrap();
+
+        assert_eq!(p.levels[0].bins(), 2);
+        assert_eq!(p.levels[0].rms[0], 0);
+        assert!(p.levels[0].rms[1].abs_diff(q(1.0)) <= 1);
+
+        let truth = q((30.0f32 / 150.0).sqrt()); // 0.4472 -> 114
+        let unweighted = q((1.0f32 / 2.0).sqrt()); // 0.7071 -> 180
+        assert_ne!(
+            truth, unweighted,
+            "the fixture must be able to tell them apart"
+        );
+        assert!(
+            p.levels[1].rms[0].abs_diff(truth) <= 1,
+            "level 1 rms {} — expected ~{truth} (unweighted would give ~{unweighted})",
+            p.levels[1].rms[0]
+        );
+        // And it stays right all the way up: every coarser level is the same 150 samples.
+        for (i, level) in p.levels.iter().enumerate().skip(1) {
+            assert!(
+                level.rms[0].abs_diff(truth) <= 1,
+                "level {i} rms {} — expected ~{truth}",
+                level.rms[0]
+            );
+        }
+        // Peak is unaffected: the full-scale tail survives every merge. (At level 0 it is
+        // still the second bin; from level 1 up the two have been folded together.)
+        assert_eq!(p.levels[0].peak[1], 255);
+        assert!(p.levels.iter().skip(1).all(|l| l.peak[0] == 255));
+    }
+
+    #[test]
+    fn a_full_final_bin_merges_exactly_as_before_the_weights_existed() {
+        // The other half of the weighting contract: when every bin is full, weights are
+        // all equal and the merge must be the plain mean it always was. 120 silent then
+        // 120 at full scale -> sqrt(1/2).
+        let b = BASE_BIN_SAMPLES as usize;
+        let mut samples = vec![0.0f32; b];
+        samples.resize(2 * b, 1.0);
+        let (_dir, path) = cache_file(&samples);
+        let p = pyramid_from_cache_file(&path).unwrap();
+
+        assert!(p.levels[1].rms[0].abs_diff(q((0.5f32).sqrt())) <= 1);
     }
 
     #[test]
@@ -719,7 +861,8 @@ mod tests {
 
         assert_eq!(p.levels[0].bins(), 4);
         assert!(p.levels.iter().all(|l| l.bins() >= 1));
-        assert_eq!(p.levels[8].bins(), 1);
-        assert!(p.levels[8].peak[0].abs_diff(q(0.7)) <= 1);
+        let coarsest = p.levels.last().unwrap();
+        assert_eq!(coarsest.bins(), 1);
+        assert!(coarsest.peak[0].abs_diff(q(0.7)) <= 1);
     }
 }
