@@ -44,6 +44,15 @@ export interface Settings {
    * other advanced setting.
    */
   betaChannel: boolean;
+  /**
+   * V03-S5 (D-055): apply the same drift correction to *playback* that `correctDrift`
+   * applies to the export. On by default, and separate from `correctDrift` on purpose —
+   * the point of listening is to compare, and turning correction off for the ears while
+   * leaving it on for the export is a legitimate thing to want to hear.
+   */
+  playbackDriftCorrected: boolean;
+  /** V03-S5: master playback volume, 0–1. */
+  playbackVolume: number;
   onboardingDone: boolean;
 }
 
@@ -55,6 +64,8 @@ export const DEFAULTS: Settings = {
   cacheCapMb: null,
   correctDrift: true,
   betaChannel: false,
+  playbackDriftCorrected: true,
+  playbackVolume: 1,
   onboardingDone: false,
 };
 
@@ -82,6 +93,18 @@ function load(): Settings {
       // Defaults to off: only an explicit stored `true` opts into the beta ring (D-044),
       // so a fresh or corrupt blob stays on stable.
       betaChannel: p.betaChannel === true,
+      // Defaults to on, like `correctDrift` above: only an explicit stored `false`
+      // silences the correction, so an install predating V03-S5 gets it (D-055).
+      playbackDriftCorrected: p.playbackDriftCorrected !== false,
+      // A stored 0 is a legitimate choice (muted), so this cannot use `isPositiveNumber`;
+      // an absent or corrupt value falls back to full.
+      playbackVolume:
+        typeof p.playbackVolume === "number" &&
+        Number.isFinite(p.playbackVolume) &&
+        p.playbackVolume >= 0 &&
+        p.playbackVolume <= 1
+          ? p.playbackVolume
+          : 1,
       onboardingDone: p.onboardingDone === true,
     };
   } catch {

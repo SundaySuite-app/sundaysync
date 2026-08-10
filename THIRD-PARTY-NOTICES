@@ -34,6 +34,18 @@ Adapted in the following SundaySync files:
       one-pass-over-buckets shape is the shared part. See docs/DECISIONS.md
       D-053 ("planned (S4)").
 
+  app/src/audio/PlaybackClock.ts
+      Lifted, with adaptation, from Clypra's `PlaybackClock` in
+      `src/core/playback/PlaybackClock.ts`: the master clock read from
+      `AudioContext.currentTime` rather than a timer, the generation counters
+      that discard RAF ticks queued before a seek, and the stall-compensation
+      pair. SundaySync's version drops their frame snapping (this app's claim is
+      sub-frame accuracy, so quantising the playhead would hide the very error
+      the operator is looking for), drops variable playback speed, and does not
+      construct the AudioContext itself — the scheduler owns it, because it must
+      be created inside the play gesture and shared with every source node. See
+      docs/DECISIONS.md D-053 ("lifted (lands S5)") and D-055.
+
 MIT License
 
 Copyright (c) 2026 Clypra Contributors
