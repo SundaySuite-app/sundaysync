@@ -115,7 +115,12 @@ export function WaveformCanvas({
       fetchWaveformLevel(file, geom.level).then(
         (bytes) => {
           if (cancelled) return;
-          drawWaveform(canvas, geom, bytes);
+          // The SAME `dpr` the geometry was computed from, handed down rather than re-read
+          // (V03-S6, finding 15). `drawWaveform` used to call `window.devicePixelRatio`
+          // itself, on the far side of this promise — so dragging the window onto a
+          // second monitor mid-fetch sized the backing store by one ratio and the bar
+          // positions by another. Two sources for one number is how they disagree.
+          drawWaveform(canvas, geom, bytes, dpr);
         },
         (e: unknown) => {
           if (!cancelled) setError(classifyWaveformError(e, t));
@@ -258,9 +263,18 @@ export function WaveformCanvas({
  * passed as a prop: `Clip.tsx`'s `.clip`/`.clip--warn` classes already set it (the same
  * near-black ink the clip's own label uses), so the waveform automatically tracks the
  * §9.4 green/orange state without this component needing to know why.
+ *
+ * `dpr` is a PARAMETER, not a fresh `window.devicePixelRatio` read: `geom` was built from
+ * one ratio before the level fetch, and re-reading it here after the fetch resolved gave
+ * the backing store a different scale from the bar positions inside it whenever the two
+ * disagreed (finding 15).
  */
-function drawWaveform(canvas: HTMLCanvasElement, geom: BarGeometry, bytes: Uint8Array): void {
-  const dpr = window.devicePixelRatio || 1;
+function drawWaveform(
+  canvas: HTMLCanvasElement,
+  geom: BarGeometry,
+  bytes: Uint8Array,
+  dpr: number,
+): void {
   const cssHeight = canvas.clientHeight;
   if (geom.widthCssPx <= 0 || cssHeight <= 0) return;
 

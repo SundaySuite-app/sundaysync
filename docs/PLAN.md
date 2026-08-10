@@ -305,6 +305,27 @@ original wording implied could not show a four-second offset inside a ninety-min
 founding principle is retained, not revisited: zoom, pan and seek are read-mostly operations over a
 result that already exists; nothing here writes back into `SyncResult`, and clips still do not drag.
 
+**Amendment (v0.3, D-052/D-054/D-056):** every clip draws its own **waveform** — a peak+RMS
+pyramid streamed once from the analysis cache the sync already wrote, so waveforms cost zero
+extra ffmpeg spawns and zero second decodes. Bins are anchored to real time, never stretched to
+fill the clip box, so a clip whose audio ends before its container simply leaves its tail
+unpainted rather than time-warping the picture to hide the difference. A clip whose cache entry
+has been swept shows a "rebuild" control in place of the canvas — a state with an action, not an
+error.
+
+**Amendment (v0.3, D-055):** the result view has a **transport**. Press play (or Space) and every
+clip sounds at once at the offsets the engine worked out, with per-device mute/solo in the track
+gutters and measured drift corrected exactly as the export will correct it (separately switchable,
+so the two can be compared by ear). The audio is the 12 kHz mono analysis audio — see
+KNOWN_LIMITATIONS.md. This does not make the view an editor: playback is another way of *reading*
+the result, and nothing about it writes back into `SyncResult`.
+
+**Amendment (v0.3, D-057):** the timeline is keyboard-operable throughout — `+`/`−` zoom,
+`0`/`F` fit, `←`/`→` nudge the playhead (±1 s, ±10 s with shift), `Home`/`End`, Space play/pause,
+and a focusable scrollbar with arrow/page/Home/End. The clip the playhead stands in is marked
+`aria-current`. §9's "advanced settings persist per machine" now covers playback drift correction
+too.
+
 ## 10. Performance targets
 
 - Cold sync of an 8 h / 100-file day: < 6 min on a modern 8-core laptop (decode-bound); warm-cache

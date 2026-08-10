@@ -1,6 +1,6 @@
 //! Waveform peaks — a multi-resolution peak+RMS pyramid over the analysis cache.
 //!
-//! The interactive timeline (docs/V03-PROGRAM.md S2) needs to draw a waveform for every
+//! The v0.3 interactive timeline (docs/DECISIONS.md D-051/D-052) needs to draw a waveform for every
 //! clip, at every zoom level, without stuttering. The naive route is what most editors
 //! do: shell out to ffmpeg once per zoom step and re-decode. We already have something
 //! better sitting on disk.
@@ -154,6 +154,98 @@ impl Pyramid {
     #[must_use]
     pub fn duration_seconds(&self) -> f64 {
         self.total_samples as f64 / f64::from(ANALYSIS_RATE)
+    }
+
+    /// This pyramid's shape, without its bytes — the same value
+    /// [`meta_from_sample_count`] derives from the sample count alone.
+    #[must_use]
+    pub fn meta(&self) -> PyramidMeta {
+        PyramidMeta {
+            total_samples: self.total_samples,
+            levels: self
+                .levels
+                .iter()
+                .map(|l| LevelMeta {
+                    bin_samples: l.bin_samples,
+                    bins: l.bins(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// One level of the ladder described without its bytes: how wide a bin is, and how many
+/// there are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LevelMeta {
+    /// How many source samples one bin of this level covers.
+    pub bin_samples: u32,
+    /// Number of bins at this level.
+    pub bins: usize,
+}
+
+/// The shape of a clip's waveform — everything a renderer needs to pick a level, and
+/// nothing it needs to draw one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PyramidMeta {
+    /// Samples in the source cache file, at [`ANALYSIS_RATE`].
+    pub total_samples: u64,
+    pub levels: Vec<LevelMeta>,
+}
+
+/// The ladder's shape for a clip of `total_samples` samples — **arithmetic only**, no file.
+///
+/// # Why this exists
+///
+/// Every mounted clip on the timeline asks the shell for its waveform's shape before it
+/// asks for any bins, and the honest way to answer used to be
+/// [`pyramid_from_cache_file`]: stream the whole `.f32` and fold the entire ladder just to
+/// report how many bins each level holds. That is ~169 MB of disk read per audio-hour, per
+/// clip, fired the moment results appear — on an eight-device one-hour shoot, ~1.3 GB of
+/// near-simultaneous reads, *including* for clips scrolled just off-screen inside the
+/// virtualization overscan (V03-S6 finding 12).
+///
+/// None of that read is needed. Bin counts are a pure function of the sample count and the
+/// ladder constants: level 0 bins [`BASE_BIN_SAMPLES`] samples (a trailing partial bin is
+/// kept, hence `div_ceil`), and every coarser level merges pairs (an odd tail inherits its
+/// single child — `div_ceil` again). The sample count itself is the entry's byte length
+/// divided by [`FRAME_BYTES`], which one `metadata` call already knows
+/// ([`crate::Cache::entry_len`]).
+///
+/// The equality with the folded ladder is not "close enough" — it is exact, at every level
+/// and every length, and `the_arithmetic_meta_matches_the_folded_ladder_exactly` holds the
+/// two together over empty, single-sample, partial-bin, odd-tail and multi-level inputs.
+/// If that test ever fails, this function is wrong and not the other way round: the fold is
+/// the definition.
+#[must_use]
+pub fn meta_from_sample_count(total_samples: u64) -> PyramidMeta {
+    // Deliberately the same loop shape as `pyramid_from_cache_file`'s, so the two cannot
+    // drift apart under an edit to the ladder bound: base level, then double until a bin
+    // reaches MAX_BIN_SECONDS.
+    let mut levels = vec![LevelMeta {
+        bin_samples: BASE_BIN_SAMPLES,
+        bins: total_samples.div_ceil(u64::from(BASE_BIN_SAMPLES)) as usize,
+    }];
+
+    let max_bin = MAX_BIN_SECONDS * f64::from(ANALYSIS_RATE);
+    while f64::from(
+        levels
+            .last()
+            .map_or(u32::MAX, |l: &LevelMeta| l.bin_samples),
+    ) < max_bin
+    {
+        let Some(previous) = levels.last() else {
+            break;
+        };
+        levels.push(LevelMeta {
+            bin_samples: previous.bin_samples.saturating_mul(2),
+            bins: previous.bins.div_ceil(2),
+        });
+    }
+
+    PyramidMeta {
+        total_samples,
+        levels,
     }
 }
 
@@ -849,6 +941,71 @@ mod tests {
         assert_eq!(p.levels[0].peak[0], 255, "a hot peak must pin, not wrap");
         assert_eq!(p.levels[0].peak[1], 0, "NaN must read as silence");
         assert_eq!(p.levels[0].rms[1], 0);
+    }
+
+    #[test]
+    fn the_arithmetic_meta_matches_the_folded_ladder_exactly() {
+        // Finding 12's whole justification. `waveform_meta` answers from the cache entry's
+        // byte length alone instead of streaming and folding ~169 MB per audio-hour — which
+        // is only legitimate if the arithmetic is EXACTLY the fold, not approximately it.
+        //
+        // The lengths are chosen to hit every place an off-by-one could hide: nothing at
+        // all; one sample (a bin holding 1/120 of its nominal size); the last sample before
+        // a bin boundary and the first past it; an odd number of level-0 bins (the merge's
+        // childless-parent branch) at more than one level; and a clip long enough to have
+        // real bins at the coarsest level, where twelve successive `div_ceil`s have had
+        // every chance to disagree with twelve successive `chunks(2)`.
+        let b = u64::from(BASE_BIN_SAMPLES);
+        for &n in &[
+            0,
+            1,
+            2,
+            b - 1,
+            b,
+            b + 1,
+            2 * b - 1,
+            2 * b,
+            2 * b + 30,
+            3 * b, // 3 level-0 bins -> odd tail at level 1
+            5 * b, // odd at level 0 AND at level 2
+            1000,
+            12_000,
+            60_001,
+            491_520 + 1, // just past one full bin of the coarsest level
+        ] {
+            let samples = vec![0.25f32; n as usize];
+            let (_dir, path) = cache_file(&samples);
+            let folded = pyramid_from_cache_file(&path).unwrap();
+
+            let arithmetic = meta_from_sample_count(n);
+            assert_eq!(
+                arithmetic,
+                folded.meta(),
+                "n = {n}: the arithmetic ladder disagrees with the folded one"
+            );
+            // And the sample count itself is derivable from the byte length, which is the
+            // other half of what `waveform_meta` relies on.
+            let bytes = std::fs::metadata(&path).unwrap().len();
+            assert_eq!(bytes / FRAME_BYTES as u64, folded.total_samples);
+        }
+    }
+
+    #[test]
+    fn the_arithmetic_meta_has_the_same_depth_as_the_ladder_at_any_length() {
+        // A cheaper, broader sweep of the same contract: the fold is O(file), so the test
+        // above can only afford a handful of lengths. Depth and bin_samples are free.
+        for n in [0u64, 7, 119, 121, 100_000, 1_000_000, 130_000_000] {
+            let meta = meta_from_sample_count(n);
+            assert_eq!(meta.levels.len(), LEVEL_COUNT, "n = {n}");
+            assert_eq!(meta.levels[0].bin_samples, BASE_BIN_SAMPLES);
+            for pair in meta.levels.windows(2) {
+                assert_eq!(pair[1].bin_samples, pair[0].bin_samples * 2);
+                // Halving, never below one bin while there is any audio at all.
+                assert_eq!(pair[1].bins, pair[0].bins.div_ceil(2));
+            }
+            let coarsest = meta.levels.last().unwrap().bins;
+            assert_eq!(coarsest == 0, n == 0, "n = {n}: {coarsest} coarse bins");
+        }
     }
 
     #[test]

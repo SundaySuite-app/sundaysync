@@ -38,6 +38,7 @@ export const Track = memo(function Track({
   visStart,
   visEnd,
   isReference,
+  unknownDurations,
   laneHeight,
   onSelect,
   muted,
@@ -55,6 +56,9 @@ export const Track = memo(function Track({
   visStart: number;
   visEnd: number;
   isReference: boolean;
+  /** Files the outcome carries no duration for — drawn as a stated unknown rather than
+   *  as a silent zero-length sliver (V03-S6, finding 15). */
+  unknownDurations: ReadonlySet<string>;
   laneHeight: number;
   onSelect: (placement: Placement) => void;
   muted: boolean;
@@ -122,6 +126,7 @@ export const Track = memo(function Track({
                     span={item}
                     placement={placement}
                     view={view}
+                    durationUnknown={unknownDurations.has(item.file)}
                     onSelect={onSelect}
                   />
                 );

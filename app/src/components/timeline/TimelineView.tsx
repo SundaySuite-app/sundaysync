@@ -17,6 +17,8 @@ import {
   fitPxPerMs,
   scrollbarFracToScrollMs,
   scrollbarMetrics,
+  scrollbarValueNow,
+  thumbOffsetFracToScrollMs,
 } from "../../timeline/viewport";
 import type { Placement, SyncOutcome } from "../../types";
 import { ClipDetail } from "./ClipDetail";
@@ -57,6 +59,14 @@ const LANE_H = 34;
 const WHEEL_FACTOR = 1.15;
 const BUTTON_FACTOR = 1.4;
 
+/** Arrow-key playhead nudge, and its shift-held coarse step (V03-S6). */
+const NUDGE_MS = 1000;
+const NUDGE_COARSE_MS = 10_000;
+
+/** Arrow-key scrollbar step, as a fraction of the visible window — the "line" of a
+ *  horizontal scrollbar (finding 14). */
+const SCROLL_STEP_FRACTION = 0.1;
+
 const VIEWPORT_ID = "timeline-viewport";
 
 export function TimelineView({
@@ -79,9 +89,18 @@ export function TimelineView({
   const viewportRef = useRef<HTMLDivElement>(null);
 
   // ---- Content: seconds → ms, grouped per device, stacked into sub-tracks ----
-  const { tracks, contentSpanMs, placements, audioClips } = useMemo(() => {
+  const { tracks, contentSpanMs, placements, audioClips, unknownDurations } = useMemo(() => {
     const placements = new Map<string, Placement>();
     for (const p of result.placements) placements.set(p.file, p);
+
+    // A placement with no `durations` entry is a hole in the outcome, not a zero-length
+    // clip — the probe failed to report a duration, or the two halves of the outcome
+    // disagree about which files exist. Drawn as a 3 px sliver and otherwise unremarked, it
+    // reads as "this camera recorded nothing", which is a lie the operator would act on
+    // (finding 15). So the set is carried down to the clips, which say so.
+    const unknownDurations = new Set<string>(
+      result.placements.filter((p) => durations[p.file] === undefined).map((p) => p.file),
+    );
 
     const spans: ClipSpan[] = result.placements.map((p) => {
       const startMs = p.offset_seconds * 1000;
@@ -119,7 +138,7 @@ export function TimelineView({
       projectedEndErrorMs: p.projected_end_error_ms,
     }));
 
-    return { tracks, contentSpanMs: spanMs, placements, audioClips };
+    return { tracks, contentSpanMs: spanMs, placements, audioClips, unknownDurations };
   }, [result, durations]);
 
   // ---- View state: zoom + pan, measured against the lane column's width ----
@@ -202,23 +221,39 @@ export function TimelineView({
   // Wheel is bound natively, not through React's synthetic handler, because React
   // registers `wheel` on the root as PASSIVE — `preventDefault()` there is a no-op,
   // and without it a ctrl+wheel zoom becomes a browser page zoom and a pan scrolls
-  // the whole window.
+  // the whole window. That binding is load-bearing; do not move it to `onWheel`.
+  //
+  // What is NOT load-bearing is calling `preventDefault()` unconditionally, which is what
+  // this used to do (finding 13). The timeline is tall, and the export bar and the unsynced
+  // shelf live below it, so a plain downward wheel over the timeline was the natural way to
+  // reach them — and it did nothing at all, because every wheel event was swallowed and
+  // turned into a horizontal pan. Now the gesture decides:
+  //
+  //   ctrl/meta         → zoom (prevented; otherwise the browser page-zooms)
+  //   deltaX, or shift  → pan  (prevented; otherwise the window scrolls sideways)
+  //   plain vertical    → not ours. Let it bubble and scroll the page.
+  //
+  // Shift+wheel is the horizontal-scroll convention every OS already applies to a mouse
+  // with only a vertical wheel; trackpads send a real `deltaX` and need no modifier.
   useEffect(() => {
     const el = bodyRef.current;
     const viewport = viewportRef.current;
     if (!el || !viewport) return;
     const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
       if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
         const anchorX = e.clientX - viewport.getBoundingClientRect().left;
         zoomBy(e.deltaY < 0 ? WHEEL_FACTOR : 1 / WHEEL_FACTOR, anchorX);
-      } else {
-        const delta = e.deltaX || e.deltaY;
-        setView((v) => ({
-          ...v,
-          scrollMs: clampS(v.scrollMs + delta / v.pxPerMs, v.pxPerMs, v.widthPx),
-        }));
+        return;
       }
+      const horizontal = e.deltaX !== 0 || e.shiftKey;
+      if (!horizontal) return;
+      e.preventDefault();
+      const delta = e.deltaX || e.deltaY;
+      setView((v) => ({
+        ...v,
+        scrollMs: clampS(v.scrollMs + delta / v.pxPerMs, v.pxPerMs, v.widthPx),
+      }));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -256,21 +291,137 @@ export function TimelineView({
   // ---- Scrollbar ----
   const bar = scrollbarMetrics(view, contentSpanMs);
 
-  function scrubScrollbar(e: React.PointerEvent<HTMLDivElement>) {
+  /**
+   * Where inside the thumb the pointer went down, as a fraction of the trough — `null`
+   * while no drag is in progress.
+   *
+   * The whole of finding 5. `offsetFrac` is the thumb's LEFT EDGE, but the same handler
+   * ran for a press on the thumb and a press on empty trough, and it treated the pointer
+   * as the CENTRE of the wanted window. Measured: grabbing the thumb's left edge jumped
+   * half a window backwards before the drag had moved a pixel; the right edge, half a
+   * window forwards. Remembering the grab offset and mapping from `frac - grabΔ` through
+   * `thumbOffsetFracToScrollMs` (the exact inverse of `scrollbarMetrics`) makes the thumb
+   * stay under the finger, which is the only behaviour a scrollbar is allowed to have.
+   */
+  const grabDelta = useRef<number | null>(null);
+
+  function troughFrac(e: React.PointerEvent<HTMLDivElement>): number | null {
     const rect = e.currentTarget.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const frac = (e.clientX - rect.left) / rect.width;
+    if (rect.width <= 0) return null;
+    return (e.clientX - rect.left) / rect.width;
+  }
+
+  function onScrollbarDown(e: React.PointerEvent<HTMLDivElement>) {
+    const frac = troughFrac(e);
+    if (frac === null) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+
+    if (frac >= bar.offsetFrac && frac <= bar.offsetFrac + bar.thumbFrac) {
+      // On the thumb: pick it up where it was touched and change nothing yet.
+      grabDelta.current = frac - bar.offsetFrac;
+      return;
+    }
+    // Empty trough: jump so the window centres on the press — the click-to-jump that
+    // lands where the eye expects. From then on the drag behaves as if the thumb had been
+    // grabbed by its middle, which is where it now is.
+    grabDelta.current = bar.thumbFrac / 2;
     setView((v) => ({ ...v, scrollMs: scrollbarFracToScrollMs(frac, v, contentSpanMs) }));
   }
+
+  function onScrollbarMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    const grab = grabDelta.current;
+    if (grab === null) return;
+    const frac = troughFrac(e);
+    if (frac === null) return;
+    setView((v) => ({
+      ...v,
+      scrollMs: thumbOffsetFracToScrollMs(frac - grab, v, contentSpanMs),
+    }));
+  }
+
+  function onScrollbarUp(e: React.PointerEvent<HTMLDivElement>) {
+    grabDelta.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }
+
+  /** Arrow/Home/End on the focused scrollbar (finding 14). Reuses `clampScroll` so a
+   *  keyboard user cannot reach a scroll a pointer could not. */
+  function onScrollbarKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    setView((v) => {
+      const visibleMs = v.widthPx / v.pxPerMs;
+      const step = visibleMs * SCROLL_STEP_FRACTION;
+      let next: number;
+      switch (e.key) {
+        case "ArrowLeft":
+          next = v.scrollMs - step;
+          break;
+        case "ArrowRight":
+          next = v.scrollMs + step;
+          break;
+        case "PageUp":
+          next = v.scrollMs - visibleMs;
+          break;
+        case "PageDown":
+          next = v.scrollMs + visibleMs;
+          break;
+        case "Home":
+          next = 0;
+          break;
+        case "End":
+          next = contentSpanMs;
+          break;
+        default:
+          return v;
+      }
+      return { ...v, scrollMs: clampS(next, v.pxPerMs, v.widthPx) };
+    });
+    if (
+      ["ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"].includes(e.key)
+    ) {
+      e.preventDefault();
+      // The section's own handler maps Home and the arrows to the PLAYHEAD. While the
+      // scrollbar has focus they belong to the scrollbar.
+      e.stopPropagation();
+    }
+  }
+
+  const [visStart, visEnd] = visibleRange(view);
+  // Seeking goes through the engine rather than straight to `publishPlayheadMs`: while
+  // playing, moving the playhead has to rebuild the audio schedule too, and the engine is
+  // the only thing that knows whether it is playing.
+  const seekMs = useCallback(
+    (ms: number) => engine.seekTo(Math.min(Math.max(0, ms), contentSpanMs) / 1000),
+    [engine, contentSpanMs],
+  );
+  const seek = useCallback((x: number) => seekMs(xToMs(x, view)), [seekMs, view]);
 
   // ---- Keyboard ----
   function onKeyDown(e: React.KeyboardEvent<HTMLElement>) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // Anything the user is typing into, or dragging with the arrow keys, owns its own
+    // keys: the project-name field (outside this section), the volume slider and the
+    // device `<select>`s inside it. Without this, adjusting the volume with the arrow keys
+    // would also drag the playhead, and Space in a text field would start playback.
     const tag = (e.target as HTMLElement).tagName;
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
     if (e.key === "+" || e.key === "=") zoomBy(BUTTON_FACTOR);
     else if (e.key === "-" || e.key === "_") zoomBy(1 / BUTTON_FACTOR);
-    else if (e.key === "0") fit();
+    // `0` and `F` both fit — `0` because it is what every NLE uses, `F` because it is what
+    // this app's own button is labelled.
+    else if (e.key === "0" || e.key === "f" || e.key === "F") fit();
+    // The playhead, in whole seconds: fine enough to walk up to a transient, coarse enough
+    // that crossing a service takes a held key rather than an afternoon. Shift is the
+    // ten-second stride.
+    else if (e.key === "ArrowLeft")
+      seekMs(getPlayheadMs() - (e.shiftKey ? NUDGE_COARSE_MS : NUDGE_MS));
+    else if (e.key === "ArrowRight")
+      seekMs(getPlayheadMs() + (e.shiftKey ? NUDGE_COARSE_MS : NUDGE_MS));
+    else if (e.key === "Home") seekMs(0);
+    else if (e.key === "End") seekMs(contentSpanMs);
     // Space is play/pause everywhere that has a transport (D-055). It is checked last so
     // it cannot interfere with the existing +/−/0 zoom keys, and `preventDefault` below
     // stops the browser scrolling the page — which is what Space would otherwise do, and
@@ -279,15 +430,6 @@ export function TimelineView({
     else return;
     e.preventDefault();
   }
-
-  const [visStart, visEnd] = visibleRange(view);
-  // Seeking goes through the engine rather than straight to `publishPlayheadMs`: while
-  // playing, moving the playhead has to rebuild the audio schedule too, and the engine is
-  // the only thing that knows whether it is playing.
-  const seek = useCallback(
-    (x: number) => engine.seekTo(Math.max(0, xToMs(x, view)) / 1000),
-    [engine, view],
-  );
 
   return (
     <section
@@ -346,6 +488,7 @@ export function TimelineView({
               visStart={visStart}
               visEnd={visEnd}
               isReference={result.reference?.device === device.id}
+              unknownDurations={unknownDurations}
               laneHeight={LANE_H}
               onSelect={setSelected}
               muted={playback.muted.includes(device.id)}
@@ -367,20 +510,23 @@ export function TimelineView({
             <div
               className="timeline__scrollbar"
               role="scrollbar"
+              // Focusable, and keyboard-operable once focused (finding 14). `role="scrollbar"`
+              // without a tab stop is a control that announces itself to a screen reader and
+              // then cannot be reached or used by one.
+              tabIndex={0}
               aria-label={t.scrollbarAria}
               aria-controls={VIEWPORT_ID}
               aria-orientation="horizontal"
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={Math.round(bar.offsetFrac * 100)}
-              onPointerDown={(e) => {
-                e.currentTarget.setPointerCapture(e.pointerId);
-                scrubScrollbar(e);
-              }}
-              onPointerMove={(e) => {
-                if (e.currentTarget.hasPointerCapture(e.pointerId)) scrubScrollbar(e);
-              }}
-              onPointerUp={(e) => e.currentTarget.releasePointerCapture(e.pointerId)}
+              // Position within the thumb's TRAVEL, so 100 is reachable — see
+              // `scrollbarValueNow`.
+              aria-valuenow={scrollbarValueNow(view, contentSpanMs)}
+              onPointerDown={onScrollbarDown}
+              onPointerMove={onScrollbarMove}
+              onPointerUp={onScrollbarUp}
+              onPointerCancel={onScrollbarUp}
+              onKeyDown={onScrollbarKeyDown}
             >
               <div
                 className="timeline__thumb"

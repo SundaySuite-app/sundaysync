@@ -47,7 +47,10 @@ pub use fcpxml::{
     export as export_fcpxml, export_with_options as export_fcpxml_with_options, Export,
     ExportError, ExportOptions, TimeMap,
 };
-pub use peaks::{pyramid_from_cache_file, Level, Pyramid, BASE_BIN_SAMPLES};
+pub use peaks::{
+    meta_from_sample_count, pyramid_from_cache_file, Level, LevelMeta, Pyramid, PyramidMeta,
+    BASE_BIN_SAMPLES,
+};
 pub use place::{Candidate, Placed};
 pub use probe::{AudioStream, Probed, VideoStream};
 pub use progress::{CancelToken, NoProgress, Progress, ProgressSink, Stage};

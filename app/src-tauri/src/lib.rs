@@ -768,24 +768,85 @@ fn pyramid_for(
 }
 
 /// Shape of a clip's waveform. Read-only: does NOT claim the D-046 activity slot.
+///
+/// **Answers from the cache entry's byte length, not from the pyramid** (V03-S6, finding
+/// 12). Every mounted `WaveformCanvas` fires this on mount, including the ones the
+/// timeline's virtualization keeps just off-screen in its overscan — and building the
+/// ladder to answer it meant streaming the entire `.f32` (~169 MB per audio-hour) and
+/// folding thirteen levels to report a handful of bin counts. On an eight-device
+/// one-hour shoot that was ~1.3 GB of near-simultaneous disk reads the instant results
+/// appeared, for numbers that are pure arithmetic on the sample count
+/// ([`sundaysync_core::meta_from_sample_count`], proved bin-for-bin equal to the fold).
+///
+/// The fold now happens on the first `waveform_level` — i.e. only for clips the renderer
+/// actually draws, and only once per clip.
+///
+/// A resident pyramid still answers from memory: it is already paid for, and using it
+/// keeps a clip drawing after a maintenance sweep has deleted the entry underneath it
+/// (the same guarantee `a_cache_entry_evicted_after_it_was_read_still_serves_from_memory`
+/// pins for `waveform_level`).
+///
+/// One deliberate difference from the fold: [`sundaysync_core::Cache::entry_len`] rejects
+/// a ZERO-length entry, which `pyramid_from_cache_file` would happily read as an empty
+/// ladder. A zero-length entry cannot come from a completed write, and "rebuild this one"
+/// is the honest affordance for it, so it reports as [`CACHE_MISSING_PREFIX`] here.
 #[tauri::command(async)]
 fn waveform_meta(
     state: State<'_, AppState>,
     file: PathBuf,
     cache_dir: Option<PathBuf>,
 ) -> Result<WaveformMeta, String> {
-    let pyramid = pyramid_for(&state, &file, cache_dir)?;
-    Ok(WaveformMeta {
-        total_samples: pyramid.total_samples,
-        levels: pyramid
-            .levels
-            .iter()
-            .map(|l| WaveformLevelMeta {
-                bin_samples: l.bin_samples,
-                bins: l.bins(),
-            })
-            .collect(),
-    })
+    waveform_meta_for(&state, &file, cache_dir)
+}
+
+/// [`waveform_meta`]'s body, off the `State` extractor so it is directly testable — the
+/// same shape as [`pyramid_for`] next to it.
+fn waveform_meta_for(
+    state: &AppState,
+    file: &Path,
+    cache_dir: Option<PathBuf>,
+) -> Result<WaveformMeta, String> {
+    let dir = resolve_cache_dir(cache_dir)?;
+    // Reads the media file's metadata — a missing *source* is not a missing cache entry,
+    // and must not offer to regenerate something that cannot be regenerated. Same
+    // classification as `pyramid_for`, for the same reason.
+    let key = sundaysync_core::CacheKey::for_file(file, sundaysync_core::ANALYSIS_RATE)
+        .map_err(|e| e.to_string())?;
+
+    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover) {
+        if let Some(hit) = lru.get(key.as_str()) {
+            return Ok(WaveformMeta::from(hit.meta()));
+        }
+    }
+
+    let total_samples = sundaysync_core::Cache::new(dir)
+        .entry_len(&key)
+        .map(|bytes| bytes / F32_BYTES)
+        .ok_or_else(|| format!("{CACHE_MISSING_PREFIX}{}", file.display()))?;
+
+    Ok(WaveformMeta::from(sundaysync_core::meta_from_sample_count(
+        total_samples,
+    )))
+}
+
+/// Bytes per `f32le` sample in a cache entry — the engine's own frame size, named here so
+/// the length→samples division reads as what it is.
+const F32_BYTES: u64 = 4;
+
+impl From<sundaysync_core::PyramidMeta> for WaveformMeta {
+    fn from(meta: sundaysync_core::PyramidMeta) -> Self {
+        Self {
+            total_samples: meta.total_samples,
+            levels: meta
+                .levels
+                .into_iter()
+                .map(|l| WaveformLevelMeta {
+                    bin_samples: l.bin_samples,
+                    bins: l.bins,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// One level's bins as raw bytes: interleaved `[peak, rms]` `u8` pairs.
@@ -830,6 +891,12 @@ fn waveform_level(
 /// no-opping on a cache hit — a "regenerate" button that silently does nothing when the
 /// entry is present-but-corrupt would be worse than no button. Safe to do under the guard:
 /// no sync can be reading the cache while we hold it.
+///
+/// **Known consequence of that order:** if the re-extract then FAILS (the file no longer
+/// decodes, the disk filled, ffmpeg died), a present-but-corrupt entry has been turned into
+/// a missing one. That is deliberate — a corrupt entry is not worth preserving, and the
+/// error this returns names the real problem — but it does mean the clip's state after a
+/// failed regenerate is "no cached analysis" rather than "the same broken waveform".
 #[tauri::command(async)]
 fn regenerate_analysis<R: tauri::Runtime>(
     app: AppHandle<R>,
@@ -841,14 +908,64 @@ fn regenerate_analysis<R: tauri::Runtime>(
 
     let sidecar = state.sidecar()?;
     let dir = resolve_cache_dir(cache_dir)?;
-    let key = sundaysync_core::CacheKey::for_file(&file, sundaysync_core::ANALYSIS_RATE)
+
+    regenerate_with(&state, &file, dir, move |cache, file| {
+        // Progress on its own channel so a multi-minute re-extract of a three-hour service
+        // is not a frozen button. Distinct from `sync:progress`, which the results view is
+        // bound to and which must not flicker because a waveform is rebuilding.
+        let sink = EventSink::new(app, "analysis:progress");
+        let one = [file.to_path_buf()];
+        let outcomes = sundaysync_core::Extractor::new(sidecar, cache)
+            .extract_all(&one, &sink, &CancelToken::new())
+            .map_err(|e| e.to_string())?;
+
+        // §7.2: a file that will not decode is a normal outcome, not an engine error — but
+        // for *this* command it is the whole answer, so it is reported rather than
+        // swallowed.
+        match outcomes.into_iter().next() {
+            Some(Ok(_)) => Ok(()),
+            Some(Err(e)) => Err(format!("could not decode {}: {}", file.display(), e.reason)),
+            None => Err(format!("nothing was extracted for {}", file.display())),
+        }
+    })
+}
+
+/// The cache bookkeeping around a re-extract, with the extraction itself injected.
+///
+/// Split out for one reason: the eviction ORDER is the whole correctness of this command,
+/// and the only way to test an order deterministically is to be able to run something in
+/// the middle of it. `regenerate_analysis` passes the real extractor; the test passes a
+/// closure that stands in for the concurrent reader.
+///
+/// # Why the memo is evicted TWICE
+///
+/// Once before the file is deleted, and once after the re-extract commits the new one.
+/// The first eviction alone is not enough, and the comment that used to claim it was had
+/// the causality backwards (V03-S6, finding 4):
+///
+/// `waveform_meta`/`waveform_level` deliberately do NOT take the D-046 activity slot
+/// (they must keep drawing while a sync runs), and they are `async`. So one of them can
+/// land in the window between the eviction and the `remove_file`, miss the now-empty LRU,
+/// read the OLD cache file that is still on disk, and `put()` the stale pyramid straight
+/// back — under the *same key*, because the key is path+size+mtime of the SOURCE media and
+/// regeneration does not touch that. The file is then deleted, the new one extracted, and
+/// nothing ever consults the LRU for that key again: the stale picture is served for the
+/// rest of the session, in exactly the present-but-corrupt case this button exists for.
+///
+/// Evicting again after the extract returns closes it: whatever raced in during the window
+/// is dropped, and the next read rebuilds from the file that is actually there now.
+fn regenerate_with(
+    state: &AppState,
+    file: &Path,
+    dir: PathBuf,
+    extract: impl FnOnce(sundaysync_core::Cache, &Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let key = sundaysync_core::CacheKey::for_file(file, sundaysync_core::ANALYSIS_RATE)
         .map_err(|e| e.to_string())?;
 
-    // Drop the memo before the file, so a concurrent read can never repopulate the LRU
-    // from the entry we are about to delete.
-    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover) {
-        lru.evict(key.as_str());
-    }
+    // Before: so a read that is already past its own LRU lookup cannot serve the pyramid
+    // we are about to invalidate for any longer than this call takes.
+    evict_pyramid(state, key.as_str());
 
     let cache = sundaysync_core::Cache::new(dir);
     let entry = cache.entry_path(&key);
@@ -859,20 +976,16 @@ fn regenerate_analysis<R: tauri::Runtime>(
         }
     }
 
-    // Progress on its own channel so a multi-minute re-extract of a three-hour service is
-    // not a frozen button. Distinct from `sync:progress`, which the results view is bound
-    // to and which must not flicker because a waveform is rebuilding.
-    let sink = EventSink::new(app, "analysis:progress");
-    let outcomes = sundaysync_core::Extractor::new(sidecar, cache)
-        .extract_all(std::slice::from_ref(&file), &sink, &CancelToken::new())
-        .map_err(|e| e.to_string())?;
+    extract(cache, file)?;
 
-    // §7.2: a file that will not decode is a normal outcome, not an engine error — but for
-    // *this* command it is the whole answer, so it is reported rather than swallowed.
-    match outcomes.into_iter().next() {
-        Some(Ok(_)) => Ok(()),
-        Some(Err(e)) => Err(format!("could not decode {}: {}", file.display(), e.reason)),
-        None => Err(format!("nothing was extracted for {}", file.display())),
+    // After: the actual fix. See this function's header.
+    evict_pyramid(state, key.as_str());
+    Ok(())
+}
+
+fn evict_pyramid(state: &AppState, key: &str) {
+    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover) {
+        lru.evict(key);
     }
 }
 
@@ -1991,6 +2104,157 @@ mod waveform_tests {
         let second = pyramid_for(&state, &f.media, Some(f.cache_dir.clone()))
             .expect("a resident pyramid must survive its cache entry being evicted");
         assert_eq!(first, second);
+    }
+
+    // ---- Regenerate: the eviction ORDER (V03-S6, finding 4) ------------------------
+
+    #[test]
+    fn regenerating_drops_a_pyramid_that_raced_in_while_the_entry_was_being_rebuilt() {
+        // The race this pins, spelled out:
+        //
+        //   1. `regenerate_analysis` evicts the LRU entry.
+        //   2. A concurrent `waveform_meta`/`waveform_level` — which deliberately do NOT
+        //      take the D-046 activity slot, and are async — misses the now-empty LRU,
+        //      reads the OLD cache file still sitting on disk, and `put()`s that stale
+        //      pyramid back under the SAME key (path+size+mtime of the source media, which
+        //      regeneration does not change).
+        //   3. `remove_file` deletes the file; the re-extract writes a new one.
+        //   4. Nothing ever consults the LRU for that key again → the stale picture is
+        //      served for the rest of the session.
+        //
+        // The closure stands in for step 2 at the one moment it can do damage, so the
+        // assertion is about the OUTCOME of the race, not about timing. Before the fix
+        // (evict only at the top) this fails: the stale entry is still resident on return.
+        let f = fixture(&vec![0.5f32; 1200]);
+        let state = AppState::default();
+        let stale = stub_pyramid(11_111);
+
+        let raced = regenerate_with(&state, &f.media, f.cache_dir.clone(), |_cache, _file| {
+            // The concurrent reader, arriving after the evict-and-delete.
+            if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover) {
+                lru.put(f.key.as_str().to_string(), Arc::clone(&stale));
+            }
+            Ok(())
+        });
+        assert!(raced.is_ok(), "unexpected: {raced:?}");
+
+        let mut lru = lock_state(&state.pyramids, OnPoison::Recover).unwrap();
+        assert!(
+            lru.get(f.key.as_str()).is_none(),
+            "a pyramid that raced in during the rebuild survived it — the next read will \
+             serve the picture of a cache file that no longer exists",
+        );
+    }
+
+    #[test]
+    fn regenerating_deletes_the_old_entry_before_re_extracting() {
+        // The other half of the order: a "regenerate" that no-ops on a cache hit would be
+        // worse than no button at all, since the case it exists for is present-but-corrupt.
+        let f = fixture(&vec![0.5f32; 1200]);
+        let entry = f.cache_dir.join(format!("{}.f32", f.key.as_str()));
+        assert!(entry.exists());
+
+        let state = AppState::default();
+        let mut saw_it_gone = false;
+        regenerate_with(&state, &f.media, f.cache_dir.clone(), |_cache, _file| {
+            saw_it_gone = !entry.exists();
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            saw_it_gone,
+            "the extractor ran with the stale entry still there"
+        );
+    }
+
+    #[test]
+    fn a_failed_re_extract_reports_the_failure_and_leaves_no_stale_memo() {
+        // Documented consequence (see `regenerate_analysis`'s doc comment): the entry is
+        // deleted first, so a failed rebuild turns present-but-corrupt into missing. What
+        // must NOT happen either way is a resident pyramid outliving the file it describes.
+        let f = fixture(&vec![0.5f32; 1200]);
+        let state = AppState::default();
+        // Prime the LRU the way a real session would have.
+        let _ = pyramid_for(&state, &f.media, Some(f.cache_dir.clone())).unwrap();
+
+        let err = regenerate_with(&state, &f.media, f.cache_dir.clone(), |_cache, _file| {
+            Err("could not decode".to_string())
+        })
+        .unwrap_err();
+        assert_eq!(err, "could not decode");
+
+        let mut lru = lock_state(&state.pyramids, OnPoison::Recover).unwrap();
+        assert!(lru.get(f.key.as_str()).is_none());
+        assert!(!f.cache_dir.join(format!("{}.f32", f.key.as_str())).exists());
+    }
+
+    // ---- waveform_meta answers from the byte length (finding 12) -------------------
+
+    #[test]
+    fn waveform_meta_does_not_read_the_cache_file_at_all() {
+        // Finding 12: meta used to stream the whole `.f32` and fold thirteen levels just to
+        // report bin counts — ~169 MB per audio-hour, per mounted clip, including the ones
+        // the virtualization keeps off-screen. It now answers from `entry_len`.
+        //
+        // Proved by making the file UNREADABLE while keeping its length: a fold would fail
+        // (or read garbage), and the arithmetic cannot tell the difference. The permission
+        // bits are the cheapest honest way to say "you may stat this, not read it".
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let f = fixture(&vec![0.5f32; 12_000]);
+            let entry = f.cache_dir.join(format!("{}.f32", f.key.as_str()));
+            std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+            let state = AppState::default();
+            // The fold really would fail on this file — otherwise the assertion below
+            // proves nothing.
+            assert!(pyramid_for(&state, &f.media, Some(f.cache_dir.clone())).is_err());
+
+            let meta = waveform_meta_for(&state, &f.media, Some(f.cache_dir.clone()))
+                .expect("meta must answer from the byte length alone");
+            assert_eq!(meta.total_samples, 12_000);
+            assert_eq!(meta.levels.len(), sundaysync_core::peaks::LEVEL_COUNT);
+            assert_eq!(meta.levels[0].bins, 100);
+            assert_eq!(meta.levels[1].bins, 50);
+
+            // Leave it removable for the TempDir's Drop.
+            std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+    }
+
+    #[test]
+    fn waveform_meta_prefers_a_resident_pyramid_over_the_file() {
+        // A pyramid already in the LRU is paid for, and using it keeps a clip's shape
+        // answerable after a maintenance sweep has deleted the entry underneath it — the
+        // same guarantee `a_cache_entry_evicted_after_it_was_read_still_serves_from_memory`
+        // pins for the bytes.
+        let f = fixture(&vec![0.9f32; 2400]);
+        let state = AppState::default();
+        let _ = pyramid_for(&state, &f.media, Some(f.cache_dir.clone())).unwrap();
+        std::fs::remove_file(f.cache_dir.join(format!("{}.f32", f.key.as_str()))).unwrap();
+
+        let meta = waveform_meta_for(&state, &f.media, Some(f.cache_dir.clone()))
+            .expect("a resident pyramid must still describe itself");
+        assert_eq!(meta.total_samples, 2400);
+    }
+
+    #[test]
+    fn waveform_meta_reports_a_missing_or_empty_entry_as_regenerable() {
+        let f = fixture(&vec![0.5f32; 480]);
+        let entry = f.cache_dir.join(format!("{}.f32", f.key.as_str()));
+        let state = AppState::default();
+
+        std::fs::remove_file(&entry).unwrap();
+        let err = waveform_meta_for(&state, &f.media, Some(f.cache_dir.clone())).unwrap_err();
+        assert!(err.starts_with(CACHE_MISSING_PREFIX), "unexpected: {err}");
+
+        // A zero-length entry cannot come from a completed write; "rebuild this one" is the
+        // honest answer for it too (`Cache::entry_len` already refuses to serve it).
+        std::fs::write(&entry, b"").unwrap();
+        let err = waveform_meta_for(&state, &f.media, Some(f.cache_dir.clone())).unwrap_err();
+        assert!(err.starts_with(CACHE_MISSING_PREFIX), "unexpected: {err}");
     }
 
     // ---- The LRU -------------------------------------------------------------------

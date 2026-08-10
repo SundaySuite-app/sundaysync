@@ -6,6 +6,8 @@ import {
   fitPxPerMs,
   scrollbarFracToScrollMs,
   scrollbarMetrics,
+  scrollbarValueNow,
+  thumbOffsetFracToScrollMs,
 } from "./viewport";
 
 const view = (over: Partial<TimelineView> = {}): TimelineView => ({
@@ -156,5 +158,96 @@ describe("scrollbarFracToScrollMs", () => {
   it("clamps at both ends", () => {
     expect(scrollbarFracToScrollMs(0, view(), 4_000_000)).toBe(0);
     expect(scrollbarFracToScrollMs(1, view(), 4_000_000)).toBe(3_000_000);
+  });
+});
+
+describe("thumbOffsetFracToScrollMs (finding 5)", () => {
+  it("is the exact inverse of scrollbarMetrics, at every scroll", () => {
+    // The contract `scrollbarMetrics`'s header states. Anything less than exact shows up
+    // as the thumb creeping away from the pointer over a long drag.
+    const span = 4_000_000;
+    const v = view();
+    const maxScroll = span - v.widthPx / v.pxPerMs;
+    for (let i = 0; i <= 20; i++) {
+      const scrollMs = (maxScroll * i) / 20;
+      const { offsetFrac } = scrollbarMetrics({ ...v, scrollMs }, span);
+      expect(thumbOffsetFracToScrollMs(offsetFrac, { ...v, scrollMs }, span)).toBeCloseTo(
+        scrollMs,
+        6,
+      );
+    }
+  });
+
+  it("round-trips at deep zoom, where the thumb is wider than its natural width", () => {
+    // MIN_THUMB_FRAC inflates the thumb here, so "fraction of the trough" and "fraction of
+    // the travel" are different numbers — the case a naive inverse gets wrong.
+    const span = 3 * 3_600_000;
+    const v = view({ pxPerMs: MAX_PX_PER_MS });
+    const maxScroll = span - v.widthPx / v.pxPerMs;
+    for (const scrollMs of [0, maxScroll * 0.13, maxScroll * 0.99, maxScroll]) {
+      const { offsetFrac } = scrollbarMetrics({ ...v, scrollMs }, span);
+      expect(thumbOffsetFracToScrollMs(offsetFrac, { ...v, scrollMs }, span) / maxScroll)
+        .toBeCloseTo(scrollMs / maxScroll, 9);
+    }
+  });
+
+  it("grabbing anywhere on the thumb and not moving leaves the scroll where it was", () => {
+    // Finding 5, stated as the thing the user notices: press on the thumb's left edge,
+    // release without moving, and the timeline must not have gone anywhere. Centring on
+    // the pointer instead (`scrollbarFracToScrollMs`) jumps half a window backwards from
+    // the left edge and half a window forwards from the right one.
+    const span = 4_000_000;
+    const v = view({ scrollMs: 1_800_000 });
+    const bar = scrollbarMetrics(v, span);
+
+    for (const withinThumb of [0, bar.thumbFrac / 2, bar.thumbFrac]) {
+      const pointerFrac = bar.offsetFrac + withinThumb;
+      const grabOffset = pointerFrac - bar.offsetFrac;
+      expect(thumbOffsetFracToScrollMs(pointerFrac - grabOffset, v, span)).toBeCloseTo(
+        v.scrollMs,
+        6,
+      );
+    }
+
+    // …and the old mapping demonstrably does not: grabbing the left edge moves it.
+    const naive = scrollbarFracToScrollMs(bar.offsetFrac, v, span);
+    expect(Math.abs(naive - v.scrollMs)).toBeGreaterThan(100_000);
+  });
+
+  it("pins to zero when there is no travel to speak of", () => {
+    expect(thumbOffsetFracToScrollMs(0.7, view(), 500_000)).toBe(0);
+  });
+
+  it("never leaves the legal scroll range, whatever fraction it is handed", () => {
+    const span = 4_000_000;
+    for (const frac of [-3, -0.01, 0, 0.5, 1, 1.5, 99]) {
+      const ms = thumbOffsetFracToScrollMs(frac, view(), span);
+      expect(ms).toBeGreaterThanOrEqual(0);
+      expect(ms).toBeLessThanOrEqual(3_000_000);
+    }
+  });
+});
+
+describe("scrollbarValueNow (finding 14)", () => {
+  it("reaches 100 at the end of travel, not (1 - thumbFrac) · 100", () => {
+    const span = 4_000_000;
+    const v = view();
+    const maxScroll = span - v.widthPx / v.pxPerMs;
+    expect(scrollbarValueNow({ ...v, scrollMs: 0 }, span)).toBe(0);
+    expect(scrollbarValueNow({ ...v, scrollMs: maxScroll / 2 }, span)).toBe(50);
+    // The old `Math.round(offsetFrac * 100)` reported 75 here: a quarter-width thumb can
+    // only reach an offsetFrac of 0.75, however far right it is.
+    expect(scrollbarValueNow({ ...v, scrollMs: maxScroll }, span)).toBe(100);
+  });
+
+  it("is 0, not NaN, when the whole timeline already fits", () => {
+    expect(scrollbarValueNow(view({ scrollMs: 999 }), 500_000)).toBe(0);
+  });
+
+  it("reaches 100 at deep zoom too, where the thumb is at its floor width", () => {
+    const span = 3 * 3_600_000;
+    const v = view({ pxPerMs: MAX_PX_PER_MS });
+    const maxScroll = span - v.widthPx / v.pxPerMs;
+    expect(scrollbarValueNow({ ...v, scrollMs: maxScroll }, span)).toBe(100);
   });
 });

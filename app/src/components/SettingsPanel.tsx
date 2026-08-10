@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getPlaybackEngine } from "../audio/scheduler";
 import type { Lang, Strings } from "../i18n";
 import { formatBytes } from "../i18n";
 import { getSettings, parseMinPsrInput, saveSettings } from "../settings";
@@ -79,6 +80,7 @@ export function SettingsPanel({
   );
   const [cacheCapError, setCacheCapError] = useState(false);
   const [correctDrift, setCorrectDrift] = useState(settings.correctDrift);
+  const [playbackDrift, setPlaybackDrift] = useState(settings.playbackDriftCorrected);
   const [telemetry, setTelemetry] = useState<TelemetryStatus | null>(null);
   const [telemetryBusy, setTelemetryBusy] = useState(false);
   const [telemetryPreview, setTelemetryPreview] = useState<string | null>(null);
@@ -330,6 +332,26 @@ export function SettingsPanel({
             <span>{t.driftCorrect}</span>
           </span>
           <small>{t.driftCorrectHint}</small>
+        </label>
+
+        {/* V03-S6: playback's own drift switch, next to the export one it deliberately does
+            NOT share (D-055 — comparing the two by ear is the point). Routed through the
+            engine rather than `saveSettings` directly: `setDriftCorrected` persists it AND
+            rebuilds the schedule from where the playhead stands, so the change is audible
+            immediately instead of at the next restart. */}
+        <label className="field field--check">
+          <span className="field__row">
+            <input
+              type="checkbox"
+              checked={playbackDrift}
+              onChange={(e) => {
+                setPlaybackDrift(e.target.checked);
+                getPlaybackEngine().setDriftCorrected(e.target.checked);
+              }}
+            />
+            <span>{t.playbackDriftCorrect}</span>
+          </span>
+          <small>{t.playbackDriftCorrectHint}</small>
         </label>
 
         <div className="field">

@@ -1,6 +1,6 @@
 // Adapted from SundayEdit (same owner) — src/features/timeline/laneLayout.test.ts; see docs/DECISIONS.md D-051.
 import { describe, it, expect } from "vitest";
-import { stackClips, trackAtY, type ClipSpan } from "./laneLayout";
+import { stackClips, type ClipSpan } from "./laneLayout";
 
 function span(file: string, startMs: number, endMs: number): ClipSpan {
   return { file, startMs, endMs };
@@ -68,20 +68,3 @@ describe("stackClips", () => {
   });
 });
 
-describe("trackAtY", () => {
-  const rows = stackClips([span("a.mov", 0, 1000), span("b.mov", 500, 1500)]);
-
-  it("resolves a Y to the row via row height", () => {
-    expect(trackAtY(0, rows, 48)?.map((c) => c.file)).toEqual(["a.mov"]);
-    expect(trackAtY(47, rows, 48)?.map((c) => c.file)).toEqual(["a.mov"]); // last px of row 0
-    expect(trackAtY(48, rows, 48)?.map((c) => c.file)).toEqual(["b.mov"]); // row boundary -> row 1
-    expect(trackAtY(999, rows, 48)).toBeNull();
-  });
-
-  it("returns null above the rows area, with no rows, or degenerate row height", () => {
-    expect(trackAtY(-1, rows, 48)).toBeNull();
-    expect(trackAtY(2 * 48, rows, 48)).toBeNull(); // just past the last row
-    expect(trackAtY(0, [], 48)).toBeNull();
-    expect(trackAtY(0, rows, 0)).toBeNull();
-  });
-});

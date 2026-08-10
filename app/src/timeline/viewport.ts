@@ -99,12 +99,9 @@ const MIN_THUMB_FRAC = 0.02;
  * `1 - thumbFrac` at the end (thumb flush right), monotonic in between — and needs no
  * clamp to stay inside the trough.
  *
- * **Contract for the grab-offset fix still to come** (finding 5, `TimelineView.tsx`):
- * this is the inverse of "thumb left edge → scroll", i.e. `scrollMs = offsetFrac /
- * (1 - thumbFrac) * maxScrollMs`. A drag that tracks where the thumb was *grabbed*
- * should therefore convert the pointer's trough fraction into a thumb-LEFT-EDGE fraction
- * (subtract the grab offset within the thumb) and invert this — not treat the pointer as
- * the thumb's centre, which is what `scrollbarFracToScrollMs` below does for a bare click.
+ * The inverse — thumb left edge → scroll — is [`thumbOffsetFracToScrollMs`], which is what
+ * a drag that tracks where the thumb was *grabbed* uses. `scrollbarFracToScrollMs` below
+ * is the other mapping, for a bare click on empty trough.
  */
 export function scrollbarMetrics(
   view: TimelineView,
@@ -122,6 +119,11 @@ export function scrollbarMetrics(
  * Where to scroll when the user grabs the scrollbar at `frac` (0–1 across the
  * trough): centre the visible window on that point, then clamp. Centring rather
  * than left-aligning is what makes click-to-jump land where the eye expects.
+ *
+ * This is the **empty-trough** mapping only. Dragging the thumb itself uses
+ * [`thumbOffsetFracToScrollMs`] — treating a grabbed thumb's position as the *centre* of
+ * the wanted window is what made grabbing its left edge jump half a window backwards
+ * (finding 5).
  */
 export function scrollbarFracToScrollMs(
   frac: number,
@@ -131,4 +133,53 @@ export function scrollbarFracToScrollMs(
   const visibleMs = view.widthPx / view.pxPerMs;
   const target = frac * Math.max(1, contentSpanMs) - visibleMs / 2;
   return clampScroll(target, view.pxPerMs, view.widthPx, contentSpanMs);
+}
+
+/**
+ * The exact inverse of [`scrollbarMetrics`]: given where the thumb's LEFT EDGE should sit
+ * (0–1 of the trough), the scroll it represents.
+ *
+ * `scrollbarMetrics` maps `scrollMs → offsetFrac = scrolledFrac · (1 - thumbFrac)`, so the
+ * way back is `scrollMs = offsetFrac / (1 - thumbFrac) · maxScrollMs`. Going through the
+ * thumb's TRAVEL rather than through the content fraction is what makes the round trip
+ * exact at deep zoom, where `MIN_THUMB_FRAC` has inflated the thumb past its natural width
+ * and the two stop being the same number.
+ *
+ * A drag calls this with `pointerFrac - grabOffset`, where `grabOffset` is where inside
+ * the thumb the pointer went down. That is the whole of finding 5: the position under the
+ * user's finger is where they *put* it, not the middle of the window.
+ *
+ * When everything is visible (`thumbFrac === 1`) there is no travel and no scroll — 0.
+ */
+export function thumbOffsetFracToScrollMs(
+  offsetFrac: number,
+  view: TimelineView,
+  contentSpanMs: number,
+): number {
+  const { thumbFrac } = scrollbarMetrics(view, contentSpanMs);
+  const travel = 1 - thumbFrac;
+  if (travel <= 0) return 0;
+  const visibleMs = view.widthPx / view.pxPerMs;
+  const maxScrollMs = Math.max(0, Math.max(1, contentSpanMs) - visibleMs);
+  return clampScroll(
+    (offsetFrac / travel) * maxScrollMs,
+    view.pxPerMs,
+    view.widthPx,
+    contentSpanMs,
+  );
+}
+
+/**
+ * The scrollbar's `aria-valuenow`, 0–100.
+ *
+ * Position within the thumb's TRAVEL, not within the content — so 100 is actually
+ * reachable. Reporting `offsetFrac · 100` (which is a fraction of the whole trough) meant
+ * the value maxed out at `(1 - thumbFrac) · 100`: 75 on a quarter-width thumb, 98 at deep
+ * zoom, and a screen reader announcing "75 %" for a scrollbar that is flush against its
+ * right end is simply wrong (finding 14).
+ */
+export function scrollbarValueNow(view: TimelineView, contentSpanMs: number): number {
+  const { thumbFrac, offsetFrac } = scrollbarMetrics(view, contentSpanMs);
+  const travel = 1 - thumbFrac;
+  return travel > 0 ? Math.round((offsetFrac / travel) * 100) : 0;
 }

@@ -47,18 +47,9 @@ export function stackClips(clips: ClipSpan[]): ClipSpan[][] {
   return rows;
 }
 
-/**
- * The row a vertical offset lands on within one device's stacked lane. `y`
- * is measured from the top of that device's lane (i.e. below its label).
- * Returns the row (so callers can read every clip sharing it) or null when
- * outside every row.
- */
-export function trackAtY(
-  y: number,
-  rows: ClipSpan[][],
-  rowH: number,
-): ClipSpan[] | null {
-  if (rowH <= 0 || y < 0) return null;
-  const i = Math.floor(y / rowH);
-  return i < rows.length ? rows[i] : null;
-}
+// `trackAtY` (y → the sub-track row under it) came across from SundayEdit with
+// `stackClips` and was removed in V03-S6 (finding 15). Nothing ever called it: S3 puts a
+// real DOM node under every clip so hit-testing is the browser's job, and S5's playback
+// addresses clips by file, not by where they sit on screen. Tested, exported, dead — and
+// dead code with tests reads as load-bearing to the next person. If a future gesture needs
+// it (a lasso, a drag-to-reorder), it is four lines and it is in the history.
