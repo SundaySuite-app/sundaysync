@@ -27,7 +27,7 @@ async function reachResult(page: import("@playwright/test").Page) {
   await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
   await page.getByRole("button", { name: en.syncButton }).click();
   // Since V04-U3 (D-061) `.clip` boxes exist from the sources phase on — the pre-sync
-  // ones are `disabled` and carry `clip--pre` — so their presence no longer means the
+  // ones carry `clip--pre` — so their presence no longer means the
   // sync has finished. `waitForResult` gates on the result-only export bar.
   await waitForResult(page);
 }
@@ -43,13 +43,16 @@ test.describe("override after sync marks the result stale", () => {
     await reachResult(page);
 
     await page.locator(".clip", { hasText: "C0001.MP4" }).click();
-    const dialog = page.getByRole("dialog", { name: "C0001.MP4" });
-    await expect(dialog).toBeVisible();
-    await dialog.getByLabel(en.moveToDevice).selectOption("rec");
+    // V05-W4b (D-070): the reassign `<select>` moved with the rest of the clip detail into
+    // the preview panel. Same control, same label, same consequence — and there is no
+    // dialog to dismiss afterwards, so the operator can reassign a second clip by clicking
+    // it, which is the whole reason the dialog went.
+    const preview = page.locator(".preview");
+    await expect(preview.locator(".preview__name")).toHaveText("C0001.MP4");
+    await preview.getByLabel(en.moveToDevice).selectOption("rec");
 
-    // The dialog closes itself right after the reassignment (ClipDetail's onChange
-    // calls `onOverride` then `onClose`).
-    await expect(dialog).toBeHidden();
+    // The panel stays, and now describes the clip in its new home.
+    await expect(preview.getByLabel(en.moveToDevice)).toHaveValue("rec");
 
     await expect(page.getByText(en.staleResult)).toBeVisible();
     await expect(page.getByRole("button", { name: en.exportButton })).toBeDisabled();

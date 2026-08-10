@@ -12,7 +12,7 @@ import {
 import { LANE_HEIGHT_PX } from "../../timeline/hop";
 import { stackClips, type ClipSpan } from "../../timeline/laneLayout";
 import { getPlayheadMs, publishPlayheadMs } from "../../timeline/playhead";
-import type { TimeSource } from "../../timeline/recordingTime";
+import { recordingTimes, type TimeSource } from "../../timeline/recordingTime";
 import { sourceSpans } from "../../timeline/sourceLayout";
 import {
   clampScroll,
@@ -25,8 +25,8 @@ import {
 } from "../../timeline/viewport";
 import type { PrewarmStatus } from "../../state";
 import type { Device, Placement, ScanManifest, SyncOutcome } from "../../types";
-import { ClipDetail } from "./ClipDetail";
 import { PlayheadLine } from "./PlayheadLine";
+import { PreviewPanel } from "./PreviewPanel";
 import { Ruler } from "./Ruler";
 import { Track } from "./Track";
 import { Transport } from "./Transport";
@@ -47,8 +47,9 @@ import { warningText } from "./warnings";
  *
  * What is result-only is what genuinely does not exist before a sync: the transport and
  * the playhead (there is no schedule to play), the sequence meta, the unsynced shelf, the
- * clip-detail dialog, the per-device mute/solo. What works in every phase is everything
- * about *looking*: ruler, zoom, pan, scrollbar, virtualization.
+ * per-device mute/solo, and the SYNC HALF of the preview panel. What works in every phase
+ * is everything about *looking*: ruler, zoom, pan, scrollbar, virtualization — and, since
+ * D-070, marking a clip and reading its picture and its file facts in the panel below.
  *
  * The old view laid clips out in percent of the widest span, which meant a
  * 4-second offset inside a 90-minute service was a sub-pixel sliver nobody could
@@ -67,7 +68,7 @@ import { warningText } from "./warnings";
  *      get the unit wrong.
  *   2. **Origin.** `contentBounds` decides where t=0 sits (see its comment).
  *      Clip boxes are drawn at timeline-local ms; a clip's accessible name and
- *      its detail dialog keep showing the engine's real `offset_seconds`.
+ *      the preview panel keep showing the engine's real `offset_seconds`.
  */
 
 /** Wheel/button zoom step. Small enough that a trackpad flick is not a jump. */
@@ -164,7 +165,16 @@ export function TimelineView({
   onOverride: (file: string, device: string) => void;
   onExclude: (file: string) => void;
 }) {
-  const [selected, setSelected] = useState<Placement | null>(null);
+  /**
+   * The marked clip, as a FILE PATH (V05-W4b, D-070).
+   *
+   * It used to be a `Placement`, which made the selection unrepresentable before a sync —
+   * the domain of the state was "things the engine has placed", so a pre-sync clip had
+   * nothing to become when clicked and its button was `disabled`. The preview panel is
+   * about the file: its picture, its streams, its reconstructed start. A file exists in
+   * every phase; a placement does not. The placement is DERIVED below when there is one.
+   */
+  const [selected, setSelected] = useState<string | null>(null);
   const result = outcome?.result ?? null;
 
   const sectionRef = useRef<HTMLElement>(null);
@@ -394,12 +404,39 @@ export function TimelineView({
     publishPlayheadMs(0);
   }, [result]);
 
-  // A pre-sync clip has no detail to show; if one was open when a re-scan pulled the
-  // outcome out from under it, close it rather than leaving a dialog describing a
-  // placement that no longer exists.
+  // ---- The selection must name something that is on screen (V05-W4b, D-070) -----------
+  //
+  // Generalised from `useEffect(() => { if (!result) setSelected(null) }, [result])`, which
+  // was the same rule in the one form the old selection could express: the detail dialog
+  // was result-only, so losing the result was the only way its subject could vanish. A file
+  // path can go stale in four ways — the operator removed the file (D-062), excluded it, a
+  // re-scan came back without it, or the outcome it was placed by was pulled — and all four
+  // are one question: is the marked file still drawn? A panel describing a clip that is no
+  // longer anywhere on the timeline is the same lie the dialog would have been.
+  const drawnFiles = useMemo(() => {
+    const files = new Set<string>();
+    for (const { rows } of tracks) for (const row of rows) for (const span of row) files.add(span.file);
+    return files;
+  }, [tracks]);
   useEffect(() => {
-    if (!result) setSelected(null);
-  }, [result]);
+    if (selected !== null && !drawnFiles.has(selected)) setSelected(null);
+  }, [drawnFiles, selected]);
+
+  // ---- What the panel below is looking at ---------------------------------------------
+  //
+  // All derived, none of it stored: one source for the marked clip (the path) and every
+  // other view of it computed from the data already in hand. `recordingTimes` is the same
+  // ladder `sourceLayout` runs (D-067) and is memoised on the manifest alone, so it costs
+  // one pass per scan and nothing per selection — and it answers in the RESULT phase too,
+  // where the pre-sync `timeSource` map is deliberately empty but the file's own clock is
+  // still a fact worth showing beside the engine's answer.
+  const selectedPlacement = selected !== null ? (placements?.get(selected) ?? null) : null;
+  const selectedEntry =
+    selected !== null ? (manifest?.files.find((f) => f.file === selected) ?? null) : null;
+  const recorded = useMemo(
+    () => (manifest ? recordingTimes(manifest.files) : null),
+    [manifest],
+  );
 
   // ---- Playback (v0.3, D-055) ----
   const engine = getPlaybackEngine();
@@ -497,6 +534,15 @@ export function TimelineView({
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (e.button !== 0) return;
     // Controls and the ruler own their own pointer gestures.
+    //
+    // V05-W4b (D-070) changed what this covers without changing a character of it: a
+    // pre-sync clip used to be a DISABLED button, and a disabled control receives no
+    // pointer events at all — the press landed on the lane behind it and started a pan.
+    // Now every clip is enabled, so a press on a clip is a press on a `button` and never
+    // pans. That is correct (the clip is a control now, in both phases) and it is a real
+    // behaviour change on a dense timeline, where the clips cover most of the lane. If it
+    // turns out to hurt, the answer is a drag threshold ON THE CLIP — press-and-move more
+    // than a few pixels pans, a clean click selects — not making the clip inert again.
     const target = e.target as HTMLElement;
     if (target.closest("button, select, label, .timeline__ruler")) return;
     hop.cancel();
@@ -838,6 +884,33 @@ export function TimelineView({
 
       {result && <Transport t={t} clips={audioClips} fps={fps} />}
 
+      {/* The panel (V05-W4b, D-070). Below the timeline, above the export bar, ALWAYS
+          mounted and always the same height — the two properties that keep clicking a
+          three-pixel clip from moving the thing the operator is about to click next. It is
+          deliberately not gated on `result`: the picture and the file facts are there from
+          the moment a folder is dropped, and only the sync half waits for the engine. */}
+      <PreviewPanel
+        t={t}
+        file={selected}
+        entry={selectedEntry}
+        placement={selectedPlacement}
+        minPsr={result?.parameters.min_psr ?? null}
+        recorded={selected !== null ? (recorded?.get(selected) ?? null) : null}
+        // The same three-layer overlay `SourcesPanel` and `sourceSpans` apply (D-027/D-028):
+        // the operator's override wins, then the engine's placement, then the scan's own
+        // grouping. Post-sync the placement is deliberately NOT rewritten by an override —
+        // that is what makes the result stale — so without the overlay here the `<select>`
+        // would snap back the instant it was used.
+        device={
+          selected !== null
+            ? (overrides[selected] ?? selectedPlacement?.device ?? selectedEntry?.device ?? "")
+            : ""
+        }
+        deviceIds={deviceIds}
+        busy={phase === "syncing"}
+        onOverride={onOverride}
+      />
+
       {result && shelved.length > 0 && (
         <UnsyncedShelf
           t={t}
@@ -845,17 +918,6 @@ export function TimelineView({
           deviceIds={deviceIds}
           onOverride={onOverride}
           onExclude={onExclude}
-        />
-      )}
-
-      {selected && result && (
-        <ClipDetail
-          t={t}
-          clip={selected}
-          minPsr={result.parameters.min_psr}
-          deviceIds={deviceIds}
-          onOverride={onOverride}
-          onClose={() => setSelected(null)}
         />
       )}
     </section>

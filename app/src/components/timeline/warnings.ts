@@ -4,7 +4,7 @@ import type { Warning } from "../../types";
 /**
  * A §5 `Warning` as the operator's own language. Lifted unchanged out of the old
  * `ResultView.tsx` when the timeline replaced it (D-051); two components need it
- * now (the header's result-level warnings and `ClipDetail`'s per-clip ones), so
+ * now (the header's result-level warnings and the preview panel's per-clip ones), so
  * it lives on its own rather than being exported from one of them.
  *
  * The exhaustive switch is deliberate: adding a variant to `Warning` without a

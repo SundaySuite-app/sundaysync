@@ -16,8 +16,17 @@ per-clip waveforms from a streamed peak+RMS pyramid over the analysis cache (D-0
 and sample-accurate multi-source playback so the sync can be *heard* before export (D-055).
 Two review rounds have landed — D-056 (eight findings, mostly waveform time-anchoring and
 DPR) and D-057 (the seven deferred ones, plus keyboard operation, the scrollbar's ARIA, the
-playback-drift setting UI and this docs pass). Everything runs against the cache the sync
-already wrote: **no extra ffmpeg spawns, no second decode, no copy of the media.**
+playback-drift setting UI and this docs pass). Everything the timeline *hears and draws of the
+audio* runs against the cache the sync already wrote: **no second decode of the audio, no copy
+of the media.**
+
+> **Amended in v0.5 (D-073).** That sentence used to open with "no extra ffmpeg spawns" as
+> well, and for the waveforms (D-052) and playback (D-055) it still holds. The **preview
+> frame** (D-069/D-070) is the first feature to break it: one frame per marked clip is a real
+> ffmpeg spawn and a real decode, on demand, of media the analysis cache does not contain. It
+> is bounded on both sides — two permits so it can never starve a running sync's decoders, and
+> no claim on the D-046 activity slot so a sync never blanks the picture — and §9's read-mostly
+> rule is satisfied: it reads one frame, writes nothing, and makes no copy of the media.
 
 | v0.3 stage | State | What it added |
 | --- | --- | --- |

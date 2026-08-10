@@ -421,10 +421,10 @@ select:hover, input:hover { border-color: var(--accent-border); }
    mouse, which contradicts what the view is for: D-061's rule is that *looking* works in
    every phase, and the keyboard's +/−/0 and arrows never stopped working here anyway, so
    the two input methods disagreed about the same view. Nothing inside the timeline is a
-   decision that could disturb a running sync — pre-sync clips are `disabled`, and the
-   shelf, the transport and the clip dialog are result-only — so there was nothing for the
-   blanket to protect. The sources panel below has its own `busy` prop for the controls
-   that ARE decisions (V04-U5). */
+   decision that could disturb a running sync — the shelf and the transport are
+   result-only, and since D-070 a clip click only MARKS a clip, while the one control the
+   preview panel carries takes the same `busy` gate the sources panel's controls do
+   (V04-U5). So there is nothing for the blanket to protect. */
 .timeline--busy { opacity: 0.55; }
 
 /* One quiet line above the frame — the pre-sync caveat that cannot live in a clip. */
@@ -788,6 +788,74 @@ select:hover, input:hover { border-color: var(--accent-border); }
   font-style: italic;
   white-space: nowrap;
 }
+
+/* ── Preview panel (V05-W4b, D-070) ─────────────────────────────── */
+
+/* One panel under the timeline: the frame, the file, the sync detail.
+
+   `height`, not `min-height`, and deliberately so. This panel is ALWAYS on screen, and its
+   box must be identical whether a clip is marked or not — a panel that grew when the
+   operator clicked would push the timeline up in the same instant, and on a timeline whose
+   clips are three pixels wide their next click would land on a different clip. Everything
+   inside therefore scrolls in its own column rather than being allowed to set the height. */
+.preview {
+  height: 180px;
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.preview__empty { margin: auto; }
+
+/* The still. A fixed box so the two columns beside it never shift sideways between a
+   letterboxed 4:3 frame, a 16:9 one and «ingen bilde». */
+.preview__frame {
+  flex: 0 0 auto;
+  width: 140px;
+  height: 79px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--rsm);
+  overflow: hidden;
+}
+.preview__canvas { display: block; }
+/* Loading and "no picture" are the same calm weight: neither is a failure, and one of them
+   is the normal answer for about one file in twelve (D-069). */
+.preview__nostill {
+  color: var(--text3);
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 0 0.5rem;
+}
+
+.preview__info, .preview__sync {
+  flex: 1 1 0;
+  min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+}
+.preview__name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preview .detail-grid { margin-bottom: 0.5rem; }
+.preview .detail-grid dd { min-width: 0; overflow-wrap: anywhere; }
+
+/* The one control in the panel, on one line so it costs a row rather than a block. */
+.field--inline { flex-direction: row; align-items: center; gap: 0.5rem; }
+.field--inline > span { color: var(--text2); font-weight: 400; font-size: 0.8125rem; }
 
 /* ── Unsynced shelf ─────────────────────────────────────────────── */
 

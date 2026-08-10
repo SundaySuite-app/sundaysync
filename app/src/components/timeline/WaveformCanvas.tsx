@@ -284,7 +284,8 @@ export function useClipWaveform({
 
   // `stopPropagation` does the half of the job a native nested button would have done for
   // free (`ClipStatus` explains why this cannot be one): the clip underneath is its own
-  // click target (it opens ClipDetail), and this control must act on its own click without
+  // click target (it marks the clip for the preview panel), and this control must act on
+  // its own click without
   // also triggering that.
   const onRegenerate = useCallback(
     (e: React.MouseEvent | React.KeyboardEvent) => {

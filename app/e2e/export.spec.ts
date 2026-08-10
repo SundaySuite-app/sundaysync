@@ -34,7 +34,7 @@ async function reachResult(page: import("@playwright/test").Page, extra: Record<
   await page.getByRole("button", { name: en.dropFolder }).click();
   await page.getByRole("button", { name: en.syncButton }).click();
   // Since V04-U3 (D-061) `.clip` boxes exist from the sources phase on — the pre-sync
-  // ones are `disabled` and carry `clip--pre` — so their presence no longer means the
+  // ones carry `clip--pre` — so their presence no longer means the
   // sync has finished. `waitForResult` gates on the result-only export bar.
   await waitForResult(page);
 }
