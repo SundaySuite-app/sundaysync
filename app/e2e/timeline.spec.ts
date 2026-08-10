@@ -487,24 +487,29 @@ test.describe("a clip whose duration the outcome does not carry (finding 15)", (
     await expect(clip).toHaveClass(/clip--nodur/);
     await expect(clip).toHaveAttribute("aria-label", new RegExp(en.clipDurationUnknown));
     await expect(clip).toHaveAttribute("title", new RegExp(en.clipDurationUnknown));
-    // Still a clip: clicking it still opens its details.
+    // Still a clip: clicking it still shows what the app knows about it — in the preview
+    // panel since V05-W4b (D-070) rather than in a dialog. A three-pixel sliver is the
+    // hardest thing on the timeline to hit, and it staying selectable is the point.
     await clip.click();
-    await expect(page.getByRole("dialog", { name: "C0001.MP4" })).toBeVisible();
+    await expect(page.locator(".preview__name")).toHaveText("C0001.MP4");
   });
 });
 
 test.describe("clip detail and the unsynced shelf", () => {
-  test("clicking a clip opens its detail with the offset to the millisecond", async ({
+  test("clicking a clip shows its detail with the offset to the millisecond", async ({
     page,
   }) => {
     await reachResult(page);
     await clipBox(page).click();
 
-    const dialog = page.getByRole("dialog", { name: "C0001.MP4" });
-    await expect(dialog).toBeVisible();
+    // V05-W4b (D-070): the detail moved from a dialog into the always-present panel. The
+    // assertion is deliberately the SAME two numbers — those strings are §9.4's, the owner
+    // reads them every run, and this stage moved them rather than rewording them.
+    const preview = page.locator(".preview");
+    await expect(preview.locator(".preview__name")).toHaveText("C0001.MP4");
     // 4.2 s in the fixture, rendered at 3 dp — the precision the engine actually has.
-    await expect(dialog.getByText("4.200 s")).toBeVisible();
-    await expect(dialog.getByText(en.directMatch)).toBeVisible();
+    await expect(preview.getByText("4.200 s")).toBeVisible();
+    await expect(preview.getByText(en.directMatch)).toBeVisible();
   });
 
   test("reassigning from the shelf marks the result stale and dims the timeline", async ({

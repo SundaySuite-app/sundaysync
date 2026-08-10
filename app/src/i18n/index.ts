@@ -150,6 +150,38 @@ export const nb = {
     return `${pad(at.getDate())}.${pad(at.getMonth() + 1)}.${at.getFullYear()}`;
   },
 
+  // Forhåndsvisningspanelet (V05-W4b, D-070) — ett panel under tidslinja som viser bildet,
+  // fila og (etter en synk) synkedetaljene. Alltid synlig, alltid like høyt: et panel som
+  // dukker opp ved klikk ville dyttet tidslinja i samme øyeblikk som operatøren traff et
+  // 3 px klipp, og neste klikk hadde landet et helt annet sted.
+  previewAria: "Forhåndsvisning av klipp",
+  previewEmpty: "Velg et klipp for å se det.",
+  previewLoading: "Henter bilde …",
+  // D-069: .WAV og .HEIC gir null byte tilbake, og det gjelder ~32 av eierens 386 filer.
+  // Det er en helt vanlig tilstand, ikke en feil, og teksten er rolig deretter.
+  previewNoImage: "Ingen bilde",
+  previewFrameAlt: (name: string) => `Stillbilde fra ${name}`,
+  previewDuration: "Lengde",
+  previewVideo: "Video",
+  previewAudio: "Lyd",
+  previewNone: "—",
+  previewRecorded: "Opptak",
+  previewVideoStream: (codec: string, w: number, h: number, fps: string | null) =>
+    fps === null ? `${codec} · ${w}×${h}` : `${codec} · ${w}×${h} · ${fps} bilder/sek`,
+  previewAudioStream: (codec: string, rate: number, channels: number) =>
+    `${codec} · ${(rate / 1000).toFixed(rate % 1000 === 0 ? 0 : 1)} kHz · ${
+      channels === 1 ? "mono" : channels === 2 ? "stereo" : `${channels} kanaler`
+    }`,
+  /** dd.mm.åååå hh:mm:ss — samme håndlagde format som `presyncDay`, uten Intl, så det er
+   *  likt i test og i app. */
+  previewClock: (ms: number) => {
+    const at = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(at.getDate())}.${pad(at.getMonth() + 1)}.${at.getFullYear()} ${pad(
+      at.getHours(),
+    )}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
+  },
+
   // Per-clip waveforms (v0.3 S4, D-052)
   waveformRegenerate: "Bygg bølgeform på nytt",
   waveformRegenerating: "Bygger på nytt …",
@@ -479,6 +511,32 @@ export const en: Strings = {
     const at = new Date(ms);
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+  },
+
+  // The preview panel (V05-W4b, D-070) — see the nb comments above.
+  previewAria: "Clip preview",
+  previewEmpty: "Select a clip to see it.",
+  previewLoading: "Fetching picture …",
+  previewNoImage: "No picture",
+  previewFrameAlt: (name: string) => `Still frame from ${name}`,
+  previewDuration: "Length",
+  previewVideo: "Video",
+  previewAudio: "Audio",
+  previewNone: "—",
+  previewRecorded: "Recorded",
+  previewVideoStream: (codec: string, w: number, h: number, fps: string | null) =>
+    fps === null ? `${codec} · ${w}×${h}` : `${codec} · ${w}×${h} · ${fps} fps`,
+  previewAudioStream: (codec: string, rate: number, channels: number) =>
+    `${codec} · ${(rate / 1000).toFixed(rate % 1000 === 0 ? 0 : 1)} kHz · ${
+      channels === 1 ? "mono" : channels === 2 ? "stereo" : `${channels} channels`
+    }`,
+  /** `yyyy-mm-dd hh:mm:ss` — the unambiguous English form, no Intl, same as `presyncDay`. */
+  previewClock: (ms: number) => {
+    const at = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(
+      at.getHours(),
+    )}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
   },
 
   // Per-clip waveforms (v0.3 S4, D-052)

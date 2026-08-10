@@ -79,7 +79,8 @@ export const Track = memo(function Track({
    *  tracking is simply absent. */
   prewarm: Record<string, PrewarmStatus>;
   laneHeight: number;
-  onSelect: (placement: Placement) => void;
+  /** Mark a clip — by FILE since D-070, so a pre-sync clip can be marked too. */
+  onSelect: (file: string) => void;
   muted: boolean;
   soloed: boolean;
   /** False when this result has a single device — see the note above. */

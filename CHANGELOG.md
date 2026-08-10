@@ -4,6 +4,29 @@
 
 ### New
 
+- **You can see the clip you are marking (D-070).** Click any clip and the panel under the
+  timeline shows a still frame from it, what the file actually is — length, video codec and
+  size, audio codec and rate, and when it was recorded, with the app still saying how it
+  knows — and, once you have synced, everything the engine worked out about it: the offset to
+  the millisecond, how sure it is, the signal strength against the threshold, measured drift
+  and any warnings. Those last ones are exactly the numbers the old clip dialog showed, in
+  exactly the same words; what changed is that they no longer sit in a box you have to close
+  before you can look at the next clip. Reassigning a clip to another camera happens right
+  there too.
+- **Clips can be marked before you sync.** Previously a clip you had not synced yet could not
+  be clicked at all — there was nothing to open. Now there is: the picture and the file's own
+  details are there from the moment you drop the folder, so you can go through a card and see
+  what is on it before asking the app to do any work. Nothing is invented — a clip the engine
+  has not placed says nothing about position or confidence, because there is nothing to say.
+- **Files with no picture in them say so, quietly.** A WAV from the recorder, or a photograph
+  that travelled in the same folder, simply has no frame to show — on a normal card that is
+  about one file in twelve. It reads «Ingen bilde», not a broken image and not an error. A
+  frame that is still being fetched says that too: pulling one out of a 45-minute file on a
+  NAS takes a few seconds, and the app would rather tell you than blink.
+- **The timeline no longer jumps under your finger.** The panel is always there and always the
+  same height, whether or not a clip is marked. On a wedding-sized drop the clips are three
+  pixels wide, and a panel that appeared when you clicked would have moved the timeline in the
+  same instant — sending your next click somewhere you did not aim.
 - **The timeline knows when your files were recorded, even when the camera did not write it
   down (D-067).** On a real 386-file wedding, 174 files used to land in one pile at the very
   start of the timeline under a single line: "174 filer mangler opptakstidspunkt". Almost all
@@ -65,8 +88,8 @@
 ### New
 
 - **Groundwork: the app can now pull a single video frame out of a clip (D-069).** The first
-  half of being able to *see* the clip you are marking, and there is nothing to look at yet —
-  the panel that shows the picture comes next. What landed is the part that had to be right
+  half of being able to *see* the clip you are marking; the panel that puts it on screen is
+  the entry above. What landed here is the part that had to be right
   first: one frame, decoded on demand at whatever second you point at, handed to the screen as
   a picture and never written to disk. It needed no new permission of any kind — the app is
   exactly as locked down as it was yesterday, which is the reason this shape was chosen over

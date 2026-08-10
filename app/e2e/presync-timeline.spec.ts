@@ -62,12 +62,28 @@ test.describe("clips appear on the timeline before any sync", () => {
     await expect(page.locator(".timeline__body")).toBeVisible();
     await expect(page.locator(".clip")).toHaveCount(3);
 
-    // Pre-sync, and honest about it: not the placed green, and not clickable, because
-    // there is no placement behind it to open.
+    // Pre-sync, and honest about it: not the placed green, because green is a claim the
+    // engine has not made yet.
+    //
+    // V05-W4b (D-070) turned the second half of this assertion inside out, and the intent
+    // survives the flip. It used to be `toBeDisabled()` — "there is no placement behind
+    // this box, so there is nothing to open". What a click opens now is the preview panel,
+    // whose subject is the FILE, and a file exists before any sync. So the clip is enabled,
+    // and the honest version of "the engine has not spoken" is asserted where it actually
+    // lives: the panel fills with the file's own facts and says NOT ONE WORD of sync
+    // detail. That is a stronger test of the same thing — a disabled button could have
+    // become enabled with the panel still inventing an offset, and this would catch it.
     for (const file of [WAV, CAM_A, CAM_B]) {
       await expect(clip(page, file)).toHaveClass(/clip--pre/);
-      await expect(clip(page, file)).toBeDisabled();
+      await expect(clip(page, file)).toBeEnabled();
     }
+
+    await clip(page, CAM_A).click();
+    const preview = page.locator(".preview");
+    await expect(preview.locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview.getByText(en.previewVideoStream("h264", 1920, 1080, "25/1"))).toBeVisible();
+    await expect(preview.getByText(en.directMatch)).toHaveCount(0);
+    await expect(preview.getByText(en.offsetLabel, { exact: true })).toHaveCount(0);
 
     // Camera A is the earliest stamp, so it anchors t=0; the WAV has no stamp at all and
     // sits at the same place; Camera B rolled ten minutes later and is drawn to the right

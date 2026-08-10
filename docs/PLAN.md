@@ -326,6 +326,23 @@ and a focusable scrollbar with arrow/page/Home/End. The clip the playhead stands
 `aria-current`. §9's "advanced settings persist per machine" now covers playback drift correction
 too.
 
+**Amendment (v0.5, D-070/D-073):** point 4's **clip-detail dialog is superseded by a preview
+panel** — one fixed-height panel under the timeline, always on screen, carrying the marked clip's
+still frame, what the file is, and (once a sync has placed it) the same offset/confidence/PSR/drift/
+provenance the dialog showed, in the same words. Marking a clip therefore works before a sync too:
+what a click selects is the FILE, which exists in every phase, rather than a placement, which does
+not. The panel is a fixed height and always mounted on purpose — a panel that appeared or grew on
+selection would move the timeline in the same instant the operator clicked a three-pixel clip.
+
+This is also the first thing in the app to **spend an ffmpeg spawn on drawing** (D-073). The
+waveforms (D-052) and playback (D-055) both promised "no extra ffmpeg spawns, no second decode, no
+copy of the media"; a preview frame is a real spawn and a real decode of media the analysis cache
+does not contain, so the first two clauses no longer hold and the claim is narrowed rather than
+quietly left standing. **§9's read-mostly rule above (retained by D-051) is satisfied: the preview
+reads one frame, writes nothing, makes no copy of the media, and the third clause stands.** The
+spawn is bounded by W4a (D-069): two permits, so a preview can never starve a running sync's
+decoders, and no claim on the D-046 activity slot, so a sync never blanks the picture either.
+
 ## 10. Performance targets
 
 - Cold sync of an 8 h / 100-file day: < 6 min on a modern 8-core laptop (decode-bound); warm-cache

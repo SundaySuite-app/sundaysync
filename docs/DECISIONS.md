@@ -3281,3 +3281,149 @@ them the same thing. `outsideWindow` splits out of `unknownStart` and gets three
 Two session days in one drop falls out of the same mechanism rather than needing its own: the
 smaller day is demoted by the window gate, counted, and named. No silent merge, and no
 invented origin.
+
+## D-070 — V05-W4b: one panel — the frame, the file, and the sync detail
+
+W4a (D-069) landed `video_frame` and nothing called it. This is the half that shows it: a
+single panel under the timeline carrying the marked clip's **still frame**, **what the file
+is**, and — once there is a placement — **what the engine worked out about it**. The
+clip-detail dialog is deleted; `ClipDetail.tsx` is gone and its content moved into the
+panel verbatim.
+
+### Why a fixed-height panel that is always on screen
+
+Two alternatives were considered, and both were rejected for reasons that are about this
+timeline in particular, not about panels in general.
+
+- **Appear on selection.** It would shove the timeline vertically at the exact instant the
+  operator clicked a clip — so their *next* click lands somewhere else. On a 386-file
+  wedding the clips are around three pixels wide, and a layout that moves between two
+  clicks is not a nuisance there, it is a broken interaction. The same argument kills
+  "grow to fit the content": a placement with two warnings would be taller than one with
+  none, so the panel would jump as the operator worked through a card.
+- **A right rail.** It takes horizontal pixels from the one axis the timeline needs. `.app`
+  is a `max-width: 68rem` column (`styles.css`), and D-051's whole point is that TIME gets
+  the width — a four-second offset inside a ninety-minute service is only visible if there
+  are pixels to spend on it. Trading them for a sidebar undoes the stage that made the
+  offsets visible in the first place.
+
+Fixed height also keeps W3's `max-height: 60vh` timeline stable rather than letting it
+resize with the selection, which is the same property stated from the other side. The
+empty state — «Velg et klipp for å se det.» — therefore renders inside the same box, and
+`preview.spec.ts` asserts in pixels that neither the panel nor the timeline above it moves
+when a clip is marked.
+
+The panel sits below the timeline and above the export bar. The export bar is result-only;
+the panel is not — the picture and the file facts exist from the moment a folder is
+dropped, and only the sync half waits for the engine.
+
+### The selection changes domain: a placement becomes a file
+
+`TimelineView`'s `useState<Placement | null>` is now `useState<string | null>`, holding the
+file path, and the placement is derived from `result.placements` when there is one. The old
+domain was "things the engine has placed", which made a pre-sync selection literally
+unrepresentable — which is *why* `Clip.tsx` set `disabled` on a clip with no placement.
+The panel is about the file: its picture, its streams, its reconstructed start. A file
+exists in every phase.
+
+D-061's real invariant survives untouched: the clip stays a `<button>` and the tag never
+swaps at the sources→result boundary, which is what that component's own comment argues
+for — the element type is what React reconciles on. Only `disabled` went.
+
+Two consequences, both stated rather than discovered later:
+
+1. **`presync-timeline.spec.ts`'s `toBeDisabled()` became `toBeEnabled()`**, plus an
+   assertion that clicking a pre-sync clip fills the panel with the file's facts and shows
+   **no** sync detail. That is a better test of the same intent: the old one could not have
+   caught a panel that invented an offset for an unplaced clip, and this one does.
+2. **A press on a pre-sync clip no longer starts a pan.** `TimelineView.onPointerDown`
+   ignores presses that land on `button, select, label, .timeline__ruler`; a *disabled*
+   button receives no pointer events at all, so the press used to fall through to the lane
+   behind it and pan. Now every clip is enabled, so it does not. That is correct — the clip
+   is a control in both phases — and it is a real behaviour change on a dense timeline,
+   where clips cover most of the lane. **If it turns out to hurt, the answer is a drag
+   threshold on the clip** (press-and-move more than a few pixels pans, a clean click
+   selects), not making the clip inert again. Measured in this round: the existing pan
+   coverage is wheel-driven and unaffected, and the suite is green.
+
+The reassign `<select>` moved into the panel with the rest of the detail, and reads through
+the override overlay (`overrides[file] ?? placement.device ?? entry.device`) rather than
+off the placement alone — post-sync an override deliberately does not rewrite the
+placement (that is what marks the result stale), so a `<select>` reading only the placement
+would snap back the instant it was used. It takes the same `busy` gate `SourcesPanel`'s
+controls take: looking works in every phase (D-061), but mid-run there is nothing a
+reassignment could change about the run in flight.
+
+### `frameStore.ts` — lifted from SundayEdit, with a different tail
+
+The structure is `sundayedit/src/features/media/thumbnails.ts`: a promise-memo keyed on the
+file, at most one grab per file per session, and the frame-time heuristic — **10 % into the
+clip, capped at 5 s** — that dodges black lead-ins. What is not lifted is its tail:
+SundayEdit writes a JPEG to its cache dir and returns a `convertFileSrc()` URL, and D-069
+chose the shape that needs neither an asset protocol nor a temp-file lifetime. The bytes
+come back over binary IPC, become an `ImageBitmap`, and are drawn onto a canvas. The
+filmstrip and `MediaPlayer.tsx` are not lifted at all.
+
+**Three answers, not two**, and the third is the one that is easy to get wrong:
+
+- a bitmap;
+- `null`, **remembered** — there is no picture in this file. Measured (D-069): `.WAV` and
+  `.HEIC` exit 234 with zero bytes, and 32 of the owner's 386 files are in that class. It
+  is memoised exactly like a success, because a card of WAVs must not re-spawn ffmpeg once
+  per click;
+- `null`, **forgotten** — the grab was superseded. This is the only answer that says
+  nothing about the file, and caching it would mean a clip the operator clicked past once
+  shows «ingen bilde» for the rest of the session. That is precisely the shape of the bug
+  D-064 was written for.
+
+**Cancellation is phrased as `cancelFramesExcept(file)`, and that phrasing is the fix for a
+bug the e2e caught.** The obvious shape — the panel's effect cancelling its own grab in its
+cleanup — cancels the grab it just started: `main.tsx` renders under `React.StrictMode`,
+which mounts, unmounts and remounts every effect, so the cleanup fires for the file that is
+still selected, the token is thrown, and the remount awaits the memoised promise straight
+into a `cancelled` rejection. Asking for the *other* files makes the operation idempotent
+and says what is actually meant. One call is enough however many entries there are: the
+shell holds a single cancel token (`install_thumbnail_cancel`).
+
+### The e2e migration
+
+Five existing assertions moved, none deleted. Each one is re-expressed with its intent
+intact, and in three cases the new form is strictly stronger than the old:
+
+| was | now | intent |
+|---|---|---|
+| `waveform.spec.ts` "regenerate does not open the dialog" | the panel **does not change** across the click (still the empty state, still no frame), plus the rebuild really fired | `stopPropagation` on the rebuild control |
+| `waveform.spec.ts` "an unreadable clip can still be selected" | the panel names that file | the status line is not a click target |
+| `timeline.spec.ts` "still a clip: clicking opens its details" (3 px sliver) | the panel names that file | a sliver is still selectable |
+| `timeline.spec.ts` "the offset to the millisecond" | the same two strings, in the panel | §9.4's numbers, unchanged |
+| `override-stale.spec.ts` reassign-from-dialog | `.preview` `getByLabel(moveToDevice)`, no dialog to close | a post-sync reassign marks the result stale |
+
+`timeline.spec.ts`'s shelf `<select>` is a different control and is untouched.
+`presync-timeline.spec.ts`'s `data-e2e-mount-tag` continuity assertions still hold — the
+panel is a sibling of the timeline frame, not a restructuring of its subtree.
+
+New coverage: pre-sync selection shows frame + facts and no sync detail; post-sync shows
+both; a zero-byte answer shows the calm "no picture"; a `controlled("video_frame")` fixture
+shows the loading state; changing the selection mid-load invokes `cancel_thumbnail`; a
+re-selected file costs no second spawn; and the panel's box does not move between the empty
+and the filled state. The `video_frame` fixture's JPEG is produced by the browser's own
+encoder (`canvas.toDataURL`) rather than pasted in as base64 — the renderer really decodes
+it through `createImageBitmap`, and a subtly malformed literal would fail there and be
+indistinguishable on screen from the "no picture" state these specs exist to tell apart.
+
+## D-073 — the preview is the first thing to spend an ffmpeg spawn, and STATUS says so
+
+`STATUS.md` has said, since v0.3, that everything the timeline draws "runs against the cache
+the sync already wrote: **no extra ffmpeg spawns, no second decode, no copy of the media**."
+That was true of the waveforms (D-052) and of playback (D-055), and it is the kind of claim
+that quietly stops being true. The preview breaks the first two clauses: a frame is a real
+ffmpeg spawn and a real decode, on demand, of media the analysis cache does not contain.
+The line is amended rather than deleted, in the same style as the D-052/D-055 amendments in
+`PLAN.md` §9 — the promise is narrowed to what is still promised, and what changed is named.
+
+**§9's read-mostly rule (`PLAN.md` §9, retained by D-051) is satisfied: the preview reads
+one frame, writes nothing, makes no copy of the media, and the third clause stands.**
+Nothing is written to disk, nothing is written back into `SyncResult`, and clips still do
+not drag. The spawn is bounded on both sides by W4a: two permits so a preview can never
+starve a running sync's decoders, and no claim on the D-046 activity slot, so a sync never
+blanks the picture either.

@@ -27,12 +27,19 @@ const LABEL_KEEP_PX = 36;
  * **Pre-sync (v0.4, D-061): `placement` is null.** The same box is drawn where the
  * file's own creation timestamp says it belongs, in a neutral tone that is
  * deliberately NOT the placed green — green is a claim the engine has not made
- * yet — and the button is `disabled`, because there is no placement to open a
- * detail dialog on. It stays a `<button>` rather than becoming a `<div>` on
+ * yet. It stays a `<button>` rather than becoming a `<div>` on
  * purpose: the element type is what React reconciles on, and a clip that swapped
  * tags at the sources→result boundary would tear down its own subtree (waveform
  * state included) at exactly the moment the timeline is supposed to be showing
  * continuity.
+ *
+ * **V05-W4b (D-070): it is no longer `disabled` before a sync.** The old rule was that a
+ * clip with no placement had nothing to open, which was true while the only thing a click
+ * could do was open a placement's detail dialog. What a click selects now is the FILE, and
+ * a file exists in every phase — the preview panel shows its picture, its streams and its
+ * reconstructed start with no sync in sight. `onSelect` therefore takes the path, not the
+ * placement, and the invariant the note above actually argues for is untouched: the element
+ * is a `<button>` in both phases and the tag never swaps.
  */
 export const Clip = memo(function Clip({
   t,
@@ -65,7 +72,9 @@ export const Clip = memo(function Clip({
    *  `memo`ised, and a map would hand every clip a fresh prop on every `prewarm:file`
    *  event, re-rendering the entire timeline once per decoded file. */
   analysisStatus?: PrewarmStatus | null;
-  onSelect: (placement: Placement) => void;
+  /** Mark this clip. The argument is the FILE (D-070): the preview panel is about the file,
+   *  and there is a file in every phase where there may not yet be a placement. */
+  onSelect: (file: string) => void;
 }) {
   const left = msToX(span.startMs, view);
   // The floor lives in `timeline/hop.ts` alongside the rest of a clip box's geometry, so a
@@ -161,11 +170,9 @@ export const Clip = memo(function Clip({
       type="button"
       className={className}
       style={{ left: `${left}px`, width: `${width}px` }}
-      // A file the engine has not placed has no detail to open, and a control that does
-      // nothing when pressed is worse than no control. `disabled` rather than a swapped
-      // tag — see the component note.
-      disabled={placement === null}
-      onClick={placement !== null ? () => onSelect(placement) : undefined}
+      // Enabled in every phase (D-070): what a click marks is the file, and the panel below
+      // has something to say about a file whether or not the engine has placed it yet.
+      onClick={() => onSelect(span.file)}
       // The identity the later "hop to the solved position" animation addresses a clip by
       // (V04-U3): the file is the one thing that is the same box before and after a sync.
       data-file={span.file}

@@ -190,18 +190,33 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     await expect(clipBox(page).locator(".clip__waveform canvas")).toBeVisible();
   });
 
-  test("clicking regenerate does not also open the clip's own detail dialog", async ({ page }) => {
+  test("clicking regenerate does not also select the clip", async ({ page }) => {
     // The regenerate control sits inside the clip's own clickable box (Clip.tsx's
     // `<button>`) — without `stopPropagation` this click would bubble and also fire
-    // `onSelect`, popping ClipDetail open behind it.
+    // `onSelect`.
+    //
+    // V05-W4b (D-070) migrated the assertion, not the intent. There is no dialog to stay
+    // hidden any more; what must not happen is that the preview panel CHANGES. So the panel
+    // is checked before and after: still the empty state, still no file facts, still nobody
+    // asked for a picture. (A "the dialog is hidden" assertion would silently pass forever
+    // once dialogs stopped existing; this one cannot.)
     await reachResult(page, {
       waveform_meta: waveformMetaMissingUntilRebuilt(),
       waveform_level: waveformLevelOk(),
       ...regenerateSpyOk(),
     });
 
+    const preview = page.locator(".preview");
+    await expect(preview).toHaveText(en.previewEmpty);
+
     await clipBox(page).getByRole("button", { name: en.waveformRegenerate }).click();
-    await expect(page.getByRole("dialog", { name: "C0001.MP4" })).toBeHidden();
+
+    // The rebuild really happened — otherwise this would pass by the click missing entirely.
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_REGENERATE__))
+      .toEqual([FILE]);
+    await expect(preview).toHaveText(en.previewEmpty);
+    await expect(preview.locator(".preview__frame")).toHaveCount(0);
   });
 
   test("a D-046 busy refusal surfaces inline, retryable, distinct from the cache-miss copy", async ({
@@ -318,6 +333,9 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
 
     await expect(clipBox(page).locator(".waveform__status")).toBeVisible();
     await clipBox(page).click();
-    await expect(page.getByRole("dialog", { name: "C0001.MP4" })).toBeVisible();
+    // Same intent, new surface (V05-W4b, D-070): "selected" is what the preview panel shows,
+    // and the panel naming this very file is the proof the click reached the clip rather
+    // than being swallowed by the status line lying on top of it.
+    await expect(page.locator(".preview__name")).toHaveText("C0001.MP4");
   });
 });

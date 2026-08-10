@@ -321,6 +321,10 @@ export const BOOT_FIXTURES: Fixtures = {
   // `consentVersion` non-null means "already answered" — keeps the one-time
   // ConsentCard from popping up unbidden in specs that are not about consent.
   telemetry_status: { consentVersion: 1, granted: false, hasInstallId: true, queued: 0 },
+  // V05-W4b (D-070): marking a clip asks for its picture. Answered here with a real frame so
+  // a spec that merely clicks a clip on its way to something else never has to think about
+  // it; `preview.spec.ts` overrides these to test the other two states.
+  ...videoFrameOk(),
 };
 
 /**
@@ -341,6 +345,62 @@ export function pcmWindow(): Fixtures {
       const out = new Float32Array(len);
       for (let i = 0; i < len; i += 1) out[i] = Math.sin((args.startSample + i) / 400);
       return out.buffer;
+    }`),
+  };
+}
+
+/**
+ * A real, decodable JPEG for `video_frame` (V05-W4b, D-070; backend D-069).
+ *
+ * The bytes are produced by the browser's own encoder (`canvas.toDataURL("image/jpeg")`)
+ * rather than pasted in as a base64 blob, for one reason: the renderer runs the result
+ * through `createImageBitmap`, which really decodes it. A hand-carried literal that turned
+ * out to be subtly malformed would fail there and be indistinguishable, on screen, from the
+ * "no picture" state these specs are trying to tell apart.
+ *
+ * 16×9 so a letterboxed draw has something to letterbox.
+ */
+export function videoFrameOk(): Fixtures {
+  return {
+    video_frame: fn(`(args) => {
+      const c = document.createElement("canvas");
+      c.width = 16;
+      c.height = 9;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#ebb84b";
+      ctx.fillRect(0, 0, 16, 9);
+      const b64 = c.toDataURL("image/jpeg").split(",")[1];
+      const bin = atob(b64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+      return out.buffer;
+    }`),
+    ...cancelThumbnailSpy(),
+  };
+}
+
+/**
+ * The measured normal case for a `.WAV` or a `.HEIC` (D-069): ffmpeg exits having written
+ * **zero bytes**, the shell turns that into an empty `Response`, and the panel says «ingen
+ * bilde». 32 of the owner's 386 files answer this way — it is not a failure fixture.
+ */
+export function videoFrameNoPicture(): Fixtures {
+  return {
+    video_frame: fn(`(args) => new ArrayBuffer(0)`),
+    ...cancelThumbnailSpy(),
+  };
+}
+
+/**
+ * Records every `cancel_thumbnail` call onto `window.__E2E_CANCEL_THUMBNAIL__`, so a spec
+ * can assert that a superseded grab was actually stopped — `invoke` has no cancellation of
+ * its own, so that call is the only thing that ends a running ffmpeg.
+ */
+export function cancelThumbnailSpy(): Fixtures {
+  return {
+    cancel_thumbnail: fn(`() => {
+      window.__E2E_CANCEL_THUMBNAIL__ = (window.__E2E_CANCEL_THUMBNAIL__ || 0) + 1;
+      return undefined;
     }`),
   };
 }
