@@ -67,7 +67,19 @@ export function Dialog({
     <div
       className="dialog-backdrop"
       onMouseDown={(e) => {
-        if (dismissable && e.target === e.currentTarget) onClose();
+        if (!dismissable || e.target !== e.currentTarget) return;
+        // `preventDefault` is what makes the focus return above actually happen for THIS
+        // exit (V06 control sweep). React flushes the state update from a discrete event
+        // synchronously, so the dialog unmounts — and its cleanup focuses the opener —
+        // while the mousedown is still being dispatched. The browser's own default action
+        // for that mousedown then runs and moves focus to the nearest focusable ancestor of
+        // the backdrop, of which there is none: focus lands on `<body>`, and the opener the
+        // cleanup had just focused loses it again. The ✕ and Escape were unaffected, so this
+        // was one exit out of three quietly dropping the keyboard user at the top of the
+        // document. Nothing on a backdrop wants the default (no selection, no focus, no
+        // drag), so refusing it costs nothing.
+        e.preventDefault();
+        onClose();
       }}
     >
       <div
