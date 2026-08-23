@@ -454,20 +454,21 @@ for (const size of SIZES) {
       });
       const sources = page.locator(".popover--sources");
       const problems = page.locator(".popover--problems");
+      // `locator.press` rather than `focus()` + `keyboard.press`: it focuses and presses as
+      // one actionability-checked step, so a re-render landing between the two cannot send the
+      // Enter to `document.body` and leave the disclosure closed. `open` is read as the DOM
+      // PROPERTY, which is what `<details>` actually toggles.
+      await sources.locator("> summary").press("Enter");
+      await expect(sources).toHaveJSProperty("open", true);
 
-      await sources.locator("> summary").focus();
-      await page.keyboard.press("Enter");
-      await expect(sources).toHaveAttribute("open", "");
-
-      await problems.locator("> summary").focus();
-      await page.keyboard.press("Enter");
-      await expect(problems).toHaveAttribute("open", "");
-      await expect(sources).not.toHaveAttribute("open", "");
+      await problems.locator("> summary").press("Enter");
+      await expect(problems).toHaveJSProperty("open", true);
+      await expect(sources).toHaveJSProperty("open", false);
 
       // …and the same holds the other way round, and by pointer.
       await sources.locator("> summary").click();
-      await expect(sources).toHaveAttribute("open", "");
-      await expect(problems).not.toHaveAttribute("open", "");
+      await expect(sources).toHaveJSProperty("open", true);
+      await expect(problems).toHaveJSProperty("open", false);
     });
 
     test("nothing in the strip or the slot is ever drawn on top of anything else", async ({
