@@ -2,9 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { TimelineView } from "./geometry";
 import {
   CLIP_HEIGHT_PX,
+  HOP_JITTER_X_PX,
+  HOP_JITTER_Y_PX,
+  HOP_MAX_DELAY_MS,
+  HOP_MIN_JITTER_X_PX,
+  HOP_TOTAL_MS,
+  HOP_TRAVEL_MS,
   LANE_HEIGHT_PX,
   MIN_CLIP_WIDTH_PX,
   clipBoxes,
+  hopChoreography,
   hopDeltas,
   hopExits,
   type HopTrack,
@@ -193,5 +200,138 @@ describe("hopExits", () => {
     expect(hopExits(before, VIEW, before).size).toBe(0);
     expect(hopExits(before, VIEW, []).size).toBe(1);
     expect(hopExits([], VIEW, before).size).toBe(0);
+  });
+});
+
+// ── V06 (D-090): the shuffle's choreography ────────────────────────────────────────────
+//
+// The motion is CSS and cannot be unit-tested; what CAN be, and is the part that would go
+// quietly wrong, is the arithmetic that decides how long each clip waits and how far it
+// wanders. Two properties carry the design:
+//
+//   - it is SEEDED, so the same drop choreographs identically every run — which is what
+//     lets `e2e/hop.spec.ts` assert a distribution at all, and what stops a re-render
+//     mid-flight from re-rolling a clip's numbers and jerking it sideways;
+//   - it is BOUNDED, in both axes and in time, and the bounds are what keep «litt rundt»
+//     from becoming a clip that visits another track.
+
+/** The fixture's shape: enough distinct paths that a claim about spread means something. */
+const FILES = Array.from({ length: 200 }, (_, i) => `/Users/e2e/shoot/CamA/C${1000 + i}.MP4`);
+
+/** A comfortable clip — wide enough that the width cap never binds. */
+const WIDE = 400;
+
+describe("hopChoreography", () => {
+  it("gives the same file the same number every time it is asked", () => {
+    const once = hopChoreography(FILES[0], WIDE);
+    for (let i = 0; i < 5; i++) expect(hopChoreography(FILES[0], WIDE)).toEqual(once);
+  });
+
+  it("is a function of the path, not of call order", () => {
+    // Drawn in one order…
+    const forwards = FILES.map((f) => hopChoreography(f, WIDE));
+    // …and in the other. A generator threaded through the loop — the obvious way to write
+    // this, and the wrong one — would give every clip a different number here.
+    const backwards = [...FILES].reverse().map((f) => hopChoreography(f, WIDE));
+    expect(backwards.reverse()).toEqual(forwards);
+  });
+
+  it("keeps every start delay inside the window the band's hold is sized from", () => {
+    for (const file of FILES) {
+      const { delayMs } = hopChoreography(file, WIDE);
+      expect(delayMs).toBeGreaterThanOrEqual(0);
+      expect(delayMs).toBeLessThanOrEqual(HOP_MAX_DELAY_MS);
+    }
+    // …and that window plus one clip's travel IS the number's length, which is the constant
+    // `useHop`'s safety net and App's band hold are both sized from. If these three ever
+    // disagree the band leaves while the clips are still moving (D-082).
+    expect(HOP_TOTAL_MS).toBe(HOP_MAX_DELAY_MS + HOP_TRAVEL_MS);
+  });
+
+  it("spreads the delays out, rather than handing a card's clips one shared number", () => {
+    // Consecutive filenames off one camera card differ in a single character, which is
+    // exactly the case a weak hash collapses — and a card whose forty clips all start
+    // together is not a wave, it is a block moving.
+    const delays = new Set(FILES.map((f) => hopChoreography(f, WIDE).delayMs));
+    expect(delays.size).toBeGreaterThan(50);
+    // Both ends of the window are actually used: nothing starts at once, nothing is left
+    // straggling alone.
+    const values = FILES.map((f) => hopChoreography(f, WIDE).delayMs);
+    expect(Math.min(...values)).toBeLessThan(HOP_MAX_DELAY_MS * 0.15);
+    expect(Math.max(...values)).toBeGreaterThan(HOP_MAX_DELAY_MS * 0.85);
+  });
+
+  it("wanders in both directions, and never nowhere", () => {
+    const xs = FILES.map((f) => hopChoreography(f, WIDE).jx);
+    const ys = FILES.map((f) => hopChoreography(f, WIDE).jy);
+    expect(xs.some((x) => x < 0)).toBe(true);
+    expect(xs.some((x) => x > 0)).toBe(true);
+    expect(ys.some((y) => y < 0)).toBe(true);
+    expect(ys.some((y) => y > 0)).toBe(true);
+    // A wander that came out at 0.2 px is a clip standing still while its neighbours dance,
+    // which reads as a bug rather than as variety. The floor is 40 % of the reach — less the
+    // half-tenth the rounding to one decimal is allowed to shave off it.
+    const ROUNDING = 0.05;
+    for (const x of xs) {
+      expect(Math.abs(x)).toBeGreaterThanOrEqual(HOP_JITTER_X_PX * 0.4 - ROUNDING);
+    }
+    for (const y of ys) {
+      expect(Math.abs(y)).toBeGreaterThanOrEqual(HOP_JITTER_Y_PX * 0.4 - ROUNDING);
+    }
+  });
+
+  it("stays inside its own bounds, so a shiver never becomes a lane change", () => {
+    for (const file of FILES) {
+      const { jx, jy } = hopChoreography(file, WIDE);
+      expect(Math.abs(jx)).toBeLessThanOrEqual(HOP_JITTER_X_PX);
+      // The vertical reach is a small fraction of a lane — 3 px inside 40 — because a clip
+      // that wandered a lane's worth would read as having changed track and come back.
+      expect(Math.abs(jy)).toBeLessThanOrEqual(HOP_JITTER_Y_PX);
+      expect(HOP_JITTER_Y_PX * 2).toBeLessThan(LANE_HEIGHT_PX / 4);
+    }
+  });
+
+  it("scales the wander down to a sliver's own width, and no further than the floor", () => {
+    // The wedding case: 386 clips at MIN_CLIP_WIDTH_PX. A 3 px box wandering ±8 px moves
+    // nearly three times its own width in 140 ms, which the eye reads as flicker — or as a
+    // clip that jumped somewhere else and back. Capped at its own width, it shivers.
+    for (const file of FILES) {
+      const { jx } = hopChoreography(file, MIN_CLIP_WIDTH_PX);
+      expect(Math.abs(jx)).toBeLessThanOrEqual(MIN_CLIP_WIDTH_PX);
+    }
+    // …but never below the floor, or the narrowest clips would be the only ones not moving.
+    for (const file of FILES) {
+      expect(Math.abs(hopChoreography(file, 0).jx)).toBeGreaterThanOrEqual(
+        HOP_MIN_JITTER_X_PX * 0.4 - 0.05,
+      );
+      expect(Math.abs(hopChoreography(file, 0).jx)).toBeLessThanOrEqual(HOP_MIN_JITTER_X_PX);
+    }
+    // The cap binds on narrow clips and lets go on wide ones — the same file, two widths.
+    expect(Math.abs(hopChoreography(FILES[0], MIN_CLIP_WIDTH_PX).jx)).toBeLessThan(
+      Math.abs(hopChoreography(FILES[0], WIDE).jx),
+    );
+  });
+
+  it("leaves the vertical wander alone at every width", () => {
+    // Every clip is the same height, so there is nothing for the vertical reach to be out of
+    // proportion with — and a `jy` that shrank with the WIDTH would be arithmetic that had
+    // quietly started answering a different question.
+    for (const width of [0, MIN_CLIP_WIDTH_PX, 12, WIDE]) {
+      expect(hopChoreography(FILES[3], width).jy).toBe(hopChoreography(FILES[3], WIDE).jy);
+    }
+  });
+
+  it("survives the paths a POSIX file name is actually allowed to have", () => {
+    // The hash walks the string, so an empty name, a very long one, and one full of
+    // punctuation and non-ASCII all have to come out as ordinary numbers rather than as NaN
+    // — a NaN would land in a CSS custom property and silently void the whole transform.
+    const awkward = ["", "/a", "/Users/e2e/Bryllup «Ø»/C0001 (kopi) [2].MP4", "x".repeat(4096)];
+    for (const file of awkward) {
+      const { delayMs, jx, jy } = hopChoreography(file, WIDE);
+      expect(Number.isFinite(delayMs)).toBe(true);
+      expect(Number.isFinite(jx)).toBe(true);
+      expect(Number.isFinite(jy)).toBe(true);
+      expect(delayMs).toBeLessThanOrEqual(HOP_MAX_DELAY_MS);
+    }
   });
 });

@@ -12,22 +12,39 @@ import {
 import { en } from "../src/i18n";
 import { FIT_PADDING_PX, fitPxPerMs } from "../src/timeline/viewport";
 
-// The hop (V04-U5, D-063) — «når man klikker sync, så hopper filene på plass».
+// The hop (V04-U5 D-063 → V06 D-090) — «ting hopper litt rundt på tidslinjen og spretter på
+// plassen hvor de skal være, for så å bli grønne».
 //
 // Two halves, and the split is deliberate.
 //
 //   - **Where it LANDS** is the part that matters and the part that must never be flaky,
 //     so it is asserted under `reducedMotion: "reduce"`, where there is no animation at
-//     all: the clips are simply at their solved positions, with nothing left on them.
-//     That is also the accessibility claim — a reduced-motion operator gets the same
+//     all: the clips are simply at their solved positions, green, with nothing left on
+//     them. That is also the accessibility claim — a reduced-motion operator gets the same
 //     answer, immediately — and it is the assertion that would catch a FLIP that forgot to
 //     clean up after itself.
 //   - **That it MOVES** is asserted by watching the DOM change, via a MutationObserver
 //     installed before the outcome lands. Never by sampling pixels mid-flight and never by
 //     comparing screenshots of a tween: an animation frame is a time-dependent value, and a
 //     test that asserts one is a test that fails on a slow CI box for no reason. What is
-//     asserted is discrete and timing-free — a class was applied, a non-identity transform
-//     was set and then removed, a ghost was inserted.
+//     asserted is discrete and timing-free — a class was applied, a delta was written into a
+//     custom property and then removed, a class came OFF at a landing, a ghost was inserted.
+//
+// D-090 replaced one 450 ms transition with one 800 ms keyframe animation per clip, each
+// behind its own 0–250 ms delay, and moved the colour into the same event: a clip is BLUE
+// (`clip--travelling`) for exactly as long as it is in the air, and green the instant its
+// animation ends. Three things therefore became assertable that were not before, and all
+// three are still discrete facts rather than instants:
+//
+//   - the delays DIFFER (the inline `--hop-delay` props are readable in flight), which is
+//     what makes the landings a wave rather than one clack;
+//   - the blue is a state with a beginning and an end — `clip--travelling` appears on every
+//     clip and the count comes back to zero;
+//   - `--travelling` coming OFF a clip is that clip going green, so the landing order is
+//     observable per file without timing anything.
+//
+// The seeded PRNG (`timeline/hop.ts`) is what lets any of this be asserted at all: the same
+// drop choreographs identically on every machine and every run.
 
 const WAV = "/Users/e2e/shoot/ZOOM0001.WAV";
 const CAM_A = "/Users/e2e/shoot/CamA/C0001.MP4";
@@ -175,16 +192,25 @@ function manifestWithFillerDevices(n: number): Record<string, unknown> {
 /**
  * Record what the timeline DOES, rather than what it looks like at some instant.
  *
- * `attributeOldValue` is the load-bearing option: the hop sets a transform and clears it
- * again, and by the time an observer callback runs the attribute already holds the new
- * (empty) value. The old value is the only place the translate it started from still
- * exists — which is exactly the fact worth asserting, because a FLIP that computed a zero
- * delta would look identical from the outside without it.
+ * `attributeOldValue` is the load-bearing option, for two facts that only exist in a value
+ * the DOM has already overwritten by the time an observer callback runs:
+ *
+ *   - the FLIP deltas. The hop writes `--hop-dx`/`--hop-dy` and removes them again; the old
+ *     `style` value is the only place the distance a clip was pushed back by still exists,
+ *     and a hop whose deltas all came out zero would look identical from the outside without
+ *     it (it would still add the classes, still end in the right place).
+ *   - the LANDINGS. `clip--travelling` coming off a clip IS that clip going green (D-090),
+ *     and it is visible only as "the old class list had it and the new one does not".
  */
 async function watchTimeline(page: Page) {
   await page.evaluate(() => {
     const w = window as unknown as Record<string, unknown>;
-    const seen = { hopped: [] as string[], transforms: [] as string[], ghosts: 0 };
+    const seen = {
+      hopped: [] as string[],
+      landed: [] as string[],
+      deltas: [] as string[],
+      ghosts: 0,
+    };
     w.__HOP_SEEN__ = seen;
     const body = document.querySelector(".timeline__body");
     if (!body) throw new Error("no .timeline__body to observe");
@@ -199,11 +225,19 @@ async function watchTimeline(page: Page) {
         }
         if (record.type !== "attributes" || !(record.target instanceof HTMLElement)) continue;
         const el = record.target;
-        if (record.attributeName === "class" && el.classList.contains("clip--hop")) {
-          seen.hopped.push(el.dataset.file ?? "");
+        if (record.attributeName === "class") {
+          const file = el.dataset.file ?? "";
+          if (el.classList.contains("clip--hop")) seen.hopped.push(file);
+          // Was blue, is not any more: the moment this clip turned green.
+          if (
+            (record.oldValue ?? "").includes("clip--travelling") &&
+            !el.classList.contains("clip--travelling")
+          ) {
+            seen.landed.push(file);
+          }
         }
         if (record.attributeName === "style" && record.oldValue) {
-          seen.transforms.push(record.oldValue);
+          seen.deltas.push(record.oldValue);
         }
       }
     });
@@ -219,7 +253,8 @@ async function watchTimeline(page: Page) {
 
 interface Seen {
   hopped: string[];
-  transforms: string[];
+  landed: string[];
+  deltas: string[];
   ghosts: number;
 }
 
@@ -229,15 +264,49 @@ async function seen(page: Page): Promise<Seen> {
   )) as Seen;
 }
 
-/** The largest translate distance any clip was pushed back by, in px. */
-function largestTranslate(transforms: string[]): number {
+/** The largest distance any clip was pushed back by before it set off, in px. */
+function largestDelta(styles: string[]): number {
   let largest = 0;
-  for (const style of transforms) {
-    const match = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(style);
-    if (!match) continue;
-    largest = Math.max(largest, Math.abs(Number(match[1])), Math.abs(Number(match[2])));
+  for (const style of styles) {
+    for (const match of style.matchAll(/--hop-d[xy]:\s*(-?[\d.]+)px/g)) {
+      largest = Math.max(largest, Math.abs(Number(match[1])));
+    }
   }
   return largest;
+}
+
+/** What every clip on screen is wearing right now — the whole assertable state of a clip
+ *  mid-number, read in one round trip so the reads cannot straddle a landing. */
+async function clipStates(page: Page) {
+  return await page.$$eval(".clip[data-file]", (els) =>
+    els.map((el) => {
+      const node = el as HTMLElement;
+      return {
+        file: node.dataset.file ?? "",
+        hop: node.classList.contains("clip--hop"),
+        travelling: node.classList.contains("clip--travelling"),
+        delay: node.style.getPropertyValue("--hop-delay"),
+        dx: node.style.getPropertyValue("--hop-dx"),
+        background: getComputedStyle(node).backgroundColor,
+      };
+    }),
+  );
+}
+
+/** `--green` and `--blue` from `styles.css`, as the browser reports them. */
+const GREEN = "rgb(34, 197, 94)";
+const BLUE = "rgb(79, 142, 247)";
+
+/** Nothing on any clip is left over from a hop: no classes, no custom properties. */
+async function expectNothingLeftOnTheClips(page: Page) {
+  await expect(page.locator(".clip--hop")).toHaveCount(0);
+  await expect(page.locator(".clip--travelling")).toHaveCount(0);
+  const leftovers = await page.$$eval(".clip", (els) =>
+    els
+      .map((el) => (el as HTMLElement).getAttribute("style") ?? "")
+      .filter((style) => style.includes("--hop-") || style.includes("transform")),
+  );
+  expect(leftovers).toEqual([]);
 }
 
 test.describe("the clips hop into place when the sync lands", () => {
@@ -251,23 +320,31 @@ test.describe("the clips hop into place when the sync lands", () => {
       page,
     }) => {
       await reachSources(page);
+      await watchTimeline(page);
       await page.getByRole("button", { name: en.syncButton }).click();
       await waitForPending(page, "run_sync");
       await resolveControlled(page, "run_sync", hopOutcome());
       await waitForResult(page);
 
       // Nothing animated, so nothing may be mid-animation — or wearing the leftovers of
-      // one. This is the assertion that catches a hop which set a transform it could not
-      // then transition away (which is precisely what would happen if the reduced-motion
-      // gate were on the CSS alone: `styles.css` kills the transition, the transform stays).
+      // one. This is the assertion that catches a hop which set an offset it could not then
+      // animate away (which is precisely what would happen if the reduced-motion gate were
+      // on the CSS alone: `styles.css` kills the animation, the offset stays).
       await expect(page.locator(".timeline")).not.toHaveAttribute("data-hop", /.*/);
-      await expect(page.locator(".clip--hop")).toHaveCount(0);
       await expect(page.locator(".clip--ghost")).toHaveCount(0);
-      expect(
-        await page.$$eval(".clip", (els) =>
-          els.map((el) => (el as HTMLElement).style.transform).filter(Boolean),
-        ),
-      ).toEqual([]);
+      await expectNothingLeftOnTheClips(page);
+
+      // D-090: and the colour landed with the layout. `clip--travelling` is the blue a clip
+      // wears while it is in the air, and a reduced-motion operator's clips were never in
+      // the air — so the blue must never have existed, not merely have been cleaned up. A
+      // gate that ran the sequence and only skipped the movement would paint every clip blue
+      // for 800 ms and then turn it green, which is an animation, and is the one thing this
+      // context has asked not to be shown.
+      expect((await seen(page)).hopped).toEqual([]);
+      for (const clip of await clipStates(page)) {
+        expect(clip.travelling).toBe(false);
+        expect(clip.background).toBe(GREEN);
+      }
 
       // And the layout IS the solved one: each clip's left edge is its own
       // `offset_seconds` under the result's fit zoom, measured from the lane column's
@@ -307,7 +384,7 @@ test.describe("the clips hop into place when the sync lands", () => {
     });
   });
 
-  test("every clip that moved gets the hop class and starts from where it used to be", async ({
+  test("every surviving clip joins the number, and starts from where it used to be", async ({
     page,
   }) => {
     await reachSources(page);
@@ -320,26 +397,72 @@ test.describe("the clips hop into place when the sync lands", () => {
     await waitForResult(page);
 
     const observed = await seen(page);
-    // The two that moved hopped — and the one that did NOT move was not handed a
-    // transition it would only have had to sit through. Camera A is the anchor of both
-    // layouts (the earliest creation stamp before the sync, the earliest offset after it),
-    // so it is at timeline zero either way. That is the zero-delta case, and the fact that
-    // it is absent from this set is the assertion.
-    expect(new Set(observed.hopped)).toEqual(new Set([WAV, CAM_B]));
-    // …and they were genuinely pushed back first. A FLIP whose deltas all came out zero
-    // would still add the class and still end in the right place; only the transform it
-    // started from can tell the difference.
-    expect(largestTranslate(observed.transforms)).toBeGreaterThan(20);
+    // ── Re-expressed for D-090, and the change is a decision rather than a repair ──────
+    //
+    // v0.4 asserted that the clip which did NOT move was absent from this set: a zero delta
+    // meant no transition, so there was nothing for it to sit through. Camera A is that
+    // clip — it is the anchor of both layouts (the earliest creation stamp before the sync,
+    // the earliest offset after it) and so is at timeline zero either way.
+    //
+    // It joins now, and that is the owner's number: «ting hopper litt rundt på tidslinjen».
+    // A clip that stood perfectly still and was already green while the other two shuffled
+    // and landed would not read as "this one happened not to move", it would read as the one
+    // that failed. What it does instead is shuffle in place and go green with the rest — its
+    // delta is zero, which the next assertion states directly, and its wander is not.
+    expect(new Set(observed.hopped)).toEqual(new Set([WAV, CAM_A, CAM_B]));
+    // …and the two that DID move were genuinely pushed back first. A FLIP whose deltas all
+    // came out zero would still add the classes and still end in the right place; only the
+    // offset it started from can tell the difference.
+    expect(largestDelta(observed.deltas)).toBeGreaterThan(20);
 
-    // The sequence cleans up after itself: no transitions left running, no inline
-    // transforms, no leftover class on the section.
-    await expect(page.locator(".clip--hop")).toHaveCount(0);
+    // Every clip went green, exactly once, by its own landing rather than by a sweep at the
+    // end (D-090). This is the observable half of «for så å bli grønne».
+    expect(new Set(observed.landed)).toEqual(new Set([WAV, CAM_A, CAM_B]));
+    expect(observed.landed).toHaveLength(3);
+
+    // The sequence cleans up after itself: no animations left running, no custom properties,
+    // no leftover class on the section.
+    await expectNothingLeftOnTheClips(page);
     await expect(page.locator(".timeline")).not.toHaveClass(/timeline--hopping/);
-    expect(
-      await page.$$eval(".clip", (els) =>
-        els.map((el) => (el as HTMLElement).style.transform).filter(Boolean),
-      ),
-    ).toEqual([]);
+    for (const clip of await clipStates(page)) expect(clip.background).toBe(GREEN);
+  });
+
+  test("the clips travel BLUE and land green, each on its own delay", async ({ page }) => {
+    // The three owner choices of D-090, caught in flight. Read in ONE round trip a few
+    // milliseconds after the outcome lands — no clip can have finished by then (the shortest
+    // possible number is 800 ms) — so this is a statement about a state, not about an
+    // instant of an animation.
+    await reachSources(page);
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForPending(page, "run_sync");
+    await resolveControlled(page, "run_sync", hopOutcome());
+    await expect(page.locator(".clip--travelling").first()).toBeAttached();
+
+    const inFlight = await clipStates(page);
+    expect(inFlight).toHaveLength(3);
+    for (const clip of inFlight) {
+      // Blue, and blue because of the travelling class rather than by accident: the placed
+      // green is the default for every one of these clips and this is what overrides it.
+      expect(clip.hop).toBe(true);
+      expect(clip.travelling).toBe(true);
+      expect(clip.background).toBe(BLUE);
+      // Each carries its own delay, inside the window the band's hold is sized from.
+      const delayMs = Number(clip.delay.replace("ms", ""));
+      expect(delayMs).toBeGreaterThanOrEqual(0);
+      expect(delayMs).toBeLessThanOrEqual(250);
+    }
+    // A wave, not a queue: if every clip started together the landings would be one clack
+    // and the green would arrive as a single flash. Two distinct delays is the weakest form
+    // of the claim that survives a fixture of only three clips.
+    expect(new Set(inFlight.map((c) => c.delay)).size).toBeGreaterThan(1);
+    // The clip that did not move has a zero delta and takes part anyway (see above).
+    expect(inFlight.find((c) => c.file === CAM_A)!.dx).toBe("0px");
+    expect(inFlight.find((c) => c.file === CAM_B)!.dx).not.toBe("0px");
+
+    // And it ends: the blue is a state with an end, not a repaint.
+    await waitForResult(page);
+    await expect(page.locator(".clip--travelling")).toHaveCount(0);
+    for (const clip of await clipStates(page)) expect(clip.background).toBe(GREEN);
   });
 
   test("a clip that lost its place fades out instead of blinking away", async ({ page }) => {
@@ -348,8 +471,17 @@ test.describe("the clips hop into place when the sync lands", () => {
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForPending(page, "run_sync");
     await resolveControlled(page, "run_sync", hopOutcome(CAM_B));
-    await waitForResult(page);
 
+    // D-090 gave the fade a head start to wait out: the survivors spend the first 280 ms of
+    // the number milling about, and a clip that vanished before they had finished doing so
+    // was gone before anyone had a reason to look at it. Asserted as the DECLARED delay,
+    // which is a discrete fact, rather than by sampling the ghost's opacity at some instant,
+    // which is not.
+    const ghost = page.locator(`.clip--ghost[data-file="${CAM_B}"]`);
+    await expect(ghost).toBeAttached();
+    expect(await ghost.evaluate((el) => getComputedStyle(el).animationDelay)).toBe("0.15s");
+
+    await waitForResult(page);
     const observed = await seen(page);
     expect(observed.ghosts).toBe(1);
     // The ghost is scenery and is gone by the time the timeline comes to rest.
@@ -367,6 +499,7 @@ test.describe("the clips hop into place when the sync lands", () => {
     // Catch it in flight, then take the timeline. Waiting for the class rather than for a
     // duration is what keeps this from being a race with a timer.
     await expect(page.locator(".clip--hop").first()).toBeAttached();
+    await expect(page.locator(".clip--travelling").first()).toBeAttached();
     const body = page.locator(".timeline__body");
     const box = (await body.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 120));
@@ -375,13 +508,16 @@ test.describe("the clips hop into place when the sync lands", () => {
     await page.keyboard.up("Shift");
 
     // Cancelled on the spot — not merely finished early.
-    await expect(page.locator(".clip--hop")).toHaveCount(0);
     await expect(page.locator(".timeline")).not.toHaveAttribute("data-hop", /.*/);
-    expect(
-      await page.$$eval(".clip", (els) =>
-        els.map((el) => (el as HTMLElement).style.transform).filter(Boolean),
-      ),
-    ).toEqual([]);
+    await expectNothingLeftOnTheClips(page);
+    // D-090: and the colour goes with it. A cancelled number is a finished number as far as
+    // the answer is concerned — the engine placed these files, whether or not the operator
+    // watched them arrive — so every clip is green in the frame the gesture landed in, not
+    // left blue waiting for an animation that will never end.
+    for (const clip of await clipStates(page)) {
+      expect(clip.travelling).toBe(false);
+      expect(clip.background).toBe(GREEN);
+    }
 
     // And the view stays where the operator left it: the interrupted fit does not creep
     // back afterwards.

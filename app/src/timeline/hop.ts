@@ -197,3 +197,134 @@ export function hopExits(
   for (const [file, box] of before) if (!survivors.has(file)) exits.set(file, box);
   return exits;
 }
+
+/* ── The shuffle, the travel and the bounce (V06, D-090) ────────────────────────────────
+ *
+ * The owner watched v0.4's hop land and asked for a different number: «ting hopper litt
+ * rundt på tidslinjen og spretter på plassen hvor de skal være, for så å bli grønne». Three
+ * things, in that order — a short wander, a travel that overshoots and springs back, and the
+ * green arriving with the landing rather than being there all along.
+ *
+ * What lives here is the part of that which is arithmetic: *how long* each clip waits before
+ * it starts, and *how far* it wanders while it does. The motion itself is one CSS keyframe
+ * animation (`styles.css`), parameterised by five custom properties `useHop` writes on each
+ * node — so 386 clips cost 386 style writes and nothing per frame, and the whole number runs
+ * on the compositor.
+ *
+ * **Seeded, never `Math.random()`.** Each clip's delay and wander are a pure function of its
+ * own file path. Two reasons, and the second is the one that mattered: a re-render mid-flight
+ * would otherwise re-roll a clip's numbers and jerk it sideways, and a spec cannot assert a
+ * distribution it cannot reproduce. The same drop choreographs identically on every machine
+ * and every run.
+ */
+
+/** How long ONE clip's whole number takes, delay excluded: wander, travel, overshoot,
+ *  spring-back. Mirrored in `styles.css` as `.clip--hop`'s `animation-duration`, which is
+ *  where the browser reads it from — this copy sizes the safety net and the band's hold. */
+export const HOP_TRAVEL_MS = 800;
+
+/** The widest start delay any clip can draw. Small enough that the timeline reads as one
+ *  event rather than as a queue, large enough that the landings arrive as a wave instead of
+ *  as a single clack. */
+export const HOP_MAX_DELAY_MS = 250;
+
+/** Wall-clock length of the whole number, from the outcome landing to the last clip coming
+ *  to rest: the longest delay anyone can draw, plus one clip's travel. ≈1.05 s.
+ *
+ *  Read by `useHop` (its own backstop) and, through it, by `App` (the progress band's hold,
+ *  D-082) — the band must stay for the WHOLE number, and one constant is what keeps the two
+ *  from drifting apart. */
+export const HOP_TOTAL_MS = HOP_MAX_DELAY_MS + HOP_TRAVEL_MS;
+
+/** How far a clip may wander sideways while it «finner seg selv», before the clip's own
+ *  width is allowed to have an opinion (see `hopChoreography`). */
+export const HOP_JITTER_X_PX = 8;
+
+/** And vertically. Deliberately much smaller: a lane is 40 px and a clip 33 of them, so
+ *  ±3 px is a shiver inside the lane rather than a clip climbing out of it. */
+export const HOP_JITTER_Y_PX = 3;
+
+/** The floor the width cap may not go below — a 3 px sliver still has to visibly move. */
+export const HOP_MIN_JITTER_X_PX = 2;
+
+/** What one clip does while everyone else is doing it too. */
+export interface HopChoreography {
+  /** ms before this clip starts, in `[0, HOP_MAX_DELAY_MS]`. */
+  delayMs: number;
+  /** The wander, in px, relative to the clip's OLD position. Signed; never zero. */
+  jx: number;
+  jy: number;
+}
+
+/**
+ * FNV-1a over the file path — a hash, not a checksum: all that is asked of it is that two
+ * neighbouring paths (`C0001.MP4`, `C0002.MP4`, which is what a camera card actually looks
+ * like) land far apart, so a card's clips do not all draw the same delay and move as a block.
+ */
+function hashFile(file: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < file.length; i++) {
+    h ^= file.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** mulberry32 — 32 bits of state, four operations, and a good enough spread for four draws
+ *  per clip. Nothing here is cryptographic and nothing here pretends to be. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * A signed wander of at least 40 % of `reach`, so a clip that drew a small number still
+ * visibly moves — a "random" wander that can come out at 0.2 px is a clip standing still
+ * while its neighbours dance, which reads as a bug rather than as variety.
+ *
+ * Rounded to a tenth of a pixel: enough resolution that no two clips look aligned, few
+ * enough digits that the inline custom property a spec reads back is a short string.
+ */
+function signedReach(magnitude: number, sign: number, reach: number): number {
+  const distance = reach * (0.4 + 0.6 * magnitude);
+  return Math.round((sign < 0.5 ? -distance : distance) * 10) / 10;
+}
+
+/**
+ * One clip's delay and wander, from its path and its drawn width.
+ *
+ * **The width cap is the whole reason `widthPx` is a parameter.** A wedding draws 386 clips
+ * at `MIN_CLIP_WIDTH_PX`, and a box that narrow wandering ±8 px travels further than its own
+ * width and back inside 140 ms — which the eye does not read as "finding itself", it reads
+ * as flicker, or as a clip that jumped somewhere else and returned. Capping the horizontal
+ * reach at the clip's own width keeps the wander proportional to the thing wandering: a wide
+ * clip drifts a comfortable 8 px, a sliver shivers.
+ *
+ * The cap is deliberately a little conservative, and it is worth writing down why rather
+ * than "fixing" it later. `widthPx` is the width this module computes and `Clip.tsx` writes
+ * into `style.width` — but the box the operator actually sees at that setting measures about
+ * 12.8 px, because `.clip`'s horizontal padding is wider than 3 px and the sheet is
+ * `border-box`, so the padding sets a floor the declared width cannot go under. Reaching for
+ * the drawn number would mean this module knowing a padding derived from the root font size,
+ * which is exactly the kind of dependency the rest of the file refuses; and the error is in
+ * the safe direction — a sliver shivering by 3 px of a 12.8 px box is legible (it was looked
+ * at, at 24 clips and one frame per 100 ms), where the same box lurching by 8 is not.
+ *
+ * The vertical reach is not capped by anything — every clip is the same height, so there is
+ * nothing for it to be out of proportion with.
+ *
+ * Pure and seeded: same file, same width, same numbers, forever.
+ */
+export function hopChoreography(file: string, widthPx: number): HopChoreography {
+  const random = mulberry32(hashFile(file));
+  const delayMs = Math.round(random() * HOP_MAX_DELAY_MS);
+  const reachX = Math.max(HOP_MIN_JITTER_X_PX, Math.min(HOP_JITTER_X_PX, widthPx));
+  const jx = signedReach(random(), random(), reachX);
+  const jy = signedReach(random(), random(), HOP_JITTER_Y_PX);
+  return { delayMs, jx, jy };
+}
