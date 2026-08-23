@@ -3,6 +3,8 @@ import {
   boot,
   BOOT_FIXTURES,
   controlled,
+  emit,
+  fn,
   resolveControlled,
   scanManifest,
   SETTLED_SETTINGS,
@@ -42,6 +44,7 @@ import { en } from "../src/i18n";
  */
 
 const CAM_A = "/Users/e2e/shoot/CamA/C0001.MP4";
+const WAV = "/Users/e2e/shoot/ZOOM0001.WAV";
 
 /** The two window sizes the shell must be identical in: the design's, and the smallest the
  *  desktop window may be dragged to (`tauri.conf.json`'s `minWidth`/`minHeight`). */
@@ -170,14 +173,19 @@ for (const size of SIZES) {
       expect(result.gutter.x).toBeCloseTo(sources.gutter.x, 0);
       expect(result.gutter.width).toBeCloseTo(sources.gutter.width, 0);
 
-      // The timeline's own top edge is back where it was. Its FRAME is a few pixels higher
-      // than it was in the sources phase, and honestly so: the pre-sync legend (D-067) is a
-      // line about provisional positions and there are no provisional positions any more, so
-      // it is gone. That line still sits above the frame in R1 — relocating it out of the
-      // stack is R2b's job — and it is content, not shell: the room did not move, the
-      // sentence inside it did.
+      // The timeline's own top edge is back where it was…
       const timelineAtResult = (await page.locator(".timeline").boundingBox())!;
       expect(timelineAtResult.y).toBeCloseTo(sources.stage.y + 8, 0);
+
+      // …and so is its FRAME, to the pixel — which it was NOT in R1. There, the pre-sync
+      // legend (D-067) sat above the frame and vanished with the sync, so the frame's top
+      // edge stood a few pixels higher in the result phase than in the sources phase. That
+      // was an honest deviation while the legend still lived in the stack, and R2b is the
+      // stage that ends it: the legend, the meta sentence, the warnings and the zoom have
+      // all left, and `.timeline` now contains one child. Nothing renders above
+      // `.timeline__frame`, so the frame starts at the top of the stage in EVERY phase.
+      const frameAtResult = (await page.locator(".timeline__frame").boundingBox())!;
+      sameBox(frameAtResult, frameAtSources);
 
       // Nothing has been pushed under the slot at either window size.
       const scroll = (await page.locator(".timeline__scroll").boundingBox())!;
@@ -235,6 +243,93 @@ for (const size of SIZES) {
       expect(samples.filter((s) => s.hop && !s.band)).toEqual([]);
       // …and it did leave afterwards, rather than being held forever.
       expect(samples.some((s) => !s.hop && !s.band)).toBe(true);
+    });
+
+    test("the gutter is the device's home: two lines, and the zoom in the ruler's cell", async ({
+      page,
+    }) => {
+      // V06-R2b (D-083). Two claims about the same column, both of them geometric because
+      // both of them are the kind of thing that reads as correct in review and wrong in the
+      // hand: the identity line and the count/length/dot line must BOTH be inside the
+      // gutter's box (a second line that overflowed a 40 px lane would be clipped, not
+      // wrapped, and the fact would simply be missing), and the zoom must be inside the
+      // gutter COLUMN rather than merely near it.
+      await reachSources(page, size);
+
+      const gutter = page.getByRole("group", { name: en.trackAria("Camera A") }).locator(".track__gutter");
+      const ident = gutter.locator(".track__ident");
+      const meta = gutter.locator(".track__meta");
+      await expect(ident.locator(".track__name")).toHaveText("Camera A");
+      await expect(meta).toContainText(en.fileCount(1));
+
+      const [gutterBox, identBox, metaBox] = await Promise.all([
+        gutter.boundingBox(),
+        ident.boundingBox(),
+        meta.boundingBox(),
+      ]);
+      // Two lines, in order, both wholly inside the gutter — at 11/12 px type inside a
+      // single-lane track, which is the tightest case there is.
+      expect(metaBox!.y).toBeGreaterThanOrEqual(identBox!.y + identBox!.height - 1);
+      expect(identBox!.y).toBeGreaterThanOrEqual(gutterBox!.y - 1);
+      expect(metaBox!.y + metaBox!.height).toBeLessThanOrEqual(gutterBox!.y + gutterBox!.height + 1);
+
+      // The zoom sits in the RULER row's gutter cell — the empty one, left of the ruler.
+      const rulerGutter = (await page.locator(".track--ruler .track__gutter").boundingBox())!;
+      for (const name of [en.zoomOut, en.zoomIn, en.zoomFitAria]) {
+        const box = (await page.getByRole("button", { name }).boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(rulerGutter.x - 1);
+        expect(box.x + box.width).toBeLessThanOrEqual(rulerGutter.x + rulerGutter.width + 1);
+        expect(box.y).toBeGreaterThanOrEqual(rulerGutter.y - 1);
+        expect(box.y + box.height).toBeLessThanOrEqual(rulerGutter.y + rulerGutter.height + 1);
+      }
+      // …and it still WORKS from there, which is the half a box check cannot see.
+      const before = (await page.locator(`.clip[data-file="${CAM_A}"]`).boundingBox())!;
+      await page.getByRole("button", { name: en.zoomIn }).click();
+      const after = (await page.locator(`.clip[data-file="${CAM_A}"]`).boundingBox())!;
+      expect(after.width).toBeGreaterThan(before.width);
+    });
+
+    test("the gutter's dot goes grey → blue → green as the row's own files land", async ({
+      page,
+    }) => {
+      // The dot is the row's answer to "how far has this device got", and it is a claim
+      // about EVERY file on the row at once (D-083). So the transition is driven one file at
+      // a time: the drop has two devices of one file each, and the first `prewarm:file` may
+      // turn exactly one dot blue.
+      await reachSources(page, size, {
+        prewarm_analysis: fn(`(args) => {
+          window.__SUNDAYSYNC_PENDING__ = window.__SUNDAYSYNC_PENDING__ || {};
+          return new Promise((resolve, reject) => {
+            window.__SUNDAYSYNC_PENDING__["prewarm_analysis"] = { resolve, reject, args };
+          });
+        }`),
+      });
+      const dot = (device: string) =>
+        page.getByRole("group", { name: en.trackAria(device) }).locator(".track__dot");
+      await waitForPending(page, "prewarm_analysis");
+
+      // Nothing analysed: both rows grey, and the dot says so in words too — the colour is
+      // never the only carrier of the claim.
+      await expect(dot("Camera A")).toHaveClass(/track__dot--pending/);
+      await expect(dot("Zoom recorder")).toHaveClass(/track__dot--pending/);
+      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackAnalysing);
+
+      // One file lands. Its device turns blue; the other does not.
+      await emit(page, "prewarm:file", { file: CAM_A, ok: true });
+      await expect(dot("Camera A")).toHaveClass(/track__dot--ready/);
+      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackAnalysed);
+      await expect(dot("Zoom recorder")).toHaveClass(/track__dot--pending/);
+
+      await emit(page, "prewarm:file", { file: WAV, ok: true });
+      await expect(dot("Zoom recorder")).toHaveClass(/track__dot--ready/);
+
+      // …and the sync's answer replaces the analysis's: green, on every row it placed.
+      await page.getByRole("button", { name: en.syncButton }).click();
+      await waitForPending(page, "run_sync");
+      await resolveControlled(page, "run_sync", syncOutcome());
+      await waitForResult(page);
+      await expect(dot("Camera A")).toHaveClass(/track__dot--placed/);
+      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackPlaced);
     });
 
     test("marking a clip fills the inspector and moves nothing", async ({ page }) => {
@@ -298,6 +393,49 @@ for (const size of SIZES) {
         await page.keyboard.press("Escape");
         await expect(popover.locator(".popover__panel")).toBeHidden();
       }
+    });
+
+    test("the result's warnings are a chip on the strip, not banners over the timeline", async ({
+      page,
+    }) => {
+      // V06-R2b (D-083). `result.warnings` used to be one `<p class="banner banner--warn">`
+      // per warning, stacked between the strip and the frame — the exact shape D-082 took out
+      // of the room everywhere else, still in it here because nothing had moved the timeline's
+      // own header yet. A two-warning run therefore pushed the frame down by two lines in the
+      // same instant the clips hopped.
+      await reachSources(page, size);
+      const frameBefore = (await page.locator(".timeline__frame").boundingBox())!;
+      const before = await room(page);
+
+      await page.getByRole("button", { name: en.syncButton }).click();
+      await waitForPending(page, "run_sync");
+      const base = syncOutcome();
+      await resolveControlled(page, "run_sync", {
+        ...base,
+        result: {
+          ...(base.result as Record<string, unknown>),
+          warnings: [{ code: "mixed_fps" }, { code: "drift", projected_end_error_ms: 120 }],
+        },
+      });
+      await waitForResult(page);
+      await expect(page.locator(".band")).toHaveCount(0);
+
+      // The count is on the strip, beside the problem chip — one place for "is anything
+      // wrong?" — and nothing is above the frame.
+      const chip = page.locator(".popover--warnings");
+      await expect(chip.locator("> summary")).toHaveText(en.warningsCount(2));
+      await expect(page.locator(".banner--warn")).toHaveCount(0);
+      sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
+
+      // …and the sentences themselves are one click away, on a layer, moving nothing.
+      await chip.locator("> summary").click();
+      await expect(chip.locator(".popover__panel")).toContainText(en.mixedFps);
+      await expect(chip.locator(".popover__panel")).toContainText(en.drift(120));
+      const after = await room(page);
+      sameBox(after.strip, before.strip);
+      sameBox(after.slot, before.slot);
+      sameBox(after.stage, before.stage);
+      sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
     });
 
     test("an error banner floats over the stage instead of pushing it", async ({ page }) => {

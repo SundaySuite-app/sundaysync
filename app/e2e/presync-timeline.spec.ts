@@ -112,7 +112,17 @@ test.describe("clips appear on the timeline before any sync", () => {
     // from counts, because the drop divides into more than two cases (D-067).
     // One of the three files (the WAV) carries nothing at all: no container timestamp, no
     // date tag, no timestamp in its name, no mtime.
-    await expect(page.locator(".timeline__note").first()).toHaveText(
+    //
+    // V06-R2b (D-083): the legend moved into the 38 px slot, so the COUNTS are what is drawn
+    // and the whole sentence is the element's `title`. Both are asserted — the numbers are
+    // the claim, and the sentence is what makes them readable to someone who has not met
+    // this app before, so losing either would be losing the legend.
+    const legend = page.locator(".timeline__note").first();
+    await expect(legend).toHaveText(
+      en.presyncLegendShort({ placed: 2, estimated: 0, ordered: 1, offSession: 0 }),
+    );
+    await expect(legend).toHaveAttribute(
+      "title",
       en.presyncLegend({ placed: 2, estimated: 0, ordered: 1, offSession: 0 }),
     );
     await expect(clip(page, WAV)).toHaveAttribute(
@@ -147,8 +157,20 @@ test.describe("clips appear on the timeline before any sync", () => {
     await page.getByRole("button", { name: en.dropFolder }).click();
     await expect(page.locator(".clip")).toHaveCount(2);
 
-    await expect(page.locator(".result__meta span").first()).toHaveText(en.presyncMetaNoClock);
-    await expect(page.locator(".timeline__note").first()).toHaveText(
+    // V06-R2b (D-083): the meta sentence is in the slot's middle now, where it ellipsises at
+    // a narrow window — so the assertion is on the `title` it carries for exactly that
+    // reason. Same sentence, and this is the reading that cannot be defeated by a window
+    // width.
+    await expect(page.locator(".result__meta span").first()).toHaveAttribute(
+      "title",
+      en.presyncMetaNoClock,
+    );
+    const legend = page.locator(".timeline__note").first();
+    await expect(legend).toHaveText(
+      en.presyncLegendShort({ placed: 0, estimated: 0, ordered: 2, offSession: 0 }),
+    );
+    await expect(legend).toHaveAttribute(
+      "title",
       en.presyncLegend({ placed: 0, estimated: 0, ordered: 2, offSession: 0 }),
     );
   });
@@ -196,6 +218,10 @@ test.describe("clips appear on the timeline before any sync", () => {
     // lumping it in with the WAV that carries nothing at all. Two files, two sentences.
     const notes = page.locator(".timeline__note");
     await expect(notes.first()).toHaveText(
+      en.presyncLegendShort({ placed: 2, estimated: 0, ordered: 1, offSession: 1 }),
+    );
+    await expect(notes.first()).toHaveAttribute(
+      "title",
       en.presyncLegend({ placed: 2, estimated: 0, ordered: 1, offSession: 1 }),
     );
     await expect(page.locator(".timeline__note--offsession")).toHaveText(
@@ -276,7 +302,14 @@ test.describe("a drop with one file per rung of the recording-time ladder", () =
     // One placed from a container stamp; three estimated (a BWF's date + clock, a
     // timestamp in a filename, an mtime minus its duration); one with no evidence at all;
     // two carrying stamps from other days. 1 + 3 + 1 + 2 = the seven clips above.
-    await expect(page.locator(".timeline__note").first()).toHaveText(
+    const legend = page.locator(".timeline__note").first();
+    await expect(legend).toHaveText(
+      en.presyncLegendShort({ placed: 1, estimated: 3, ordered: 1, offSession: 2 }),
+    );
+    // …and the sentence that explains what each number MEANS is still there, one hover away
+    // (D-083). The counts sum to the seven clips either way.
+    await expect(legend).toHaveAttribute(
+      "title",
       en.presyncLegend({ placed: 1, estimated: 3, ordered: 1, offSession: 2 }),
     );
   });

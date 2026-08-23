@@ -17,6 +17,19 @@
 
 ### Endret
 
+- **Sporhodet er enhetens hjem (V06-R2b).** Til venstre for hvert spor står det nå to linjer:
+  hvem enheten er (ikon, navn, «Referanse», M/S) og hva den har med seg — «3 filer · 1 t 42
+  min» og én prikk som sier hvor langt den er kommet. **Grå venter, blå er ferdig analysert,
+  grønn er plassert av synken**, akkurat som klippene, men sagt om hele raden på én gang. På
+  et bryllup med fire hundre filer er hvert klipp tre piksler bredt; raden er det eneste på
+  skjermen som er stor nok til å leses fra andre siden av rommet. Sporene er 40 px høye nå, så
+  begge linjene får plass.
+- **Ingenting står lenger over tidslinja.** Zoom-knappene har flyttet inn i linjalens egen
+  celle rett over klippene, forklaringslinja og setninga om hva du ser på står i bunnstripa
+  ved siden av avspillingen, og advarsler fra synken er blitt til «2 advarsler» oppe på
+  topplinja — ved siden av problemfilene, for det er samme spørsmål. Resultatet er at
+  tidslinje-ramma begynner på nøyaktig samme sted i alle faser: å trykke Synkroniser flytter
+  ikke lenger på en eneste piksel av det du sitter og ser på.
 - **Appen er ett rom (V06-R1).** SundaySync leses ikke lenger som en rekke sider som dytter
   hverandre rundt. Det er en 44 px topplinje med navnet, «Legg til», én setning om hva du har
   sluppet inn og den ene tingen du skal trykke på nå; tidslinja fyller alt under den; en

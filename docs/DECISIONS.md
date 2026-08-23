@@ -4019,3 +4019,136 @@ looking at the row rather than by reading a list of filenames. That is a real pi
 work (a lane that is not a time axis, hit-testing, the hop's arithmetic) and it is priced as
 **R2c**. Until then the shelf is one click behind a chip that carries its own count, which is
 the same standing the problem list has had since D-061 — folded, never hidden.
+
+## D-083 — V06-R2b: the gutter is the device's HOME, and the frame starts at the top of the room
+
+R1 built the room and R2a emptied the panel into it. What was left standing was a small stack
+of lines **above the timeline's frame** that nothing had claimed yet: the zoom buttons, the
+pre-sync legend, the off-session line, the meta sentence, and one amber banner per result
+warning. Five different things, one on top of another, in a room whose whole promise (D-074)
+is that nothing moves — and every one of them appeared or vanished with the phase, so the
+frame's top edge was a few pixels lower before a sync than after it. `ett-rom.spec` said so
+out loud in R1, as an honest deviation with a note that R2b would end it. This is that stage.
+
+After it, `.timeline` contains exactly one child, `.timeline__frame`, and the frame starts at
+the top of the stage in every phase. The spec no longer records a deviation; it asserts the
+frame's box is the SAME box in `sources` and in `result`.
+
+### Lanes are 40 px, and the row pitch is one number
+
+`LANE_HEIGHT_PX` in `src/timeline/hop.ts` goes 34 → 40. Everything vertical follows from it:
+`Track.tsx` writes it into the track's height and each lane's height, `clipBoxes` sums it,
+`CLIP_HEIGHT_PX` derives from it and `useHop`'s ghosts are drawn at that size. The stylesheet
+mirrors it in exactly one cosmetic place (`.lane__empty`'s `line-height`) and nowhere
+load-bearing.
+
+**No `min-height`, anywhere on that chain.** This is the one way the stage could have failed
+silently. A two-line gutter is the obvious candidate for "just let it grow", and a lane the
+browser grew to fit it would still be summed here at 40 — so the DOM's pitch and the hop's
+pitch would disagree by a few pixels per track, and every clip below the first device would
+fly, smoothly and confidently, to a row it is not in. Green tests, correct-looking
+screenshot, wrong app: an R5-class seam. What holds instead is arithmetic on both sides, and
+two new cases in `hop.test.ts` assert the arithmetic is the constant and nothing but the
+constant — consecutive rows exactly `LANE_HEIGHT_PX` apart, and a two-lane track's second row
+at exactly `trackTop + LANE_HEIGHT_PX`. Two lines at 13 px and 11 px measure ~36 px inside a
+40 px lane, so nothing needs to grow.
+
+`--tl-gutter` goes 12.5rem → 14rem and `--tl-ruler-h` 22 → 26 px, and both move from
+`.timeline` up to `.app`. The gutter is a column of the ROOM now, not an implementation
+detail of one component: anything that ever needs to align to it (the band, the slot) has to
+be able to read its width without reaching into a descendant.
+
+### Two lines: who, and where it stands
+
+Line one is identity — icon, name, `badge--ref`, the mute/solo pair. Line two is
+`t.fileCount(n)` · the summed length of the device's drawn spans · one dot.
+
+Both are computed **inside `Track`**, from props it already had (`rows` for the count and the
+lengths, `prewarm` and `placements` for the dot). No new props from App. A count App derived
+and Track drew would be a second derivation of the same manifest, free to disagree with the
+lane six pixels to its right.
+
+The dot's three states are the clip vocabulary of D-080 one level up: **grey** while any file
+on the row is not `ready`, **blue** once every file is, **green** once the sync has placed
+them. `failed` counts as not-ready — the row is not analysed, and the file that failed says so
+on its own clip. A row with nothing drawn on it gets **no dot at all**: §7.5 keeps a device
+that placed nothing visible, its lane already says «Ingen klipp plassert», and a green
+«plassert av synken» ten pixels away would be the app contradicting itself in one glance. An
+absent dot is not a fourth state; it is the row having nothing to be in a state about.
+
+The dot exists because the operator's question — *how far has this got?* — is a question about
+a ROW, and at the owner's four-hundred-file wedding a clip is three pixels wide. The row is
+the only object on screen with enough area to answer it from the other side of the room. It
+carries `aria-label`/`title` (`trackAnalysing`/`trackAnalysed`/`trackPlaced`) so the claim is
+never colour-only.
+
+**Blue, not gold — a deliberate deviation from the canvas.** The design drew this dot gold.
+Gold is `--accent`, and `badge--ref` is gold, and the badge sits on the line directly above
+the dot, ten pixels away: one colour making two different claims about one device. The owner's
+clip vocabulary is already grey → blue → green, and the dot is that vocabulary at row scale,
+so blue is the colour that means what the dot means. **If this is vetoed it is a one-token
+change**: `.track__dot--ready { background: var(--blue) }` → `var(--gold)` in `styles.css`,
+and nothing else moves.
+
+### The zoom moves into the ruler row's gutter cell
+
+The `−` `+` `Fit` buttons were on the line above the frame. They are now in the ruler track's
+gutter cell — the one cell in the whole frame that was empty, sitting directly above the
+column they act on, on the row that already says what the horizontal axis means.
+Right-aligned, 22 px, against the lane column's left edge, which is where the eye already is.
+Same three accessible names, deliberately: the specs click them by name and so does the
+operator's hand.
+
+### The words go to the bottom slot, the warnings to the strip
+
+`TimelineView` portals its own words into the slot through the same target `Transport` has
+used since D-075, for the same reason: every one of them is built from a memo of this
+component's, so lifting any of them to App would be a second place deriving the same thing.
+The slot reads left → right: the transport (result) or the legend (pre-sync), the meta
+sentence, then R2a's chips.
+
+**The legend keeps its counts and folds its words.** «204 plassert · 163 anslått · 5
+rekkefølge · 14 utenfor økta» is drawn; the full sentence is the element's `title`. The four
+numbers ARE the claim (§7.3: they sum to the whole drop), and 38 px does not hold four clauses
+beside a transport. The off-session line is the one note that keeps its whole sentence, because
+what makes it actionable is the DATE it names (D-071) — it ellipsises rather than shortening.
+The legend is `flex: 0 0 auto` and the meta sentence absorbs the squeeze instead: measured at
+1024, a shrinkable legend was handed 40 px of the 62 it needs, and a legend clipped mid-number
+has lost the only thing it was for. The meta can afford it — it carries its own `title`.
+
+**The result's warnings become one chip on the strip**, `«N advarsler»`, opening R2a's popover
+(D-078) with the sentences in full. They were one `banner--warn` per warning stacked above the
+frame — the exact shape D-082 removed from the room everywhere else, still present here only
+because nothing had yet moved the timeline's own header. A two-warning run pushed the frame
+down by two lines in the same instant the clips hopped. The chip sits beside the problem chip,
+because «er noe galt?» is one question and it should be asked in one place, and it is absent
+when there are none: a permanent «0 advarsler» is a line read past on every clean run. App
+renders a second portal target (`.strip__status`) for it, on the same terms as `slotEl`.
+
+### What the playback quality note cost, and why the trade was taken
+
+`t.playbackQualityNote` — "audio for checking sync (12 kHz analysis audio), not export
+quality" — was a visible caption on the transport. It is the transport's `title` now.
+
+This was measured, not guessed. With the meta sentence in the slot's middle, at **1280×800**
+the slot is exactly full (980 px of content in 980 px) and the note was already being clipped
+from 413 px of text into a 374 px box; at **1024×600** the slot overflowed its own 724 px by
+38. A sentence cut off mid-word is not a sentence anybody reads, and a slot that overflows is
+the room breaking its one promise. With the note on the `title`, the result slot measures 724
+of 724 at 1024 with the transport, the meta and the chips all at their natural widths.
+
+The loss is real and worth naming: the sentence is expectation-setting, and expectation-setting
+only works if it is read *before* the operator presses play. On the bar's `title` it is one
+hover away, over the very control that raises the question — which is the best available
+placement in 38 px, not an equal substitute. If the room ever gains a line for it, it should
+come back. `playback.spec` asserts the attribute now instead of the visible text.
+
+### Specs
+
+Re-expressed, never deleted (D-085). `ett-rom.spec` gains the two gutter lines, the dot's
+grey → blue → green transition driven by per-file `prewarm:file` events, the zoom buttons'
+boxes inside the ruler's gutter column, the warnings chip, and the frame-y identity that
+replaces R1's noted deviation. `presync-timeline.spec` asserts the legend's counts AND its
+`title` — the parent claim survives in full, one attribute away — and the meta sentence by its
+`title`, which is the reading a window width cannot defeat. `hop.test.ts` gains the two pitch
+cases above.

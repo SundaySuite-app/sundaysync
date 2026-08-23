@@ -36,7 +36,7 @@ describe("clipBoxes", () => {
     );
     expect(boxes.get("a")!.y).toBe(5);
     expect(boxes.get("b")!.y).toBe(5 + LANE_HEIGHT_PX);
-    // Two lanes above, so the second track starts 68 px down.
+    // Two lanes above, so the second track starts two lane heights down.
     expect(boxes.get("c")!.y).toBe(5 + 2 * LANE_HEIGHT_PX);
   });
 
@@ -59,6 +59,43 @@ describe("clipBoxes", () => {
   it("is empty for no tracks, and for tracks with no clips", () => {
     expect(clipBoxes([], VIEW).size).toBe(0);
     expect(clipBoxes([track(), track()], VIEW).size).toBe(0);
+  });
+
+  // ── V06-R2b (D-083): the row pitch is ONE number, and this is where it is checked ────
+  //
+  // `LANE_HEIGHT_PX` went 34 → 40 so the gutter could carry two lines. Everything vertical
+  // in the timeline is that constant times an integer: `Track.tsx` sizes the track and each
+  // lane from it, `clipBoxes` sums it, `useHop` places ghosts by it. The risk the stage
+  // carried is a lane the browser grew — a `min-height` on the two-line gutter taller than
+  // the constant — because then the DOM's pitch and this module's pitch disagree by a few
+  // px per track and every clip below the first one hops to a row it is not in. Nothing
+  // here can see the DOM, so what these two assert is the other half: that the arithmetic
+  // is the constant and nothing but the constant, at any value it is ever given.
+
+  it("puts consecutive rows of one track exactly one LANE_HEIGHT_PX apart", () => {
+    const boxes = clipBoxes(
+      [track([clip("a", 0)], [clip("b", 0)], [clip("c", 0)])],
+      VIEW,
+    );
+    const [a, b, c] = [boxes.get("a")!.y, boxes.get("b")!.y, boxes.get("c")!.y];
+    expect(b - a).toBe(LANE_HEIGHT_PX);
+    expect(c - b).toBe(LANE_HEIGHT_PX);
+  });
+
+  it("starts a two-lane track's second row at exactly trackTop + LANE_HEIGHT_PX", () => {
+    // `trackTop` is not a number this module exports, so it is taken the only way a caller
+    // could: the first row of a track IS its top plus the two hairlines and the inset, and
+    // a following track's top is the previous one's top plus its lanes. One track of two
+    // lanes, then a second track — so both readings of "trackTop" are exercised at once.
+    const boxes = clipBoxes(
+      [track([clip("a", 0)], [clip("b", 0)]), track([clip("c", 0)])],
+      VIEW,
+    );
+    const trackTop = boxes.get("a")!.y;
+    expect(boxes.get("b")!.y).toBe(trackTop + LANE_HEIGHT_PX);
+    // …and the next track begins after exactly two of them, never after "two plus whatever
+    // the gutter needed".
+    expect(boxes.get("c")!.y).toBe(trackTop + 2 * LANE_HEIGHT_PX);
   });
 
   it("leaves room inside a lane for the clip it describes", () => {

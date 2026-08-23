@@ -38,8 +38,23 @@
 import { msToX, type TimelineView } from "./geometry";
 import type { ClipSpan } from "./laneLayout";
 
-/** Height of one sub-track lane — the 34 px `.track__lane` is drawn at. */
-export const LANE_HEIGHT_PX = 34;
+/**
+ * Height of one sub-track lane — the px `.track__lane` is drawn at.
+ *
+ * **40 since V06-R2b (D-083)**, up from 34. The gutter carries two lines now (identity, and
+ * `count · length ·` the analysis dot), and two lines of 11–13 px type do not fit in 34.
+ *
+ * This constant is the ONLY place the row pitch is stated. `Track.tsx` sets both the track's
+ * height (`max(1, rows) * laneHeight`) and each lane's height from it, `TimelineView` hands
+ * it down, `clipBoxes` below sums the same number, and `useHop`'s ghosts are drawn from
+ * `CLIP_HEIGHT_PX`, which derives from it. Nothing anywhere may state the pitch a second
+ * time — in particular no `min-height` on the gutter or the lane: a lane the browser grew to
+ * fit a taller gutter would still be summed here at this value, and every clip below the
+ * first track would hop to a row it is not in. The stylesheet's own two mirrors
+ * (`.lane__empty`'s `line-height`, and nothing else) are the unavoidable exceptions, and
+ * they are cosmetic rather than load-bearing.
+ */
+export const LANE_HEIGHT_PX = 40;
 
 /** `.track`'s hairline (`.track + .track { border-top }`). Inside the box, since the sheet
  *  is `border-box` throughout — so it does not add to a track's height, it only pushes the
@@ -48,7 +63,7 @@ export const LANE_HEIGHT_PX = 34;
  *  ghosts are placed at. */
 const TRACK_BORDER_PX = 1;
 
-/** `.track__lane`'s own top hairline, inside its 34 px for the same reason. */
+/** `.track__lane`'s own top hairline, inside its 40 px for the same reason. */
 const LANE_BORDER_PX = 1;
 
 /** `.clip`'s `top`/`bottom` inset inside its lane. */

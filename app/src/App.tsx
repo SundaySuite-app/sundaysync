@@ -103,6 +103,13 @@ export function App() {
   /** The bottom slot's portal target (D-075). A callback ref in state rather than a `useRef`
    *  so the commit that mounts the node re-renders the tree that portals into it. */
   const [slotEl, setSlotEl] = useState<HTMLDivElement | null>(null);
+  /**
+   * The strip's second portal target (V06-R2b, D-083): where `TimelineView` puts the result's
+   * warnings chip. Same bargain as `slotEl` — the warnings live on `outcome`, which is a
+   * prop of the timeline's, and a second reader of the same field up here would be a second
+   * place that can disagree about how many there are.
+   */
+  const [stripStatusEl, setStripStatusEl] = useState<HTMLSpanElement | null>(null);
   const t = dictionaries[lang];
 
   // Screen readers pronounce by the document language — a hardcoded lang="nb" reads
@@ -604,6 +611,12 @@ export function App() {
           onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
           onExclude={(file) => dispatch({ type: "files/exclude", file })}
         />
+        {/* Where the timeline puts «N advarsler» (V06-R2b, D-083) — right after the problem
+            chip, because «er noe galt?» is one question and it is asked in one place. Its own
+            node with no React children of its own, for the same reason `.slot__transport` has
+            one: a portal into a container React is also rendering into can fight the
+            reconciler over child order. */}
+        <span className="strip__status" ref={setStripStatusEl} />
         {/* The background pre-analysis (D-059/D-062), as quietly as it deserves. Its OWN
             element and class — never the ProgressBar, which belongs to things the operator is
             waiting for; this is work the app started on its own and abandons without a word. */}
@@ -758,6 +771,7 @@ export function App() {
             selected={selected}
             onSelect={setSelected}
             slotEl={slotEl}
+            stripStatusEl={stripStatusEl}
             onHopSettled={onHopSettled}
           />
         )}

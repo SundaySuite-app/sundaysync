@@ -1,5 +1,6 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import type { Strings } from "../../i18n";
+import { formatDuration } from "../../i18n";
 import { visibleClips, type TimelineView } from "../../timeline/geometry";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import type { PrewarmStatus } from "../../state";
@@ -35,6 +36,21 @@ import { Clip } from "./Clip";
  *
  * `placements` is null before a sync — the clips are drawn from the scan's own
  * creation timestamps and there is no engine detail behind them yet.
+ *
+ * ## Two lines (V06-R2b, D-083)
+ *
+ * The gutter is the DEVICE'S HOME, not a label. Line one is who it is — icon, name, the
+ * reference badge, the mix buttons. Line two is what it brought and where it stands: how
+ * many files, how much material, and one dot for the state the whole row is in. Those three
+ * facts used to be somewhere else entirely (a list under the timeline, a legend above it, a
+ * colour on 3 px clips), and the row is where they are actually asked about — "how far has
+ * Camera B got" is a question about a row, answered by looking at that row.
+ *
+ * Everything on line two is computed HERE, from props the component already had: the file
+ * count and the total length come out of `rows` (the spans it is about to draw anyway) and
+ * the dot's state out of `prewarm` plus whether there are placements at all. No new props,
+ * because a count App computed and Track drew would be a second place that can disagree
+ * with the lane beside it.
  */
 export const Track = memo(function Track({
   t,
@@ -92,39 +108,69 @@ export const Track = memo(function Track({
 }) {
   const name = t.deviceLabel(device.id, device.label);
   const height = Math.max(1, rows.length) * laneHeight;
+  const meta = useTrackMeta(rows, placements, prewarm);
+  const dotLabel =
+    meta.state === "placed"
+      ? t.trackPlaced
+      : meta.state === "ready"
+        ? t.trackAnalysed
+        : t.trackAnalysing;
 
   return (
     <div className="track" role="group" aria-label={t.trackAria(name)} style={{ height: `${height}px` }}>
       <div className="track__gutter">
-        {device.kind === "video" ? <CameraIcon /> : <MicIcon />}
-        <span className="track__name" title={name}>
-          {name}
-        </span>
-        {isReference && <span className="badge badge--ref">{t.reference}</span>}
-        {showMix && (
-          <span className="track__mix">
-            <button
-              type="button"
-              className={`mixbtn${muted ? " mixbtn--on mixbtn--mute" : ""}`}
-              aria-label={muted ? t.unmuteDevice(name) : t.muteDevice(name)}
-              aria-pressed={muted}
-              onClick={() => onToggleMute(device.id)}
-            >
-              {t.muteShort}
-            </button>
-            {showSolo && (
+        <span className="track__ident">
+          {device.kind === "video" ? <CameraIcon /> : <MicIcon />}
+          <span className="track__name" title={name}>
+            {name}
+          </span>
+          {isReference && <span className="badge badge--ref">{t.reference}</span>}
+          {showMix && (
+            <span className="track__mix">
               <button
                 type="button"
-                className={`mixbtn${soloed ? " mixbtn--on mixbtn--solo" : ""}`}
-                aria-label={soloed ? t.unsoloDevice(name) : t.soloDevice(name)}
-                aria-pressed={soloed}
-                onClick={() => onToggleSolo(device.id)}
+                className={`mixbtn${muted ? " mixbtn--on mixbtn--mute" : ""}`}
+                aria-label={muted ? t.unmuteDevice(name) : t.muteDevice(name)}
+                aria-pressed={muted}
+                onClick={() => onToggleMute(device.id)}
               >
-                {t.soloShort}
+                {t.muteShort}
               </button>
-            )}
-          </span>
-        )}
+              {showSolo && (
+                <button
+                  type="button"
+                  className={`mixbtn${soloed ? " mixbtn--on mixbtn--solo" : ""}`}
+                  aria-label={soloed ? t.unsoloDevice(name) : t.soloDevice(name)}
+                  aria-pressed={soloed}
+                  onClick={() => onToggleSolo(device.id)}
+                >
+                  {t.soloShort}
+                </button>
+              )}
+            </span>
+          )}
+        </span>
+        {/* Line two: what the device brought, and where it stands. The dot is the only
+            colour in the gutter, and it is deliberately NOT gold — see D-083: gold already
+            means «referanse» on the badge ten pixels to the left. */}
+        <span className="track__meta">
+          <span>{t.fileCount(meta.files)}</span>
+          <span aria-hidden="true">·</span>
+          <span>{formatDuration(meta.lengthMs / 1000)}</span>
+          {/* No dot on a row with nothing drawn on it. §7.5 keeps a device that placed
+              nothing visible, and its lane already says «Ingen klipp plassert» — a green
+              «plassert av synken» ten pixels away would be the app contradicting itself in
+              one glance. An absent dot is not a fourth state; it is the row having nothing
+              to be in a state ABOUT. */}
+          {meta.files > 0 && (
+            <span
+              className={`track__dot track__dot--${meta.state}`}
+              role="img"
+              aria-label={dotLabel}
+              title={dotLabel}
+            />
+          )}
+        </span>
       </div>
       <div className="track__lanes">
         {rows.length === 0 ? (
@@ -168,3 +214,58 @@ export const Track = memo(function Track({
     </div>
   );
 });
+
+/** What the gutter's second line says (V06-R2b, D-083). */
+interface TrackMeta {
+  /** How many of this device's files are DRAWN on this row. */
+  files: number;
+  /** Their spans' total length, in ms. Zero-length spans (an outcome that carries no
+   *  duration for a file) contribute nothing rather than a guess. */
+  lengthMs: number;
+  /** Grey / blue / green — see below. */
+  state: "pending" | "ready" | "placed";
+}
+
+/**
+ * The two-line gutter's second line, from what `Track` already has.
+ *
+ * The three dot states are the owner's own clip vocabulary, one level up: a clip is grey
+ * while its audio is unanalysed, blue once it is, green once the sync has placed it
+ * (D-080), and the device's dot says the same thing about the whole row at once. That is
+ * the point of putting it in the gutter — at a four-hundred-file wedding a clip is three
+ * pixels wide and the row is the only thing with enough area to read from across a room.
+ *
+ * `placed` beats everything: with an outcome in hand the analysis is over and «hvor står
+ * denne enheten» has one answer. Before that, `ready` needs EVERY drawn file to be `ready`
+ * — one file still pending is a row still working, and a dot that turned blue at 90 % would
+ * be claiming the row was done. `failed` counts as not-ready for the same reason: the row
+ * is not analysed, and the file that failed says so for itself on its own clip.
+ *
+ * A row with nothing drawn on it is `pending` rather than vacuously `ready` — and `Track`
+ * draws no dot at all for it, because «ferdig analysert» (or «plassert») over «Ingen klipp
+ * plassert» is two claims that cannot both be true.
+ */
+function useTrackMeta(
+  rows: ClipSpan[][],
+  placements: Map<string, Placement> | null,
+  prewarm: Record<string, PrewarmStatus>,
+): TrackMeta {
+  return useMemo(() => {
+    let files = 0;
+    let lengthMs = 0;
+    let allReady = true;
+    for (const row of rows) {
+      for (const span of row) {
+        // The same filter the lane applies below: with an outcome, a span whose file has no
+        // placement is a hole in the outcome and is not drawn, so it is not counted either.
+        if (placements && !placements.get(span.file)) continue;
+        files += 1;
+        lengthMs += Math.max(0, span.endMs - span.startMs);
+        if (prewarm[span.file] !== "ready") allReady = false;
+      }
+    }
+    const state: TrackMeta["state"] =
+      placements !== null ? "placed" : files > 0 && allReady ? "ready" : "pending";
+    return { files, lengthMs, state };
+  }, [rows, placements, prewarm]);
+}

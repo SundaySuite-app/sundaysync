@@ -8,11 +8,13 @@ import { getPlayheadMs, usePlayheadMs } from "../../timeline/playhead";
 /**
  * The transport bar — v0.3's answer to "is it actually in sync?" (D-055).
  *
- * Small on purpose. Play, stop, where the playhead is, how loud, and one sentence saying
- * what the audio *is*: the 12 kHz mono analysis audio the correlator listened to. That
- * sentence is load-bearing. Someone who presses play expecting a mix hears something dull
- * and lo-fi and concludes the app is broken; someone told what they are listening to hears
- * exactly what they need — whether two recordings of the same room line up.
+ * Small on purpose. Play, stop, where the playhead is, how loud — and, as the bar's `title`,
+ * one sentence saying what the audio *is*: the 12 kHz mono analysis audio the correlator
+ * listened to. That sentence is load-bearing. Someone who presses play expecting a mix hears
+ * something dull and lo-fi and concludes the app is broken; someone told what they are
+ * listening to hears exactly what they need — whether two recordings of the same room line
+ * up. It was a visible caption until V06-R2b (D-083), when the slot ran out of room for it
+ * and a clipped sentence stopped being one.
  *
  * Comb filtering is the *pass* condition, not a fault: two copies of the same sound a few
  * samples apart cancel and reinforce across the spectrum, which is that hollow, phasey
@@ -39,7 +41,18 @@ export function Transport({ t, clips, fps }: { t: Strings; clips: PlacedClip[]; 
   const playing = state.playing;
 
   return (
-    <div className="transport" role="group" aria-label={t.transportAria}>
+    // The quality sentence is the bar's own `title` since V06-R2b (D-083) — measured, not
+    // guessed: the slot's middle carries the meta sentence now, and at 1280 the note was
+    // already being clipped from 413 px of text into 374 px of box, while at 1024 the whole
+    // slot overflowed its 724 px by 38. A sentence that is cut off mid-word is not a sentence
+    // the operator reads; on the transport itself it is one hover away, over the very control
+    // that raises the question. See D-083 for what is lost and why the trade was taken.
+    <div
+      className="transport"
+      role="group"
+      aria-label={t.transportAria}
+      title={t.playbackQualityNote}
+    >
       <button
         type="button"
         className="transport__play"
@@ -80,8 +93,6 @@ export function Transport({ t, clips, fps }: { t: Strings; clips: PlacedClip[]; 
           onChange={(e) => engine.setVolume(Number(e.currentTarget.value))}
         />
       </label>
-
-      <span className="transport__note subtle">{t.playbackQualityNote}</span>
 
       {state.deadFiles.length > 0 && (
         <span className="transport__dead" role="status">

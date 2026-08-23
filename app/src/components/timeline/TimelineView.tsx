@@ -25,7 +25,8 @@ import {
   thumbOffsetFracToScrollMs,
 } from "../../timeline/viewport";
 import type { PrewarmStatus } from "../../state";
-import type { Device, Placement, ScanManifest, SyncOutcome } from "../../types";
+import type { Device, Placement, ScanManifest, SyncOutcome, Warning } from "../../types";
+import { usePopoverDismiss } from "../shell/usePopoverDismiss";
 import { PlayheadLine } from "./PlayheadLine";
 import { Ruler } from "./Ruler";
 import { Track } from "./Track";
@@ -142,6 +143,7 @@ export function TimelineView({
   selected,
   onSelect,
   slotEl,
+  stripStatusEl,
   onHopSettled,
 }: {
   t: Strings;
@@ -180,6 +182,13 @@ export function TimelineView({
    * and the pixels land where the design says. Null before App's callback ref has run.
    */
   slotEl: HTMLElement | null;
+  /**
+   * Where the result's warnings belong on screen: a `<span>` App renders inside the strip's
+   * sources cluster, after the problem chip (V06-R2b, D-083). Same bargain as `slotEl` — the
+   * warnings are `outcome`'s, and `outcome` is this component's prop, so the chip is rendered
+   * here and portalled there rather than App growing a second reader of the same field.
+   */
+  stripStatusEl: HTMLElement | null;
   /** The hop has come to rest (D-082) — App holds the progress band open until it has. */
   onHopSettled?: () => void;
 }) {
@@ -447,6 +456,26 @@ export function TimelineView({
     const [num, den] = result.sequence.fps.split("/").map(Number);
     return Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : undefined;
   }, [result]);
+
+  /**
+   * The one sentence the slot's middle carries (V06-R2b, D-083). After a sync it is the
+   * sequence the exporter will write; before one it is what the positions on screen ARE.
+   *
+   * "Provisional positions from the files' own timestamps" is a claim, and it is false when
+   * not one file in the drop reached ANY rung of the ladder — a folder of untagged WAVs, or a
+   * set of cards whose clocks were all rejected (`recordingTime.ts`). Then nothing was
+   * positioned by a clock at all; the clips are in filename order (D-068), and saying
+   * otherwise invites the operator to read that order as a claim about when they recorded
+   * (V04-U5).
+   */
+  const metaSentence = result
+    ? t.sequenceMeta(result.sequence.fps, formatDuration(result.sequence.duration_seconds))
+    : clipCount > 0 && legend.placed + legend.estimated === 0
+      ? t.presyncMetaNoClock
+      : t.presyncMeta;
+
+  /** What the engine wants to say about the run as a whole — the strip's chip (D-083). */
+  const warnings: readonly Warning[] = result?.warnings ?? [];
 
   // (The unsynced shelf moved into the strip's problem popover in V06-R2a (D-079). It was
   // never about the timeline — an unplaced clip has no position, so it has no x coordinate —
@@ -723,59 +752,6 @@ export function TimelineView({
       tabIndex={0}
       onKeyDown={onKeyDown}
     >
-      <div className="result__meta">
-        <span>
-          {result
-            ? t.sequenceMeta(
-                result.sequence.fps,
-                formatDuration(result.sequence.duration_seconds),
-              )
-            : // "Provisional positions from the files' own timestamps" is a claim, and it
-              // is false when not one file in the drop reached ANY rung of the ladder — a
-              // folder of untagged WAVs, or a set of cards whose clocks were all rejected
-              // (`recordingTime.ts`). Then nothing was positioned by a clock at all; the
-              // clips are in filename order (D-068), and saying otherwise invites the
-              // operator to read that order as a claim about when they recorded (V04-U5).
-              clipCount > 0 && legend.placed + legend.estimated === 0
-              ? t.presyncMetaNoClock
-              : t.presyncMeta}
-        </span>
-        <div className="timeline__zoom">
-          <button type="button" className="ghost" onClick={() => zoomBy(1 / BUTTON_FACTOR)} aria-label={t.zoomOut}>
-            −
-          </button>
-          <button type="button" className="ghost" onClick={() => zoomBy(BUTTON_FACTOR)} aria-label={t.zoomIn}>
-            +
-          </button>
-          <button type="button" className="ghost" onClick={fit} aria-label={t.zoomFitAria}>
-            {t.zoomFit}
-          </button>
-        </div>
-      </div>
-
-      {result?.warnings.map((w, i) => (
-        <p key={i} className="banner banner--warn">
-          <span>{warningText(t, w)}</span>
-        </p>
-      ))}
-
-      {/* The legend (V05-W3). Not "N files have no recording time" any more: the ladder
-          (D-067) means a drop divides into four different situations, and one number
-          covering all of them was what let 174 of the owner's files share one sentence.
-          Counts, in words, summing to every clip on screen. */}
-      {legend.placed + legend.estimated + legend.ordered + legend.offSession > 0 && (
-        <p className="timeline__note">{t.presyncLegend(legend)}</p>
-      )}
-      {/* …and the off-session files get their own line, which NAMES THE DATE. That is what
-          makes it actionable: the owner recognises «13.06.2023» as the June drone folder
-          instantly, and would recognise nothing at all in «14 filer». Nothing is removed —
-          D-062's per-file removal is the operator's, not the app's (D-071). */}
-      {outsideWindowDays.length > 0 && (
-        <p className="timeline__note timeline__note--offsession">
-          {t.presyncOffSession(outsideWindow.size, outsideWindowDays.map(t.presyncDay))}
-        </p>
-      )}
-
       <div className="timeline__frame">
         {/* The vertical safety net (V05-W3). Twelve devices at two lanes each is some 800 px
             of tracks, and this frame had `overflow: hidden` and no height — so the BODY grew
@@ -794,7 +770,25 @@ export function TimelineView({
             onPointerCancel={endPan}
           >
             <div className="track track--ruler">
-              <div className="track__gutter" />
+              {/* The zoom lives in the ruler row's gutter cell (V06-R2b, D-083) — the one
+                  cell in the whole frame that was empty, directly above the column the
+                  buttons are about, and on the row that already says what the horizontal
+                  axis means. It used to sit on a line above the frame, which is a line the
+                  room no longer has. Same three accessible names, so the muscle memory and
+                  the specs that click by name both survive. */}
+              <div className="track__gutter">
+                <div className="timeline__zoom">
+                  <button type="button" className="ghost" onClick={() => zoomBy(1 / BUTTON_FACTOR)} aria-label={t.zoomOut}>
+                    −
+                  </button>
+                  <button type="button" className="ghost" onClick={() => zoomBy(BUTTON_FACTOR)} aria-label={t.zoomIn}>
+                    +
+                  </button>
+                  <button type="button" className="ghost" onClick={fit} aria-label={t.zoomFitAria}>
+                    {t.zoomFit}
+                  </button>
+                </div>
+              </div>
               <div className="track__lanes" id={VIEWPORT_ID} ref={viewportRef}>
                 <Ruler view={view} label={t.rulerAria} onSeek={seek} />
               </div>
@@ -877,14 +871,88 @@ export function TimelineView({
         </div>
       </div>
 
-      {/* The transport is rendered HERE and drawn THERE (V06-R1, D-075): it is built from
-          `audioClips`, the memo that also feeds `engine.setClips`, so lifting the component
-          to App would mean a second place that can rebuild the audio schedule. A portal moves
-          the pixels without moving the ownership. Null `slotEl` only happens for the one
-          commit before App's callback ref has run, which is long before a result exists. */}
-      {result &&
-        slotEl !== null &&
-        createPortal(<Transport t={t} clips={audioClips} fps={fps} />, slotEl)}
+      {/* Everything this component says in WORDS is rendered HERE and drawn THERE (V06-R1
+          D-075, extended by V06-R2b D-083). The transport is built from `audioClips`, the
+          memo that also feeds `engine.setClips`; the legend is built from `legend`, the meta
+          sentence from `result`/`clipCount`/`legend`, and the off-session line from
+          `outsideWindow`/`outsideWindowDays`. Every one of those is a memo of this
+          component's, so lifting any of them to App would mean a second place that derives
+          the same thing from the same manifest. A portal moves the pixels without moving the
+          ownership.
+
+          After this the timeline element contains ONE child, `.timeline__frame`, and the
+          frame therefore starts at the top of the stage in every phase — which is what makes
+          the frame's y identical before and after a sync (asserted in `ett-rom.spec`). Null
+          `slotEl` only happens for the one commit before App's callback ref has run. */}
+      {slotEl !== null &&
+        createPortal(
+          <>
+            {result ? (
+              <Transport t={t} clips={audioClips} fps={fps} />
+            ) : (
+              <>
+                {/* The legend (V05-W3). Not "N files have no recording time" any more: the
+                    ladder (D-067) means a drop divides into four different situations, and
+                    one number covering all of them was what let 174 of the owner's files
+                    share one sentence. In the slot it is the counts alone and the whole
+                    sentence is its `title` — the four numbers ARE the claim, and 38 px does
+                    not hold four clauses beside a transport and a meta line (D-083). */}
+                {legend.placed + legend.estimated + legend.ordered + legend.offSession > 0 && (
+                  <p className="timeline__note" title={t.presyncLegend(legend)}>
+                    {t.presyncLegendShort(legend)}
+                  </p>
+                )}
+                {/* …and the off-session files get their own line, which NAMES THE DATE. That
+                    is what makes it actionable: the owner recognises «13.06.2023» as the
+                    June drone folder instantly, and would recognise nothing at all in «14
+                    filer» — so this one keeps its whole sentence, and ellipsises rather than
+                    being shortened. Nothing is removed: D-062's per-file removal is the
+                    operator's, not the app's (D-071). */}
+                {outsideWindowDays.length > 0 && (
+                  <p className="timeline__note timeline__note--offsession">
+                    {t.presyncOffSession(outsideWindow.size, outsideWindowDays.map(t.presyncDay))}
+                  </p>
+                )}
+              </>
+            )}
+            <div className="result__meta">
+              <span title={metaSentence}>{metaSentence}</span>
+            </div>
+          </>,
+          slotEl,
+        )}
+
+      {/* The result's own warnings (V06-R2b, D-083). They were banners stacked above the
+          frame — the exact shape D-082 took out of the room everywhere else — and they are a
+          count on the strip now, beside the problem chip, because "is anything wrong?" is one
+          question and the operator asks it in one place. Absent when there are none: a
+          permanent «0 advarsler» is a line read past on every clean run. */}
+      {warnings.length > 0 &&
+        stripStatusEl !== null &&
+        createPortal(<WarningsChip t={t} warnings={warnings} />, stripStatusEl)}
     </section>
+  );
+}
+
+/** The strip's warnings chip and the list behind it (V06-R2b, D-083) — R2a's popover shape
+ *  (D-078), unchanged: a `<summary>` that is already a control the strip wanted anyway, a
+ *  panel that OVERLAYS the room rather than taking space in it, and `usePopoverDismiss` for
+ *  the two behaviours `<details>` has no opinion about. */
+function WarningsChip({ t, warnings }: { t: Strings; warnings: readonly Warning[] }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  usePopoverDismiss(ref);
+  const title = t.warningsCount(warnings.length);
+
+  return (
+    <details className="popover popover--warnings" ref={ref}>
+      <summary className="chip badge--warn">{title}</summary>
+      <div className="popover__panel" role="group" aria-label={title}>
+        {warnings.map((w, i) => (
+          <p key={i} className="warnrow">
+            {warningText(t, w)}
+          </p>
+        ))}
+      </div>
+    </details>
   );
 }

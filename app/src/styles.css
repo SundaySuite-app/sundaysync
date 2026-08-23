@@ -103,6 +103,19 @@ body {
    it is exactly 0 px tall when nothing is in it — and because the inspector spans rows 2–4
    and row 3 is flexible, the inspector never contributes to that row's size. */
 .app {
+  /* The timeline's two vertical/horizontal constants live on the ROOM, not on the timeline
+     (V06-R2b, D-083): the gutter is a column of the room now — the device's home — and the
+     band, the slot and anything else that ever wants to align to that column has to be able
+     to read its width without reaching into a descendant. `--tl-gutter` 12.5rem → 14rem for
+     the second line's «3 filer · 1 t 42 min ●», `--tl-ruler-h` 22 → 26 px because the ruler
+     row now carries the zoom buttons in its gutter cell.
+
+     The lane height is NOT here, and must not be: it is `LANE_HEIGHT_PX` in
+     `src/timeline/hop.ts`, the one number `Track`, `clipBoxes` and the hop's ghosts all read.
+     A CSS variable for it would be a second statement of the row pitch, which is exactly the
+     failure the hop cannot survive. */
+  --tl-gutter: 14rem;
+  --tl-ruler-h: 26px;
   height: 100vh;
   width: 100vw;
   display: grid;
@@ -169,7 +182,12 @@ body {
    problemfil» are one sentence about one drop, and a whole window between them reads as two. */
 .strip__sources .popover--sources { flex: 0 1 auto; min-width: 0; }
 .strip__sources .popover--problems,
+.strip__sources .popover--warnings,
+.strip__sources .strip__status,
 .strip__sources .prewarm { flex: 0 0 auto; }
+/* The timeline's warnings chip lands here (V06-R2b, D-083). It is a portal target, so it is
+   empty — and a zero-width flex item — in every phase and every run that has no warnings. */
+.strip__status { display: inline-flex; align-items: center; }
 /* A sync is running: readable, but not a surface you can change mid-run — an override or a
    removal accepted now would silently belong to the NEXT run. Same rule the panel applied to
    its whole block (D-061), on the cluster that replaced it. */
@@ -322,9 +340,19 @@ body {
   color: var(--text2);
   min-width: 0;
 }
-/* The transport's portal target. Empty in every phase but `result`, and empty even there
-   until the audio engine is ready — the slot's height does not depend on it either way. */
-.slot__transport { display: flex; align-items: center; min-width: 0; flex: 0 1 auto; }
+/* The timeline's own portal target. It was the transport's alone in R1; since V06-R2b
+   (D-083) it also carries the pre-sync legend, the off-session line and the meta sentence —
+   everything `TimelineView` says in words rather than in boxes. Left to right: the transport
+   (or, before a sync, the legend), then the meta sentence; `.slot__chips` takes the right
+   with its own `margin-left: auto`. Empty in the phases that have nothing to say, and the
+   slot's height never depends on it either way. */
+.slot__transport {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
 /* The stale notice, moved out of the body (D-082). The banner's colour, none of its box: at
    38 px there is no room for a bordered block, and nothing has gone WRONG — the result simply
    describes sources that have moved on. */
@@ -511,6 +539,20 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   gap: 0.4rem;
 }
 .chip svg { flex-shrink: 0; }
+/* The result's warnings, as a chip on the strip (V06-R2b, D-083). Amber, like the banner it
+   replaced and like the clips it is usually about — the engine noticed something, nothing
+   failed. The one warning colour there is; `.banner--warn` keeps the box for the places that
+   still want a box. */
+.badge--warn {
+  background: var(--orange-bg);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: var(--orange);
+}
+.strip__sources .popover--warnings > summary:hover .chip,
+.strip__sources .popover--warnings > summary.chip:hover { border-color: var(--orange); }
+/* One sentence per warning, as sentences: the panel is the only place they are said in full,
+   so nothing here is truncated. */
+.warnrow { color: var(--text2); font-size: 0.875rem; line-height: 1.45; }
 
 /* ── Sources: the lists that live inside the popovers now (V06-R2a, D-077) ─────────────
    The panel is gone; its ROWS are not. Everything below is what the «Kilder», problem,
@@ -675,7 +717,25 @@ select:hover, input:hover { border-color: var(--accent-border); }
 .result { display: flex; flex-direction: column; gap: 1rem; }
 .result--stale { opacity: 0.55; }
 
-.result__meta { display: flex; align-items: center; gap: 1rem; color: var(--text3); font-size: 0.8125rem; }
+/* The sequence/pre-sync sentence. It sat on a line above the frame until V06-R2b (D-083) and
+   is the slot's MIDDLE now: one fact about the whole run, beside the transport that plays it.
+   It shrinks and ellipsises before the transport does, and carries its own text as `title`
+   so the ellipsis never costs the sentence. */
+.result__meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+  flex: 0 1 auto;
+  color: var(--text3);
+  font-size: 0.8125rem;
+}
+.result__meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Every timeline row is the same two-column grid, so the gutter, the ruler and
    the playhead overlay all line up on one shared edge without measuring anything. */
@@ -685,8 +745,7 @@ select:hover, input:hover { border-color: var(--accent-border); }
    default `min-height: auto` refuses to shrink below its content, which is exactly how a
    twelve-device drop used to push the sync button off the screen. */
 .timeline {
-  --tl-gutter: 12.5rem;
-  --tl-ruler-h: 22px;
+  /* `--tl-gutter`/`--tl-ruler-h` moved up to `.app` in V06-R2b (D-083). */
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -714,15 +773,51 @@ select:hover, input:hover { border-color: var(--accent-border); }
    (V04-U5). So there is nothing for the blanket to protect. */
 .timeline--busy { opacity: 0.55; }
 
-/* One quiet line above the frame — the pre-sync caveat that cannot live in a clip. */
-.timeline__note { color: var(--text3); font-size: 0.8125rem; }
+/* The pre-sync caveats that cannot live in a clip. They were two lines above the frame; since
+   V06-R2b (D-083) they are in the slot, on the left, where the transport stands after a sync
+   — the same corner of the room, answering the same question ("what am I looking at?") in the
+   phase that has an answer for it. */
+.timeline__note {
+  min-width: 0;
+  /* `0 0 auto`: the four counts ARE the claim, and a legend clipped to «204 plassert · 163…»
+     is a legend that has lost the very numbers it exists for. Measured — at 1024 with the
+     meta sentence beside it, a shrinkable legend was given 40 px of the 62 it needs. What
+     absorbs the squeeze instead is the meta sentence, which carries its own `title`. */
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text3);
+  font-size: 0.8125rem;
+}
 /* The off-session line names a date, and a named date is the one line here the operator may
    want to act on (D-071). Amber, matching the clips it is about; still a note, not a
    banner — nothing has gone wrong. */
-.timeline__note--offsession { color: var(--orange); }
+/* …and this one is a whole sentence rather than a row of counts, so it is the one note that
+   may shrink. */
+.timeline__note--offsession { flex: 0 1 auto; color: var(--orange); }
 
-.timeline__zoom { margin-left: auto; display: flex; gap: 0.15rem; }
-.timeline__zoom button { padding: 0.15rem 0.55rem; font-size: 0.8125rem; line-height: 1.4; }
+/* The zoom sits in the RULER ROW'S GUTTER CELL now (V06-R2b, D-083) — the one empty cell in
+   the frame, directly above the column it is about, on the row that already says what the
+   horizontal axis means. Right-aligned so it meets the lane column's left edge, which is
+   where the eye is when it reaches for it. 22 px buttons: the ruler row is 26 px, and this is
+   the tallest thing that fits it with a hairline to spare. */
+.timeline__zoom {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.timeline__zoom button {
+  height: 22px;
+  min-width: 22px;
+  padding: 0 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 
 .timeline__frame {
   background: var(--surface);
@@ -778,6 +873,14 @@ select:hover, input:hover { border-color: var(--accent-border); }
    ghost layer's `--tl-ruler-h` offset is unaffected.
    `z-index: 2` puts it over the clips (whose `.clip__chrome` sits at 1) and under
    `.timeline__overlay`, so the playhead still draws across the ruler as it always did. */
+/* …and the ruler's gutter is the one that is a ROW rather than two lines: it holds the zoom
+   and nothing else. */
+.track--ruler .track__gutter {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 0.5rem;
+}
 .track--ruler {
   height: var(--tl-ruler-h);
   position: sticky;
@@ -787,16 +890,67 @@ select:hover, input:hover { border-color: var(--accent-border); }
 }
 .track--scrollbar { height: 20px; padding-top: 8px; }
 
+/* ── The gutter is the device's home (V06-R2b, D-083) ──────────────────────────────────
+   Two lines, centred in whatever the track's height is: line one is WHO (icon, name, the
+   reference badge, mute/solo), line two is WHAT IT BROUGHT and WHERE IT STANDS (file count,
+   total length, the state dot).
+
+   No `min-height` here, and none on `.track__lane` either — deliberately. The row pitch is
+   `LANE_HEIGHT_PX` in `src/timeline/hop.ts` and `Track.tsx` writes it into both boxes as an
+   explicit height; a gutter that could push a lane taller than that constant would leave the
+   hop's arithmetic measuring a stack the DOM no longer has, and every clip below the first
+   device would fly to a row it is not in. Two lines at 13 px and 11 px are ~36 px of content
+   inside a 40 px lane, so the constant is what holds and nothing needs to grow. */
 .track__gutter {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
   overflow: hidden;
   padding: 0 0.75rem 0 1rem;
   font-size: 0.8125rem;
 }
+.track__ident {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
 .track__gutter svg { flex-shrink: 0; color: var(--text3); }
 .track__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Line two. Quieter than the name by a whole step — it is the row's footnote, not its
+   heading, and a device whose count shouted as loud as its name would make twelve rows read
+   as twenty-four. */
+.track__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  color: var(--text3);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* The dot: grey while the row's audio is still being analysed, BLUE once every file of it
+   is, green once the sync has placed them. The same three states a clip carries (D-080),
+   said once for the whole row — which is the only place with enough area to read at a
+   four-hundred-file wedding where a clip is three pixels wide.
+
+   Blue rather than the canvas's gold, on purpose (D-083): `badge--ref` is gold and sits ten
+   pixels to the left on the same line, so a gold dot would be the same colour making a
+   different claim about the same device. One token if that is ever vetoed. */
+.track__dot {
+  flex-shrink: 0;
+  margin-left: 0.15rem;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text4);
+}
+.track__dot--pending { background: var(--text4); }
+.track__dot--ready   { background: var(--blue); }
+.track__dot--placed  { background: var(--green); }
 
 .track__lanes { position: relative; overflow: hidden; min-width: 0; }
 
@@ -807,7 +961,10 @@ select:hover, input:hover { border-color: var(--accent-border); }
   background: var(--surface2);
 }
 .track__lane--empty { background: none; }
-.lane__empty { color: var(--text4); font-size: 0.75rem; padding-left: 0.5rem; line-height: 34px; }
+/* Mirrors `LANE_HEIGHT_PX` (D-083). Cosmetic rather than load-bearing — it centres one line
+   of text in the lane and nothing measures it — but it has to be changed with the constant or
+   the "no clips" line stops sitting on the lane's middle. */
+.lane__empty { color: var(--text4); font-size: 0.75rem; padding-left: 0.5rem; line-height: 40px; }
 
 .timeline__ruler {
   position: relative;
@@ -1390,7 +1547,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); }
 /* V06-R1 (D-075): the transport lives in the 38 px bottom slot, which is already a bar — so
    it stops being one of its own. No card, no padding, and NO WRAPPING: a second line here
    would be a second line the room does not have, so anything that does not fit ellipsises
-   (see `.transport__note`) rather than pushing the play button somewhere new. */
+   rather than pushing the play button somewhere new. */
 .transport {
   display: flex;
   align-items: center;
@@ -1430,15 +1587,8 @@ hr.sep { border: none; border-top: 1px solid var(--border); }
 .transport__volume { display: flex; align-items: center; gap: 0.4rem; color: var(--text3); }
 .transport__volume input[type="range"] { width: 7rem; accent-color: var(--accent); }
 
-/* Pushed to the right so the sentence reads as a caption on the whole bar rather than
-   as a label on the control next to it. */
-.transport__note {
-  margin-left: auto;
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* (`.transport__note` went in V06-R2b — the quality sentence is the bar's `title` now,
+   D-083. Nothing replaced it: the slot's middle is the meta sentence's.) */
 
 /* ── Per-device mute / solo (v0.3, D-055) ───────────────────────── */
 
