@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getPlaybackEngine } from "../audio/scheduler";
+import { mapEngineError } from "../errors";
 import type { Lang, Strings } from "../i18n";
 import { formatBytes } from "../i18n";
 import { getSettings, parseMinPsrInput, saveSettings } from "../settings";
@@ -52,6 +53,20 @@ function updateStatusText(t: Strings, u: UpdateStatus): string {
  * cache grows ~170 MB per audio-hour and is never cleared; now they can see the actual
  * number and act on it.
  */
+/**
+ * An engine rejection, in the operator's own language (D-030).
+ *
+ * Three of this panel's commands used to hand `String(e)` straight to the banner, which put
+ * a raw Rust `Display` string — `busy: sync in progress`, `failed to read …` — in front of a
+ * Norwegian user, in English, with no framing at all. Every other error path in the app goes
+ * through `mapEngineError`, and §7.5's honesty rule is satisfied by the mapping too: an
+ * unrecognised message keeps its raw text, inside a sentence that says what it is. Found in
+ * the V06 control sweep, on the D-046 activity guard refusing a cache clear mid-sync.
+ */
+function engineErrorText(e: unknown, t: Strings): string {
+  return mapEngineError(String(e), t).text;
+}
+
 export function SettingsPanel({
   t,
   onClose,
@@ -214,7 +229,7 @@ export function SettingsPanel({
       onNotice("ok", t.cacheCleared(formatBytes(freed)));
       refreshCache();
     } catch (e) {
-      onNotice("error", String(e));
+      onNotice("error", engineErrorText(e, t));
     }
   };
 
@@ -244,7 +259,7 @@ export function SettingsPanel({
       if (ev.entries > 0) onNotice("ok", t.cacheEvicted(ev.entries, formatBytes(ev.bytes)));
       refreshCache();
     } catch (e) {
-      onNotice("error", String(e));
+      onNotice("error", engineErrorText(e, t));
     }
   };
 
@@ -258,7 +273,7 @@ export function SettingsPanel({
       await invoke("export_diagnostics", { path });
       onNotice("ok", t.diagnosticsSaved);
     } catch (e) {
-      onNotice("error", String(e));
+      onNotice("error", engineErrorText(e, t));
     }
   };
 
