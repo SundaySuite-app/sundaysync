@@ -1,5 +1,18 @@
 # Changelog
 
+## Ikke utgitt
+
+Etter en kontroll-for-kontroll gjennomgang av «Ett rom» (hver eneste knapp, i hver fase, trykket
+og etterprøvd — `app/e2e/control-sweep.spec.ts`):
+
+- **Tastaturet mister ikke plassen sin når du lukker en dialog ved å trykke utenfor den.** ✕ og
+  Escape ga fokus tilbake til knappen du åpnet fra; et trykk på bakgrunnen la det på toppen av
+  dokumentet i stedet. Én av tre utganger som stille sendte tastaturbrukeren tilbake til start.
+- **Feil fra Innstillinger sies på norsk.** «Tøm buffer», størrelsestaket og «Eksporter
+  diagnostikk» viste motorens egen engelske feiltekst rå — `busy: sync in progress` — mens alt
+  annet i appen oversetter den. Nå går de tre gjennom samme oversetting som resten (D-030), og
+  en ukjent melding beholder fortsatt sin egen tekst inni setninga.
+
 ## v0.6.0-beta.1
 
 **v0.6 — «Ett rom».** SundaySync var en side. Du slapp inn en mappe og slippfeltet krympet; du
