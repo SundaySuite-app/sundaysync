@@ -1,6 +1,6 @@
 # Changelog
 
-## Ikke utgitt
+## v0.6.0-beta.2
 
 Etter en kontroll-for-kontroll gjennomgang av «Ett rom» (hver eneste knapp, i hver fase, trykket
 og etterprøvd — `app/e2e/control-sweep.spec.ts`):
