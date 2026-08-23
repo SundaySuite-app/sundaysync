@@ -80,17 +80,30 @@ test.describe("export", () => {
     const bg = await banner.evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(bg, `banner background ${bg}`).not.toMatch(/rgba\([^)]*,\s*0?\.\d+\s*\)/);
 
-    // …and a clip UNDER it is still clickable. `.clip` boxes exist from the sources phase on,
-    // so this is a press on the real thing, not on a stand-in.
-    const clip = page.locator(".clip").first();
-    const box = (await clip.boundingBox())!;
-    const over = (await banner.boundingBox())!;
-    // The finding only exists if the two really do overlap.
-    expect(box.y).toBeLessThan(over.y + over.height);
-    await clip.click();
+    // Inert: a hit test in the middle of the banner resolves to whatever is UNDERNEATH it.
+    // Asked of the browser directly rather than inferred from two boxes overlapping — how
+    // many lines this sentence wraps to, and therefore whether it reaches the first device
+    // row, is a function of the platform's font metrics; whether it eats a press is not.
+    const overBody = await banner.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return at !== null && el.contains(at);
+    });
+    expect(overBody).toBe(false);
+
+    // …and the ✕ is the one thing in there that IS a control: it hit-tests to itself, and it
+    // works.
+    const overDismiss = await page.locator(".banner__dismiss").evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return at !== null && el.contains(at);
+    });
+    expect(overDismiss).toBe(true);
+
+    // The journey the finding was found by: mark a clip with the receipt still on screen.
+    await page.locator(".clip").first().click();
     await expect(page.locator(".preview__name")).toBeVisible();
 
-    // The ✕ is the one thing in there that IS a control.
     await page.locator(".banner__dismiss").click();
     await expect(banner).toBeHidden();
   });
