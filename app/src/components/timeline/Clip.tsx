@@ -142,11 +142,24 @@ export const Clip = memo(function Clip({
   //   - `clip--seq`  — there is no start at all; the box is here because of its filename's
   //     place in its device's sequence (D-068).
   //   - `clip--offsession` — there IS a timestamp and it belongs to another day (D-071).
+  //
+  // V06-R0 (D-080) adds the one mark that is NOT about the position: `clip--analysed`, this
+  // file's own analysis has landed. Grey while it waits, blue when its bytes exist, green
+  // when the engine has placed it — and it is a pre-sync mark only, because after a sync
+  // every drawn clip has been analysed and a colour every box wears is not a colour.
   const estimated = timeSource !== null && timeSource !== "container" && timeSource !== "none";
   const sequential = timeSource === "none";
+  // `placement === null &&` is not redundant with the map being emptied on `sync/done`: it
+  // is what makes the two claims mutually exclusive BY CONSTRUCTION rather than by
+  // agreement between two files. `state.ts` clears `prewarm` and sets the result phase in
+  // the same dispatch, so the classes go `clip clip--pre clip--analysed` → `clip` in one
+  // commit and there is no frame where a box is both blue and placed; this condition means
+  // that stays true even if the map ever survived the transition.
+  const analysed = placement === null && analysisStatus === "ready";
   const className = [
     "clip",
     placement === null ? "clip--pre" : "",
+    analysed ? "clip--analysed" : "",
     hasWarnings ? "clip--warn" : "",
     durationUnknown ? "clip--nodur" : "",
     estimated ? "clip--est" : "",
@@ -173,12 +186,17 @@ export const Clip = memo(function Clip({
     : sourceWords !== null
       ? `${name}, ${t.presyncStart} ${formatTimecode(span.startMs)} — ${t.presyncStartEstimated}: ${sourceWords}`
       : `${name}, ${t.presyncStart} ${formatTimecode(span.startMs)}`;
+  const presyncName = offSession ? `${presyncLabel} — ${t.presyncOffSessionClip}` : presyncLabel;
   const baseLabel =
     placement !== null
       ? `${name}, ${t.offsetLabel} ${placement.offset_seconds.toFixed(1)} s`
-      : offSession
-        ? `${presyncLabel} — ${t.presyncOffSessionClip}`
-        : presyncLabel;
+      : // D-080: the blue is a claim, and a claim made only in pixels is a claim half the
+        // room cannot hear. Appended rather than replacing anything — where the start came
+        // from and whether it is off-session are still the more important half of the
+        // sentence, and this is the last word before the length note.
+        analysed
+        ? `${presyncName} — ${t.presyncAnalysed}`
+        : presyncName;
 
   return (
     <button

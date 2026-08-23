@@ -3544,3 +3544,103 @@ A 400-clip drop, at the zoom the operator lands on: a bounded call count in the 
 events of panning, zero canvases and zero rebuild controls. Zoomed in far enough for
 waveforms to mean something: reads **do** happen — the threshold defers work, it does not
 refuse it forever — and the peak is still capped at six.
+
+## D-080 — V06-R0: blue is a semantic pair, and "analysed" is one class
+
+**The question the operator actually asks a card dump is "how far has this got?", and until
+now the app answered it in a place they were not looking.** The background pre-analysis
+(D-059/D-062) already reports per file, and a clip already changed when its file landed — its
+waveform appeared. But a waveform is only visible to someone who is zoomed in far enough for
+bars to mean anything, on the one clip they happen to be looking at. At the zoom a
+wedding-sized drop is actually read at, a clip is three pixels wide: no waveform, no room for
+a word, and no way to see the progress of the pass across four hundred files at once.
+
+So the state moves into the one channel that survives three pixels: colour. **Grey = waiting,
+blue = its own analysis is ready, green = the engine has placed it.**
+
+### The token is a PAIR, like the other three
+
+`--blue: #4f8ef7` and `--blue-bg: rgba(79, 142, 247, 0.1)` join `--green`/`--orange`/`--red`
+in the `:root` block, in the same shape they have. The wash is unused today; it exists because
+the next thing that has to say "analysed" quietly — a legend swatch, a row tint — must not
+invent a second blue, which is exactly how a palette stops being one.
+
+The hex is ≈ `oklch(0.64 0.17 262)` and is chosen against the three colours it has to live
+beside, not picked for being blue:
+
+- against `--surface3` (`#1e2a42`), the neutral pre-sync slate it replaces: far apart in
+  **lightness**, which is the channel a 3 px box still carries;
+- against `--green` (`#22c55e`), which is the claim it must never be mistaken for: far apart
+  in **hue**, and deliberately not a paler or bluer green — "on the way to placed" must not
+  look like a weak version of "placed";
+- against the Sunday gold (`--accent`, hue ≈ 85): near its complement, so a timeline full of
+  blue clips sits *beside* the accent rather than competing with it for attention.
+
+### One class, and it is only ever pre-sync
+
+`clip--analysed` is added when `placement === null && analysisStatus === "ready"`. The
+`placement === null` half is not redundant with `state.ts` emptying the `prewarm` map on
+`sync/done` — it makes the two claims mutually exclusive **by construction** rather than by
+agreement between two files. After a sync every drawn clip has been analysed, and a colour
+every box wears is not a colour.
+
+### Who owns which part of the box
+
+A clip can wear a provenance mark at the same time: `clip--est` (the start is an estimate,
+D-067), `clip--seq` (there is no start at all, D-068), `clip--offsession` (there is one and it
+belongs to another day, D-071). Those answer a different question — *where the position came
+from* — so the two vocabularies divide the box rather than overwrite each other:
+
+- **the edge is the provenance's.** `.clip--analysed`'s `border-color` is left at one class of
+  weight and stated *before* all three, so each of them wins it on source order. An
+  off-session clip whose audio is analysed is a blue box with the amber dashed edge it had
+  before; both claims are still on screen.
+- **the fill and the ink are the analysis's**, and that needed `.clip--pre.clip--analysed`
+  rather than source order. `.clip--seq` sets a fainter `background` **and** `color` of its
+  own, so ordering alone left a clockless clip grey however far its analysis had got —
+  silently excluding exactly the drops D-068 exists for, a card whose files carry no recording
+  time at all, which is where "how far has this got?" is asked hardest. The compound selector
+  is a statement of fact (the class only ever appears alongside `clip--pre`), not a
+  specificity trick. It is asserted in `e2e/prewarm.spec.ts`, because a rule that lost to a
+  later one is invisible to every test that only looks at class names.
+
+The ink is not decoration. `drawWaveform` reads the canvas's computed `color` at draw time
+(D-053), so it is what the waveform's bars are painted in: `--text3` on the blue wash measures
+about 1.3:1 — a grey smear on blue, with a filename to match.
+
+### It is said in words too
+
+`presyncAnalysed` («lyd analysert» / "audio analysed") is appended to the clip's accessible
+name in that state. A claim the app makes only in colour is a claim half the room cannot hear,
+and §9.4's rule about the clip's name has held since the first outcome dialog. It is appended
+rather than replacing anything: where the start came from, and whether the file is
+off-session, are still the more important half of the sentence.
+
+### No flash on the way to green
+
+`sync/done` empties `prewarm` **and** enters the result phase in one dispatch, so a clip's
+classes go `clip clip--pre clip--analysed` → `clip` in a single commit; there is no render in
+between where a box could be blue and placed at once, and the hop (D-063) starts from the
+already-green box. The one place a departing clip's blue is not carried across is the fade
+ghost `useHop.ts` draws for a file the outcome did **not** place: it is built as
+`clip clip--pre` and therefore fades from slate. Left alone deliberately — it is a decorative,
+`aria-hidden` copy of a box that is leaving, and 260 ms of the wrong slate is a smaller lie
+than a blue ghost implying the file is still in the run.
+
+### The ink follows the class — measured, not assumed
+
+The risk worth checking was a cached canvas: bars drawn in slate before the event, still slate
+on a blue box after it. It does not happen, and the reason is a seam that already existed.
+`App.tsx` drops the store's memo for the file (`invalidateWaveform`) **before** dispatching
+`prewarm/file`, so the clip's `pending → ready` re-read returns a fresh `WaveformMeta`
+identity, the draw effect re-runs, and `getComputedStyle` is read after React has committed
+the new class. Measured on the hardest path — analysis already on disk, so the canvas was
+already painted while the pass still reported `pending`: the brightest painted pixel went from
+`rgb(73, 87, 120)` to `rgb(220, 234, 255)`. No extra dependency was added to the draw effect;
+adding one would have hidden the fact that the invalidation is what makes this work.
+
+### What "distinguishable at 3 px" was checked against
+
+The 402-clip, six-device fixture at «Tilpass» zoom (3 px clips, 838 px of viewport across
+9.5 hours), with a progressive front: the first 45 % of each device's clips reported. Grey,
+blue and green are separable at that width by lightness alone; the proof image is on the PR.

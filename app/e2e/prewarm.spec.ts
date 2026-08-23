@@ -7,6 +7,7 @@ import {
   fn,
   rejectControlled,
   resolveControlled,
+  presyncScanManifest,
   scanManifest,
   SETTLED_SETTINGS,
   syncOutcome,
@@ -371,6 +372,173 @@ test.describe("waveforms arrive one file at a time", () => {
     await expect(
       clip(page, CAM_A).getByRole("button", { name: en.waveformRegenerate }),
     ).toBeVisible();
+  });
+});
+
+// ── Blue = analysed (V06-R0, D-080) ─────────────────────────────────────────────────────
+//
+// The waveform appearing already said "this file is ready" — to anyone looking at THAT
+// clip, zoomed in far enough for a waveform to be more than a smear. At the zoom a card
+// dump is actually read at, a 3 px box has no waveform to notice and no room for a word,
+// and the operator's question is about the whole drop rather than about one file: how far
+// has this got? Grey → blue → green answers it at any zoom and from across the room.
+//
+// What these two prove is that the mark is per-FILE (the whole reason `prewarm:file` is a
+// per-file event) and that it is not colour-only.
+test.describe("a clip goes blue when its own analysis lands", () => {
+  test("a clip turns blue the moment its own file is reported", async ({ page }) => {
+    await reachSources(page, {
+      ...prewarmHeld(),
+      run_sync: syncOutcome(),
+      waveform_meta: waveformMetaCacheMissingThenOk(),
+      waveform_level: waveformLevelOk(),
+    });
+    await waitForPending(page, "prewarm_analysis");
+
+    // Nothing has been reported yet: every box is the neutral pre-sync slate.
+    await expect(clip(page, CAM_A)).toHaveClass(/clip--pre/);
+    await expect(clip(page, CAM_A)).not.toHaveClass(/clip--analysed/);
+    await expect(clip(page, WAV)).not.toHaveClass(/clip--analysed/);
+
+    await emit(page, "prewarm:file", { file: CAM_A, ok: true });
+
+    // One file, one clip. The other is still grey — a pass that turned the whole timeline
+    // blue at the end would be the "all at once" behaviour D-062 replaced.
+    await expect(clip(page, CAM_A)).toHaveClass(/clip--analysed/);
+    await expect(clip(page, CAM_A)).toHaveClass(/clip--pre/);
+    await expect(clip(page, WAV)).not.toHaveClass(/clip--analysed/);
+
+    // A file that would not decode wrote nothing, so there is nothing to be blue about —
+    // §7.2's "a bad file is a value": it goes back to the ordinary cache-missing state
+    // (proved above), and it must not pick up the mark on the way.
+    await emit(page, "prewarm:file", { file: WAV, ok: false });
+    await expect(clip(page, WAV).getByRole("button", { name: en.waveformRegenerate })).toBeVisible();
+    await expect(clip(page, WAV)).not.toHaveClass(/clip--analysed/);
+    await expect(clip(page, CAM_A)).toHaveClass(/clip--analysed/);
+
+    // And the moment the engine has placed them, blue has nothing left to say: every drawn
+    // clip has been analysed, and a colour every box wears is not a colour. `sync/done`
+    // empties the prewarm map and enters the result phase in ONE dispatch, so this is the
+    // same commit that turns the boxes green — never a frame of one on the way to the
+    // other.
+    await page.getByRole("button", { name: en.syncButton }).click();
+    await waitForResult(page);
+    await expect(page.locator(".clip--analysed")).toHaveCount(0);
+    await expect(page.locator(".clip--pre")).toHaveCount(0);
+  });
+
+  test("the blue is in the accessible name too, not only in the pixels", async ({ page }) => {
+    // §9.4's rule about the clip's name: a claim the app makes in colour is a claim it owes
+    // in words. Appended to the pre-sync sentence rather than replacing it — where the
+    // start came from is still the more important half.
+    await reachSources(page, {
+      ...prewarmHeld(),
+      waveform_meta: waveformMetaCacheMissingThenOk(),
+      waveform_level: waveformLevelOk(),
+    });
+    await waitForPending(page, "prewarm_analysis");
+
+    // `scanManifest()`'s files carry no `creation_time`, so both clips are placed by
+    // filename order and say so (D-068).
+    const bare = `C0001.MP4, ${en.presyncSourceNone}`;
+    await expect(clip(page, CAM_A)).toHaveAttribute("aria-label", bare);
+
+    await emit(page, "prewarm:file", { file: CAM_A, ok: true });
+
+    await expect(clip(page, CAM_A)).toHaveAttribute(
+      "aria-label",
+      `${bare} — ${en.presyncAnalysed}`,
+    );
+    await expect(clip(page, WAV)).toHaveAttribute(
+      "aria-label",
+      `ZOOM0001.WAV, ${en.presyncSourceNone}`,
+    );
+  });
+});
+
+/** The known-good pre-sync drop (`presyncScanManifest`: two cameras with real container
+ *  stamps ten minutes apart and a recorder WAV with none — so `clip--seq`, D-068) plus one
+ *  stray file stamped a day that is not this session's (`clip--offsession`, D-071). Between
+ *  them the three files wear every provenance mark a pre-sync clip can wear. */
+const PLAIN = "/Users/e2e/shoot/CamA/C0001.MP4";
+const NOCLOCK = "/Users/e2e/shoot/ZOOM0001.WAV";
+const STRAY = "/Users/e2e/shoot/CamC/C0003.MP4";
+
+function provenanceManifest(): Record<string, unknown> {
+  const base = presyncScanManifest();
+  return {
+    ...base,
+    devices: [
+      ...(base.devices as Record<string, unknown>[]),
+      { id: "cam-c", label: "Camera C", kind: "video", files: [STRAY] },
+    ],
+    files: [
+      ...(base.files as Record<string, unknown>[]),
+      {
+        file: STRAY,
+        device: "cam-c",
+        duration_seconds: 1800,
+        format_name: "mov,mp4",
+        audio: { codec: "aac", sample_rate: 48000, channels: 2 },
+        video: { codec: "h264", width: 1920, height: 1080, fps: "25/1" },
+        creation_time: "1970-01-01T00:00:00.000Z",
+      },
+    ],
+  };
+}
+
+async function boxStyle(page: Page, file: string) {
+  return page.evaluate((f) => {
+    const s = getComputedStyle(document.querySelector(`.clip[data-file="${f}"]`)!);
+    return {
+      background: s.backgroundColor,
+      color: s.color,
+      borderColor: s.borderTopColor,
+      borderStyle: s.borderTopStyle,
+      borderLeftWidth: s.borderLeftWidth,
+    };
+  }, file);
+}
+
+test.describe("the blue and the provenance marks divide the box between them", () => {
+  test("the fill and the ink turn blue; the edge keeps saying where the position came from", async ({
+    page,
+  }) => {
+    // The bug this exists for: `clip--seq` and `clip--offsession` set a fill and an ink of
+    // their own, so a rule that relied on source order alone left a clip with NO recording
+    // time grey however far its analysis had got — silently excluding the very drops D-068
+    // is about, and (worse) leaving `--text3` bars on a blue box everywhere it did apply.
+    // The ink is what `drawWaveform` paints the waveform in, so this is legibility, not
+    // decoration.
+    await reachSources(page, {
+      ...prewarmHeld(),
+      scan_inputs: provenanceManifest(),
+      waveform_meta: waveformMetaCacheMissingThenOk(),
+      waveform_level: waveformLevelOk(),
+    });
+    await waitForPending(page, "prewarm_analysis");
+    await expect(clip(page, NOCLOCK)).toHaveClass(/clip--seq/);
+    await expect(clip(page, STRAY)).toHaveClass(/clip--offsession/);
+
+    const strayBefore = await boxStyle(page, STRAY);
+    for (const f of [PLAIN, NOCLOCK, STRAY]) await emit(page, "prewarm:file", { file: f, ok: true });
+    await expect(clip(page, NOCLOCK)).toHaveClass(/clip--analysed/);
+
+    const BLUE_WASH = "rgba(79, 142, 247, 0.32)";
+    const BLUE_INK = "rgb(219, 231, 255)";
+    for (const f of [PLAIN, NOCLOCK, STRAY]) {
+      const s = await boxStyle(page, f);
+      expect(s.background, `${f} fill`).toBe(BLUE_WASH);
+      expect(s.color, `${f} ink`).toBe(BLUE_INK);
+    }
+
+    // …and every edge still says exactly what it said before the analysis landed: the
+    // stray file's amber dashed border (D-071) and the clockless one's thickened leading
+    // edge (D-068) are claims about the POSITION, which nothing here has changed.
+    const stray = await boxStyle(page, STRAY);
+    expect(stray.borderColor).toBe(strayBefore.borderColor);
+    expect(stray.borderStyle).toBe("dashed");
+    expect((await boxStyle(page, NOCLOCK)).borderLeftWidth).toBe("3px");
   });
 });
 
