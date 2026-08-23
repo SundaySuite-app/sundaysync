@@ -297,7 +297,12 @@ test.describe("the clips hop into place when the sync lands", () => {
       await expect(page.locator(`.clip[data-file="${CAM_B}"]`)).toHaveCount(0);
       await expect(page.locator(".clip--ghost")).toHaveCount(0);
       expect((await seen(page)).ghosts).toBe(0);
-      // It reappears where a file that would not sync belongs: the shelf.
+      // It reappears where a file that would not sync belongs: the shelf — which since
+      // V06-R2a (D-079) hangs off the strip's problem chip rather than under the timeline.
+      await page
+        .getByRole("region", { name: en.sourcesTitle })
+        .locator(".popover--problems > summary")
+        .click();
       await expect(page.getByText(en.unsyncedTitle)).toBeVisible();
     });
   });
@@ -447,7 +452,13 @@ test.describe("the clips hop into place when the sync lands", () => {
 
     const ghost = page.locator(`.clip--ghost[data-file="${CAM_B}"]`);
     await expect(ghost).toBeAttached();
-    expect(await scroller.evaluate((el) => el.scrollTop)).toBe(scrolled);
+    // Still genuinely scrolled — otherwise everything below is vacuous. Not the SAME number
+    // any more, and honestly so: V06-R2a took the unsynced shelf out from under the timeline
+    // (D-079) and the pre-sync legend goes when the result lands, so the frame is taller in
+    // the result phase and the browser clamps a scroll that was at the old maximum. What this
+    // test is about survives that untouched, because `inColumn` measures against
+    // `.timeline__body` — which moves WITH the scroll — rather than against the viewport.
+    expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
     const after = await inColumn(ghost);
     // A ghost layer that did not scroll with the tracks would be off by `scrollTop`, and
     // every other hop assertion in this file would still pass, because they all run at

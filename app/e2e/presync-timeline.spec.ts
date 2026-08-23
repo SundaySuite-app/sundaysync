@@ -223,12 +223,16 @@ test.describe("clips appear on the timeline before any sync", () => {
     // The panel and the timeline are two views of ONE decision (D-027/D-028) — if the
     // override overlay only reached the list, they would disagree in front of the user.
     await reachSources(page);
-    const sources = page.getByRole("region", { name: en.sourcesTitle });
 
     await expect(page.getByRole("group", { name: en.trackAria("Camera B") })).toBeVisible();
-    await sources.getByLabel(`${en.moveToDevice}: C0002.MP4`).selectOption("cam-a");
+    // V06-R2a (D-077 #10): the reassign `<select>` is the inspector's, so the clip is marked
+    // first. The claim is unchanged — the overlay must reach the timeline, not only a list —
+    // and this is now the operator's actual gesture: point at the clip, then move it.
+    await page.locator(`.clip[data-file="${CAM_B}"]`).click();
+    await expect(page.locator(".preview__name")).toHaveText("C0002.MP4");
+    await page.locator(".inspector").getByLabel(`${en.moveToDevice}: C0002.MP4`).selectOption("cam-a");
 
-    // Camera B is empty now, so its track is gone — the same rule the panel applies —
+    // Camera B is empty now, so its track is gone — the same rule the groups apply —
     // and its clip has moved onto Camera A's track.
     await expect(page.getByRole("group", { name: en.trackAria("Camera B") })).toBeHidden();
     const camA = page.getByRole("group", { name: en.trackAria("Camera A") });

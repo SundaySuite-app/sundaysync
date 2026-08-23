@@ -31,10 +31,14 @@ import { PreviewPanel } from "./components/timeline/PreviewPanel";
 import { TimelineView } from "./components/timeline/TimelineView";
 import { HOP_SAFETY_MS, motionAllowed } from "./components/timeline/useHop";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { SourcesPanel } from "./components/SourcesPanel";
 import { Band } from "./components/shell/Band";
 import { BottomSlot } from "./components/shell/BottomSlot";
 import { Inspector } from "./components/shell/Inspector";
+import { InspectorActions } from "./components/shell/InspectorActions";
+import { ProblemsPopover } from "./components/shell/ProblemsPopover";
+import { SlotChips } from "./components/shell/SlotChips";
+import { SourcesPopover } from "./components/shell/SourcesPopover";
+import { problemFiles, sourceCounts } from "./components/shell/sourcesModel";
 import { TopStrip } from "./components/shell/TopStrip";
 
 import { mapEngineError } from "./errors";
@@ -538,28 +542,82 @@ export function App() {
   }, [phase.name]);
 
   /**
-   * The strip's one sentence (V06-R1, D-081).
+   * The strip's one sentence (V06-R1, D-081) — and, since V06-R2a, the «Kilder» disclosure's
+   * own summary line (D-077 #4).
    *
-   * The same two numbers the bridge panel below puts in its chips, counted the same way —
-   * after the exclusion filter and under the override overlay — because a strip that
-   * disagreed with the panel about how many files are in the run would be the loudest
-   * possible bug in a 44 px line. Result adds what the run produced: frame rate and length.
+   * Counted by `sourceCounts`, the same pure function the popover's groups are built from, so
+   * the line and the list it opens cannot disagree about how many files are in the run — which
+   * in a 44 px strip would be the loudest possible bug. After the exclusion filter and under
+   * the override overlay, as the panel's chips always were. Result adds what the run produced:
+   * frame rate and length.
    */
   const stripSummary = useMemo(() => {
     if (manifest === null || phase.name === "empty" || phase.name === "scanning") return null;
-    const gone = new Set(state.excluded);
-    const devices = new Set<string>();
-    let files = 0;
-    for (const entry of manifest.files) {
-      if (gone.has(entry.file)) continue;
-      files += 1;
-      devices.add(state.overrides[entry.file] ?? entry.device);
-    }
-    const counts = `${t.fileCount(files)} · ${t.deviceCount(devices.size)}`;
+    const { files, devices } = sourceCounts(manifest, state.overrides, excludedSet);
+    const counts = `${t.fileCount(files)} · ${t.deviceCount(devices)}`;
     if (outcome === null) return counts;
     const { fps, duration_seconds } = outcome.result.sequence;
     return `${counts} · ${t.sequenceMeta(fps, formatDuration(duration_seconds))}`;
-  }, [manifest, phase.name, state.excluded, state.overrides, outcome, t]);
+  }, [manifest, phase.name, excludedSet, state.overrides, outcome, t]);
+
+  // ---- The strip's sources cluster (V06-R2a, D-077) --------------------------------------
+  //
+  // `region(sourcesTitle)` is the handle ten specs and every operator's muscle memory reach
+  // for. It used to name a 40 %-tall panel under the timeline; it names a cluster on the strip
+  // now — the summary popover, the problem chip and the pre-analysis tick — and it resolves in
+  // exactly the phases it always did.
+  //
+  // `busy` is the same rule the panel applied (D-061), applied to the same surface: while a
+  // sync runs, everything in here is READABLE and none of it is a decision, because an
+  // override or a removal accepted now would silently belong to the NEXT run.
+  const busy = phase.name === "syncing";
+  /** What the engine refused to place, minus what the operator has already taken out. Lifted
+   *  out of `TimelineView` with the shelf itself (D-079). */
+  const shelved = useMemo(
+    () => (outcome ? outcome.result.unsynced.filter((u) => !excludedSet.has(u.file)) : []),
+    [outcome, excludedSet],
+  );
+  const stripSources =
+    manifest !== null && stripSummary !== null ? (
+      <div
+        className={`strip__sources${busy ? " strip__sources--busy" : ""}`}
+        role="region"
+        aria-label={t.sourcesTitle}
+        aria-busy={busy || undefined}
+      >
+        <SourcesPopover
+          t={t}
+          manifest={manifest}
+          inputs={phase.name === "empty" || phase.name === "scanning" ? [] : phase.inputs}
+          overrides={state.overrides}
+          excluded={excludedSet}
+          summary={stripSummary}
+          onSelect={setSelected}
+          onRemoveRoot={(path) => dispatch({ type: "inputs/removeRoot", path })}
+          onClearAll={() => dispatch({ type: "inputs/clear" })}
+        />
+        <ProblemsPopover
+          t={t}
+          scanned={problemFiles(manifest, excludedSet)}
+          shelved={shelved}
+          deviceIds={deviceIds}
+          onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+          onExclude={(file) => dispatch({ type: "files/exclude", file })}
+        />
+        {/* The background pre-analysis (D-059/D-062), as quietly as it deserves. Its OWN
+            element and class — never the ProgressBar, which belongs to things the operator is
+            waiting for; this is work the app started on its own and abandons without a word. */}
+        {state.prewarmProgress !== null && (
+          <p className="prewarm" aria-live="off">
+            {t.prewarmProgress(state.prewarmProgress.completed, state.prewarmProgress.total)}
+          </p>
+        )}
+      </div>
+    ) : (
+      // Always something in the strip's flexible slot, even with nothing to say: an element
+      // that appeared would re-flex the row and move the primary action under the hand.
+      <span className="strip__summary" />
+    );
 
   // ---- The strip's single primary action, per phase --------------------------------------
   const stripActions =
@@ -623,7 +681,7 @@ export function App() {
             />
           )
         }
-        summary={stripSummary}
+        sources={stripSources}
         actions={stripActions}
         onSettings={() => setShowSettings(true)}
       />
@@ -697,40 +755,13 @@ export function App() {
             prewarm={state.prewarm}
             outcome={outcome}
             stale={phase.name === "result" && phase.stale}
-            deviceIds={deviceIds}
             selected={selected}
             onSelect={setSelected}
             slotEl={slotEl}
             onHopSettled={onHopSettled}
-            onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
-            onExclude={(file) => dispatch({ type: "files/exclude", file })}
           />
         )}
 
-        {/* THE BRIDGE (V06-R1, D-087). The sources panel is unchanged and still mounted,
-            under the timeline, inside its own scroller — so every journey that goes through
-            it keeps working while the room is rebuilt around it. R2a is what takes it out;
-            nothing in R1 ships on its own. */}
-        {timelinePhase && manifest && (
-          <div className="stage__legacy">
-            <SourcesPanel
-              t={t}
-              manifest={manifest}
-              inputs={phase.name === "empty" || phase.name === "scanning" ? [] : phase.inputs}
-              overrides={state.overrides}
-              reference={state.reference}
-              excluded={excludedSet}
-              prewarmProgress={state.prewarmProgress}
-              busy={phase.name === "syncing"}
-              onRemoveRoot={(path) => dispatch({ type: "inputs/removeRoot", path })}
-              onClearAll={() => dispatch({ type: "inputs/clear" })}
-              onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
-              onReference={(file) => dispatch({ type: "reference/set", file })}
-              onExclude={(file) => dispatch({ type: "files/exclude", file })}
-              onRestore={(file) => dispatch({ type: "files/restore", file })}
-            />
-          </div>
-        )}
       </section>
 
       <Inspector>
@@ -741,26 +772,48 @@ export function App() {
           placement={selectedPlacement}
           minPsr={outcome?.result.parameters.min_psr ?? null}
           recorded={selected !== null ? (recorded?.get(selected) ?? null) : null}
-          // The same three-layer overlay `SourcesPanel` and `sourceSpans` apply
-          // (D-027/D-028): the operator's override wins, then the engine's placement, then
-          // the scan's own grouping. Post-sync the placement is deliberately NOT rewritten by
-          // an override — that is what makes the result stale — so without the overlay here
-          // the `<select>` would snap back the instant it was used.
-          device={
-            selected !== null
-              ? (state.overrides[selected] ??
-                selectedPlacement?.device ??
-                selectedEntry?.device ??
-                "")
-              : ""
+          actions={
+            selectedEntry !== null ? (
+              <InspectorActions
+                t={t}
+                file={selectedEntry.file}
+                // The same three-layer overlay `sourceSpans` and the popover's grouping apply
+                // (D-027/D-028): the operator's override wins, then the engine's placement,
+                // then the scan's own grouping. Post-sync the placement is deliberately NOT
+                // rewritten by an override — that is what makes the result stale — so without
+                // the overlay here the `<select>` would snap back the instant it was used.
+                device={
+                  state.overrides[selectedEntry.file] ??
+                  selectedPlacement?.device ??
+                  selectedEntry.device ??
+                  ""
+                }
+                deviceIds={deviceIds}
+                isReference={state.reference === selectedEntry.file}
+                busy={busy}
+                onReference={(file) => dispatch({ type: "reference/set", file })}
+                onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+                onExclude={(file) => dispatch({ type: "files/exclude", file })}
+              />
+            ) : null
           }
-          deviceIds={deviceIds}
-          busy={phase.name === "syncing"}
-          onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
         />
       </Inspector>
 
       <BottomSlot transportRef={setSlotEl}>
+        {/* What was taken out, what was never looked at, and who the reference will be —
+            three footnotes that used to sit at the bottom of a 40 %-tall list (V06-R2a,
+            D-077 #7/#13/#14). Each is absent when it has nothing to say. */}
+        {manifest !== null && phase.name !== "empty" && phase.name !== "scanning" && (
+          <SlotChips
+            t={t}
+            manifest={manifest}
+            excluded={excludedSet}
+            reference={state.reference}
+            showAutoReference={phase.name === "sources"}
+            onRestore={(file) => dispatch({ type: "files/restore", file })}
+          />
+        )}
         {/* The stale notice is a fact about the result, not an alarm about it — one quiet
             line at the bottom of the room rather than a banner between the operator and the
             timeline (D-082). Same words, same warn colour. */}

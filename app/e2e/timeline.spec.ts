@@ -530,6 +530,14 @@ test.describe("clip detail and the unsynced shelf", () => {
 
     const timeline = page.locator("section.timeline");
     await expect(timeline).not.toHaveClass(/result--stale/);
+    // V06-R2a (D-079): the shelf hangs off the strip's problem chip now, so the reason is one
+    // click away rather than under the timeline. Reported, not hidden — the chip carries the
+    // count, and this asserts both halves.
+    const problems = page
+      .getByRole("region", { name: en.sourcesTitle })
+      .locator(".popover--problems");
+    await expect(problems.locator("> summary")).toHaveText(en.problemCount(1));
+    await problems.locator("> summary").click();
     await expect(page.getByText(en.reasonDeviceOverlap)).toBeVisible();
 
     await page.locator(".shelf").getByLabel(`${en.moveToDevice}: C0001.MP4`).selectOption("rec");

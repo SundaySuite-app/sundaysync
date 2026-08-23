@@ -38,6 +38,10 @@ export const nb = {
   /** V06-R1 (D-081): topplinjas sammendrag. Enhet, ikke «kamera»/«lydopptaker» — stripa har
    *  plass til ett tall, og skillet mellom de to står i panelet under. */
   deviceCount: (n: number) => (n === 1 ? "1 enhet" : `${n} enheter`),
+  /** V06-R2a (D-077 #3): ikke lenger på skjermen. Stripa har plass til ÉN påstand, og den er
+   *  «N filer · M enheter»; skillet mellom kamera og lydopptaker står i ikonet foran hver
+   *  enhetsgruppe i «Kilder»-panelet og i tidslinjas egen gutter. Nøklene blir stående til
+   *  R3 rydder — en tekst som kanskje trengs igjen er billigere enn en som må skrives på nytt. */
   cameraCount: (n: number) => (n === 1 ? "1 kamera" : `${n} kameraer`),
   recorderCount: (n: number) => (n === 1 ? "1 lydopptaker" : `${n} lydopptakere`),
   problemCount: (n: number) => (n === 1 ? "1 problemfil" : `${n} problemfiler`),

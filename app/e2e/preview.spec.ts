@@ -269,10 +269,10 @@ test.describe("the preview panel", () => {
     await page.locator(`.clip[data-file="${CAM_B}"]`).click();
     await expect(preview(page).locator(".preview__name")).toHaveText("C0002.MP4");
 
-    await page
-      .getByRole("region", { name: en.sourcesTitle })
-      .getByLabel(`${en.removeFile}: C0002.MP4`)
-      .click();
+    // V06-R2a (D-077 #11): the ✕ is the inspector's own now — which makes this scenario more
+    // direct rather than less, because the control that removes the file is in the very panel
+    // whose emptying is the claim.
+    await page.locator(".inspector").getByLabel(`${en.removeFile}: C0002.MP4`).click();
 
     await expect(page.locator(`.clip[data-file="${CAM_B}"]`)).toHaveCount(0);
     await expect(preview(page)).toHaveText(en.previewEmpty);

@@ -3851,3 +3851,171 @@ rule the shell genuinely changed rather than deleting it (D-085) —
 R2a is what takes the panel out; R2b relocates the zoom controls and the pre-sync legend, which
 still sit above the frame in R1. **Nothing from R1 ships on its own** — the room is right and
 the room still contains a list nobody needs twice.
+
+**Closed by V06-R2a.** `SourcesPanel.tsx` and `.stage__legacy` are gone; the fourteen
+affordances are redistributed (D-077), the four popovers are the disclosure (D-078), the shelf
+moved with them (D-079). The bridge did its job: the two specs that drove the panel end to end
+(`sources.spec.ts`, `removal.spec.ts`) were rewritten as `kilder.spec.ts` and
+`inspector-actions.spec.ts` re-expressing every claim they made, seven more took one targeted
+edit each, and everything else in the suite stayed green untouched — which is exactly the
+"one failure, one cause" the duplication was bought for.
+
+## D-077 — V06-R2a: the sources panel is not moved, it is REDISTRIBUTED
+
+R1 built the room and left a list in it (D-087). R2a takes the list out, and the way it does
+that is the decision: `SourcesPanel.tsx` is deleted rather than relocated, and each of its
+fourteen affordances is placed where the question it answers is actually asked.
+
+The panel was one block that answered five unrelated questions at once — *what did I drop?
+what is wrong with it? what did I take out? what was never looked at? what do I want to change
+about this one file?* — and it answered all five at all times, at 40 % of the stage. A room
+where nothing moves cannot afford a permanent block whose height is a function of how many
+files were dropped. So:
+
+| # | Affordance | New home |
+|---|---|---|
+| 1 | root chips + ✕ (`inputs/removeRoot`) | «Kilder» popover on the strip |
+| 2 | «Tøm alt» (`inputs/clear`) | «Kilder» popover |
+| 3 | camera/recorder chips | **dropped** — see below |
+| 4 | file count | the strip's summary line, which IS the popover's `<summary>` |
+| 5 | problem chip | the strip's problem chip, which IS its popover's `<summary>` |
+| 6 | prewarm tick | the strip, beside the chip |
+| 7 | `autoReference` line | the bottom slot |
+| 8 | per-device groups + file rows | «Kilder» popover — rows are **buttons** that mark the clip |
+| 9 | ★ reference (`reference/set`) | the inspector's action row |
+| 10 | device `<select>` (`override/set`) | the inspector's action row |
+| 11 | ✕ remove (`files/exclude`) | the inspector's action row |
+| 12 | problem list + the result's unsynced shelf | the problem popover (D-079) |
+| 13 | removed list + «Angre» (`files/restore`) | the slot's «Fjernet (N)» chip |
+| 14 | skipped list | the slot's skipped chip |
+
+**Not one reducer action changed.** Every row of that table is the same dispatch from a
+different place on screen, which is what made this stage a redistribution rather than a
+rewrite — and what let the fourteen journeys be re-expressed (D-085) rather than re-invented.
+
+### The three that are more than a move
+
+**#8 — the file list survives, and it is the only thing here that had to be argued for.** The
+obvious reading of «Ett rom» is that the timeline already draws every file, so a list of the
+same files is duplication. It is not, for one measured reason: on the owner's 386-clip drop a
+clip is three pixels wide, and *finding one file by name* — the take somebody mentioned, the
+card that looks wrong — is something a row of 3 px boxes cannot do at all. The list is the
+app's only alphabetical index of what was dropped. What it gains is a purpose: a row is a
+`<button>` that marks the clip and closes the panel, so «find it by name» and «look at it» are
+one gesture instead of two lists that do not know about each other.
+
+**#9/#10/#11 — one of each control instead of one per row.** The star, the `<select>` and the
+✕ were on every row: 386 stars, 386 selects, 386 ✕s for a wedding. They are decisions about a
+*particular clip*, so they belong beside the clip the operator is looking at. The controls
+themselves are untouched — same classes, same accessible names, same `aria-pressed` on a star
+that toggles off, and the `<select>` keeps both its visible label and the `aria-label` that
+names the file (D-076). The consequence worth writing down: the ✕ now needs a marked clip, so
+a problem file — which has no clip to mark — keeps its own ✕ on its own row inside the problem
+popover. "Om de kan leses eller ikke" is still one wish.
+
+**#3 — «1 kamera · 1 lydopptaker» is gone, and nothing replaced it.** A 44 px line has room
+for one claim, and the one worth making is «N filer · M enheter». The split between a camera
+and a recorder is not lost: it is the icon in front of every device group in the «Kilder»
+panel and the icon in the timeline's own gutter, both of which are where the operator is
+already looking when the distinction matters. The i18n keys stay until R3 prunes them — a
+string that might be wanted again is cheaper than one that has to be written twice.
+
+### `sourcesModel.ts`
+
+The panel's four `useMemo`s became pure functions, because four different components now ask
+the same questions and a derivation that four components share cannot live inside one of them.
+The rules are verbatim (count after the exclusion filter, group under the override overlay,
+drop a device the overlay emptied) and they are finally *stated*: `sourcesModel.test.ts` pins
+the one that matters most and was asserted nowhere before — that `sourceCounts` and
+`groupFiles` agree, so the strip and the list it opens cannot disagree about how many files
+are in the run.
+
+### Busy
+
+The panel dimmed itself as a block while a sync ran (D-061). The strip's sources cluster does
+the same (`aria-busy`, `.strip__sources--busy`), and the inspector's three controls are
+`disabled` individually instead — the inspector is a picture, a table of facts and three
+controls stacked in one column, and greying the whole column would say the picture had become
+unavailable too, which it has not.
+
+### The one affordance that got narrower
+
+Post-sync, the ✕ needs a clip on the timeline or a row in the problem popover. A manifest file
+that the run neither placed nor shelved therefore has no control — it can be found in «Kilder»
+but not removed until the next scan. In practice the engine's answer covers every input file
+(placed or unsynced), so this is a shape the fixtures can build and the backend does not; it is
+written down here rather than guarded against, because the guard would be a fourth list.
+
+## D-078 — V06-R2a: the popovers are `<details>`, and they overlay the room
+
+Four disclosures, one shape:
+
+```html
+<details class="popover [popover--up] [popover--right]">
+  <summary class="…">…</summary>
+  <div class="popover__panel" role="group" aria-label="…">…</div>
+</details>
+```
+
+**`<details>` rather than a hand-rolled menu**, and the reason is arithmetic: four popovers,
+and not one of them re-implements keyboard behaviour. The summary is a tab stop, Enter and
+Space open it, the open state is announced, and the browser owns all of it. `usePopoverDismiss`
+adds exactly the two behaviours the element has no opinion about — Escape, and a pointer press
+outside — in about thirty lines, once.
+
+**The summary is always a control the strip or the slot wanted anyway.** The summary line, the
+problem chip, «Fjernet (N)», the skipped line: each of those was already on screen saying its
+own count, and making it the disclosure is what buys the whole list for zero extra pixels.
+
+**The panel is a LAYER, and that is the point.** The room is fixed (D-074); a list that took
+space when it opened would move the material the operator is reading, which is precisely what
+the bridge panel did for the whole of R1. `ett-rom.spec.ts` opens all four in turn, at both
+window sizes, and asserts that the strip, the slot, the inspector, the stage, the gutter and
+the timeline's frame are unmoved to the pixel.
+
+### `composedPath()`, not `contains()`
+
+The dismissal listener uses `event.composedPath().includes(el)`, and the difference is not
+academic. A native `<select>` — the shelf's device selector, inside the problem panel — draws
+its options in the browser's own popup layer rather than as descendants of the element, so a
+press on an option resolves as "outside" under `el.contains(event.target)` and the panel closes
+under the operator's hand, mid-choice, in the one interaction that panel exists to support.
+`composedPath()` is the event's real journey and includes the host. Pinned by a spec that
+opens the shelf's selector and chooses from it.
+
+`pointerdown` rather than `click`, and in the capture phase: the press is what the operator
+experiences as dismissing, and a `click` listener fires after `mouseup` — late enough that a
+press inside the panel that drifted outside before release would read as a dismissal of a
+gesture that never left.
+
+### Stacking
+
+`.app__header` and `.slot` are `position: relative; z-index: 40`. Without it the panels are
+painted *and hit-tested* behind the timeline: `.stage` is itself positioned, and a panel inside
+a static row loses the paint order to it no matter what `z-index` the panel carries. Found by a
+spec, not by eye — the «Angre» button was visible and unclickable, with the scrollbar thumb
+taking the press.
+
+## D-079 — V06-R2a: the unsynced shelf hangs off the problem chip, and the numbered clips wait
+
+`UnsyncedShelf` keeps its markup — `.shelf`, `.shelf__row`, the device `<select>`, the ✕ — and
+is rendered inside the strip's problem popover in the result phase. `TimelineView` no longer
+renders it, and gives up `deviceIds`/`onOverride`/`onExclude` with it: an unplaced clip has no
+position, so it never had any business being the timeline's to draw, and a room whose timeline
+fills the stage has no row under the timeline to put a red box in.
+
+**One chip counts both lists.** `ScanManifest.unsynced` (the scan could not read it) and
+`SyncResult.unsynced` (the engine would not place it) are different claims, but from where the
+operator stands they are one question — *is anything wrong?* — and a chip that answered it only
+for the pre-sync half would go quiet at the exact moment a run produced something to say. The
+popover names the list once, at the top; the shelf's own `<h2>` is suppressed there (`heading`)
+rather than saying «Ikke synkronisert» twice about one list.
+
+### What is deferred, and why it is named here
+
+The version of this the room actually wants is the unplaced clip **in its own device row**, at
+the timeline's left edge, numbered — so "which of my six cameras is the problem" is answered by
+looking at the row rather than by reading a list of filenames. That is a real piece of timeline
+work (a lane that is not a time axis, hit-testing, the hop's arithmetic) and it is priced as
+**R2c**. Until then the shelf is one click behind a chip that carries its own count, which is
+the same standing the problem list has had since D-061 — folded, never hidden.

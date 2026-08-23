@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Strings } from "../../i18n";
 import { formatDuration } from "../../i18n";
 import {
@@ -59,10 +59,7 @@ export function PreviewPanel({
   placement,
   minPsr,
   recorded,
-  device,
-  deviceIds,
-  busy,
-  onOverride,
+  actions,
 }: {
   t: Strings;
   /** The marked clip's path — the selection's whole domain since D-070. Null means nothing
@@ -79,18 +76,14 @@ export function PreviewPanel({
   /** Which rung of the recording-time ladder produced this file's start (D-067), and the
    *  start itself. Null when there is no manifest to derive it from. */
   recorded: RecordingTime | null;
-  /** The device this file belongs to *right now* — the override overlay on top of the
-   *  engine's (or the scan's) answer. Resolved by the caller, which is the one place that
-   *  can see all three layers; a panel that read only the placement would snap the
-   *  `<select>` back to the old device the instant the operator changed it. */
-  device: string;
-  deviceIds: string[];
-  /** A sync is running. Looking is still allowed in every phase (D-061) — the picture and
-   *  the facts stay readable — but the reassign `<select>` is a DECISION, and mid-run there
-   *  is nothing it could change about the run in flight. Same gate `SourcesPanel` puts on
-   *  its own controls. */
-  busy: boolean;
-  onOverride: (file: string, device: string) => void;
+  /**
+   * The action row (V06-R2a, D-077): star, move-to-device, remove — the three decisions the
+   * operator may take about the marked clip. A SLOT rather than props, because those three
+   * dispatch straight into the reducer and the panel has no business knowing the reducer
+   * exists; what the panel owns is where they sit, which is between what the file IS and what
+   * the engine made of it. Rendered only when there is a clip to act on.
+   */
+  actions?: ReactNode;
 }) {
   return (
     <section className="preview" aria-label={t.previewAria}>
@@ -99,15 +92,8 @@ export function PreviewPanel({
       ) : (
         <>
           <PreviewFrame t={t} entry={entry} />
-          <FileFacts
-            t={t}
-            entry={entry}
-            recorded={recorded}
-            device={device}
-            deviceIds={deviceIds}
-            busy={busy}
-            onOverride={onOverride}
-          />
+          <FileFacts t={t} entry={entry} recorded={recorded} />
+          {actions}
           <div className="preview__sync">
             {placement !== null && <SyncDetail t={t} clip={placement} minPsr={minPsr ?? 0} />}
           </div>
@@ -213,32 +199,23 @@ function PreviewFrame({ t, entry }: { t: Strings; entry: FileEntry }) {
  * What the file IS — every line of it already in the manifest, so this costs no IPC and is
  * there in every phase.
  *
- * The reassign `<select>` lives here now (D-027's escape hatch, moved out of the dialog with
- * everything else). It is the only control in the panel: the panel is for looking, and §9's
- * one thing the operator may change about a clip is which device it belongs to.
+ * Facts only, since V06-R2a: the reassign `<select>` moved four lines down into the action
+ * row (D-077 #10), where it stands beside the star and the ✕ as one of the three decisions
+ * rather than as a stray control at the bottom of a table of measurements.
  */
 function FileFacts({
   t,
   entry,
   recorded,
-  device,
-  deviceIds,
-  busy,
-  onOverride,
 }: {
   t: Strings;
   entry: FileEntry;
   recorded: RecordingTime | null;
-  device: string;
-  deviceIds: string[];
-  busy: boolean;
-  onOverride: (file: string, device: string) => void;
 }) {
-  const name = basename(entry.file);
   return (
     <div className="preview__info">
       <h3 className="preview__name" title={entry.file}>
-        {name}
+        {basename(entry.file)}
       </h3>
       <dl className="detail-grid">
         <dt>{t.previewDuration}</dt>
@@ -269,27 +246,6 @@ function FileFacts({
         <dt>{t.previewRecorded}</dt>
         <dd>{recordedWords(t, recorded)}</dd>
       </dl>
-      <label className="field field--inline">
-        <span>{t.moveToDevice}</span>
-        <select
-          value={device}
-          disabled={busy}
-          // The visible `<span>` names the control; the `aria-label` names it AND says which
-          // clip it is about (V06-R1, D-076). The shelf's own selector has carried that
-          // longer form since v0.4, and in a column that can show only one clip at a time the
-          // sentence «Flytt til enhet: C0001.MP4» is the whole difference between a label and
-          // a label with a subject. `aria-label` wins over the span for the accessible name,
-          // and a substring lookup for the short form still resolves it.
-          aria-label={`${t.moveToDevice}: ${name}`}
-          onChange={(e) => onOverride(entry.file, e.target.value)}
-        >
-          {deviceIds.map((id) => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
-        </select>
-      </label>
     </div>
   );
 }
