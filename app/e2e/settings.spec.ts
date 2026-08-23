@@ -95,6 +95,28 @@ test.describe("settings persistence", () => {
     await expect.poll(() => readSettings(page).then((s) => s.playbackDriftCorrected)).toBe(true);
   });
 
+  test("a field--inline is the one-line row it names — in Settings and in the inspector", async ({
+    page,
+  }) => {
+    // The modifier once sat ABOVE `.field` in the sheet and silently lost the cascade at
+    // equal specificity: the cache-cap label stacked over its input as a column. The base
+    // pair now sits below `.field`, so the row shape holds everywhere without per-context
+    // specificity bumps. This pins the geometry, not the CSS text: label and input share
+    // one horizontal band.
+    await boot(page, { fixtures: BOOT_FIXTURES, settings: SETTLED_SETTINGS });
+    await page.getByRole("button", { name: en.settings }).click();
+    const row = page.locator(".settings .field--inline");
+    const label = row.locator("> span").first();
+    const input = row.getByLabel(en.cacheCap);
+    const [lb, ib] = [await label.boundingBox(), await input.boundingBox()];
+    expect(lb && ib).toBeTruthy();
+    // One line: the two boxes overlap vertically (the label's band contains the input's
+    // centre) and the input starts to the label's right — a column puts it below instead.
+    expect(ib!.y + ib!.height / 2).toBeGreaterThan(lb!.y);
+    expect(ib!.y + ib!.height / 2).toBeLessThan(lb!.y + lb!.height + 4);
+    expect(ib!.x).toBeGreaterThan(lb!.x + lb!.width - 1);
+  });
+
   test("the cache size cap enforces immediately and persists; clearing it turns the cap off", async ({
     page,
   }) => {
