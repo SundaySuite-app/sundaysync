@@ -1,5 +1,20 @@
 # Changelog
 
+## Ikke sluppet ennå
+
+### Nytt
+
+- **Klippene blir blå med én gang lyden i dem er analysert (D-080).** Når du slipper inn et
+  kort begynner programmet å analysere lyden i bakgrunnen med det samme. Det har det gjort
+  lenge — men den eneste måten å se hvor langt det var kommet, var at bølgeformen i et klipp
+  dukket opp, og den ser du bare hvis du har zoomet langt nok inn på akkurat det klippet. På et
+  bryllup med fire hundre filer er hvert klipp tre piksler bredt. Nå sier fargen det i stedet:
+  **grå venter, blå er analysert, grønn er plassert av synken.** Du ser hele slippet gå fra grå
+  til blå mens du sitter og ser på kildelista, og du ser det fra andre siden av rommet.
+  Skjermleseren får det samme sagt med ord («lyd analysert»), og et klipp som allerede sier noe
+  om seg selv — at tidspunktet er anslått, at rekkefølgen kommer fra filnavnet, at fila er
+  stemplet en annen dag — sier det fortsatt: kanten er uendret, det er fyllet som skifter.
+
 ## v0.5.0-beta.1
 
 **v0.5 — the app stops claiming things it cannot support.** v0.4 put your files on the

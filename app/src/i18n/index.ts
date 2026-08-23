@@ -117,6 +117,10 @@ export const nb = {
   presyncSourceNone: "rekkefølge fra filnavn — tidspunkt ukjent",
   // D-071: fila har et tidsstempel, men fra en annen dag enn økta.
   presyncOffSessionClip: "tidsstemplet utenfor økta",
+  // V06-R0 (D-080): klippet er blått fordi analysen av akkurat DENNE fila er ferdig. Fargen
+  // sier det til øyet; denne linja sier det til skjermleseren, så påstanden ikke bare finnes
+  // i pikslene. Ikke «ferdig analysert» — det høres ut som at hele slippet er ferdig.
+  presyncAnalysed: "lyd analysert",
 
   // Én linje bygget av tellinger, i stedet for den gamle «N filer mangler
   // opptakstidspunkt». Poenget er at de fire tallene er fire ULIKE påstander, og at
@@ -484,6 +488,8 @@ export const en: Strings = {
   presyncSourceModified: "estimated from the file's modification time",
   presyncSourceNone: "order from the filename — recording time unknown",
   presyncOffSessionClip: "timestamped outside this session",
+  // V06-R0 (D-080) — see the nb comment above.
+  presyncAnalysed: "audio analysed",
 
   presyncLegend: (counts: {
     placed: number;
