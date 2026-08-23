@@ -4395,3 +4395,30 @@ the app. The native window was never driven: no WKWebView rendering, no real mac
 rasterisation, no titlebar, no display scaling other than dpr 1, and no live drag, hover or focus
 ring under a real hand. Everything above is true of the DOM at 1280×800 and 1024×600 in Chromium.
 The owner's sign-off on the six screenshots is what closes that gap, and the rig test after it.
+
+## D-089 — Receipts outrank the scrim, and a popover survives a phase change
+
+**Decided by the owner, 2026-08-23**, closing the two questions the v0.6.0-beta.1 control
+sweep (#54) left open.
+
+**Receipts over the backdrop.** Five Settings controls answer with a banner — clear cache,
+the size cap's eviction count, «Delete my data», «Export diagnostics», and the telemetry
+unavailable notice. The sweep found every one painted in the stage's `.toasts` layer at
+z-index 20, under the `.dialog-backdrop` at 40 with its 72 % scrim: the answer existed, was
+correct, and was 28 % visible until the operator closed the dialog it belonged to. The owner
+chose the lift over a panel-local status line: `.toasts` moves to **z-index 50**. That works
+because `.stage` is positioned but carries no z-index of its own, so the absolute layer
+participates in the root stacking context and a plain number beats the fixed backdrop. The
+layer stays `pointer-events: none` with each banner opting back in, so the scrim's
+click-to-close is not shadowed except where a banner actually is. The sweep's
+recorded-not-endorsed test is re-expressed as the decided behaviour: the hit test in the
+banner's middle must land on the banner while the dialog is open, and closing the dialog
+neither hides nor duplicates the receipt.
+
+**Popovers stay.** A `<details>` popover left open across a phase change (a keyboard-driven
+sync starts while «Kilder» is open) remains open. Deliberate: the panel floats above the
+room, its content derives from the same manifest on both sides of the transition, and
+Escape or a press anywhere else still closes it. The one wrinkle the sweep named is
+accepted: during the sync the strip's sources cluster is inert, so the panel's own summary
+cannot be clicked shut until the run ends — Escape can. The sweep's assertion of this
+behaviour is now its documentation.
