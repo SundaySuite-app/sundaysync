@@ -1,6 +1,6 @@
 # Changelog
 
-## Ikke sluppet ennå
+## v0.6.0-beta.1
 
 **v0.6 — «Ett rom».** SundaySync var en side. Du slapp inn en mappe og slippfeltet krympet; du
 trykket Synkroniser og knappen ble til en framdriftslinje; resultatet kom og det dukket opp en
