@@ -65,6 +65,13 @@ async function room(page: Page) {
   };
 }
 
+/** `#rrggbb` as the `rgb(r, g, b)` a computed style reports. */
+function hexToRgb(hex: string): string {
+  const h = hex.replace("#", "");
+  const n = parseInt(h, 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
+
 /** Same box, to the pixel. `toBeCloseTo(…, 0)` throughout: a browser can lay a border out at
  *  a fractional device pixel, and this is a spec about layout, not about subpixel rounding. */
 function sameBox(
@@ -332,6 +339,43 @@ for (const size of SIZES) {
       await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackPlaced);
     });
 
+    test("a row the pass finished with and could not read stops saying it is working", async ({
+      page,
+    }) => {
+      // V06-R3 sweep. D-083 folded `failed` into `pending` — right about the COLOUR (the
+      // vocabulary is three colours and a fourth would make it four) and wrong about the
+      // WORDS: the dot went on saying «Analyserer lyden» about a row whose pass had ended,
+      // forever. That is the app waiting for something that already happened, on the one
+      // element whose whole job is answering «hvor langt er denne enheten kommet?».
+      //
+      // Driven on the case that produces it: a whole card the analysis could not read.
+      await reachSources(page, size, {
+        prewarm_analysis: fn(`(args) => {
+          window.__SUNDAYSYNC_PENDING__ = window.__SUNDAYSYNC_PENDING__ || {};
+          return new Promise((resolve, reject) => {
+            window.__SUNDAYSYNC_PENDING__["prewarm_analysis"] = { resolve, reject, args };
+          });
+        }`),
+      });
+      const dot = (device: string) =>
+        page.getByRole("group", { name: en.trackAria(device) }).locator(".track__dot");
+      await waitForPending(page, "prewarm_analysis");
+      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackAnalysing);
+
+      await emit(page, "prewarm:file", { file: CAM_A, ok: false });
+      await expect(dot("Camera A")).toHaveClass(/track__dot--failed/);
+      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackAnalysisFailed);
+      // Grey, exactly as before: a different sentence, not a fourth colour.
+      const grey = await page.evaluate(
+        () => getComputedStyle(document.documentElement).getPropertyValue("--text4").trim(),
+      );
+      await expect(dot("Camera A")).toHaveCSS("background-color", hexToRgb(grey));
+
+      // …and the OTHER row, which the pass has genuinely not reached, still says it is
+      // working. «Ferdig, og det gikk ikke» and «ikke ferdig» are two different answers.
+      await expect(dot("Zoom recorder")).toHaveAttribute("aria-label", en.trackAnalysing);
+    });
+
     test("marking a clip fills the inspector and moves nothing", async ({ page }) => {
       await reachSources(page, size);
       const before = await room(page);
@@ -392,6 +436,135 @@ for (const size of SIZES) {
 
         await page.keyboard.press("Escape");
         await expect(popover.locator(".popover__panel")).toBeHidden();
+      }
+    });
+
+    test("only one popover is ever open — including when they are opened by keyboard", async ({
+      page,
+    }) => {
+      // V06-R3 sweep. The pointer case was covered by construction: pressing a second summary
+      // is a press OUTSIDE the first, and `usePopoverDismiss` closes on that. The keyboard
+      // case was not — and the four summaries are tab stops precisely so they can be used
+      // that way (D-078's whole argument for `<details>`). Tab, Enter, Tab, Enter left two
+      // panels open at once, overlapping each other on top of the room they float over.
+      await reachSources(page, size, {
+        scan_inputs: scanManifest({
+          unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
+        }),
+      });
+      const sources = page.locator(".popover--sources");
+      const problems = page.locator(".popover--problems");
+      // `locator.press` rather than `focus()` + `keyboard.press`: it focuses and presses as
+      // one actionability-checked step, so a re-render landing between the two cannot send the
+      // Enter to `document.body` and leave the disclosure closed. `open` is read as the DOM
+      // PROPERTY, which is what `<details>` actually toggles.
+      await sources.locator("> summary").press("Enter");
+      await expect(sources).toHaveJSProperty("open", true);
+
+      await problems.locator("> summary").press("Enter");
+      await expect(problems).toHaveJSProperty("open", true);
+      await expect(sources).toHaveJSProperty("open", false);
+
+      // …and the same holds the other way round, and by pointer.
+      await sources.locator("> summary").click();
+      await expect(sources).toHaveJSProperty("open", true);
+      await expect(problems).toHaveJSProperty("open", false);
+    });
+
+    test("nothing in the strip or the slot is ever drawn on top of anything else", async ({
+      page,
+    }) => {
+      // V06-R3 pixel pass. Both rows are one line of flex with more to carry at 1024 than
+      // they have room for, and both had items that could not shrink inside containers that
+      // could: the strip's two chips were drawn under the project-name field, and the slot's
+      // «1 stillbilde ble hoppet over» covered the first four words of the stale notice.
+      // Every claim here still has its whole self on a `title`; what it must not do is be
+      // painted over.
+      //
+      // Measured in the state that produces the most content at once: a result with problems
+      // AND warnings AND a skipped file AND an export behind it AND stale sources.
+      await reachSources(page, size, {
+        scan_inputs: scanManifest({
+          unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
+          skipped: [{ file: "/Users/e2e/shoot/IMG_0001.HEIC", reason: "still_image" }],
+        }),
+        "plugin:dialog|save": "/Users/e2e/out/x.fcpxml",
+        export_timeline: 1,
+      });
+      await page.getByRole("button", { name: en.syncButton }).click();
+      await waitForPending(page, "run_sync");
+      await resolveControlled(
+        page,
+        "run_sync",
+        syncOutcome({
+          result: {
+            ...(syncOutcome().result as Record<string, unknown>),
+            warnings: [{ code: "mixed_fps" }],
+          },
+        }),
+      );
+      await waitForResult(page);
+      await page.getByRole("button", { name: en.exportButton }).click();
+      await expect(page.getByRole("button", { name: en.revealInFinder })).toBeVisible();
+      await page.locator(".banner__dismiss").click();
+      // …and make the result stale, which is what puts a fourth thing in the slot.
+      await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+      await page.locator(".inspector__actions select").selectOption("rec");
+      await expect(page.locator(".slot__stale")).toBeVisible();
+
+      for (const row of [".app__header", ".slot"]) {
+        const boxes = await page.locator(`${row} > *`).evaluateAll((els) =>
+          els
+            .map((el) => {
+              const r = el.getBoundingClientRect();
+              return { cls: el.className || el.tagName, left: r.left, right: r.right };
+            })
+            // A zero-width portal target that has nothing in it is not an item on the row.
+            .filter((b) => b.right - b.left > 0.5),
+        );
+        for (let i = 1; i < boxes.length; i++) {
+          expect(
+            boxes[i].left,
+            `${row}: ${boxes[i].cls} starts inside ${boxes[i - 1].cls}`,
+          ).toBeGreaterThanOrEqual(boxes[i - 1].right - 0.5);
+        }
+        // …and the row itself does not overflow the window.
+        const own = (await page.locator(row).boundingBox())!;
+        if (boxes.length > 0) {
+          expect(boxes[boxes.length - 1].right).toBeLessThanOrEqual(own.x + own.width + 0.5);
+        }
+      }
+
+      // The cluster inside the strip is the same claim one level down: its own children were
+      // the ones that overflowed it.
+      const cluster = await page.locator(".strip__sources > *").evaluateAll((els) =>
+        els
+          .map((el) => {
+            const r = el.getBoundingClientRect();
+            return { cls: el.className || el.tagName, left: r.left, right: r.right };
+          })
+          .filter((b) => b.right - b.left > 0.5),
+      );
+      for (let i = 1; i < cluster.length; i++) {
+        expect(
+          cluster[i].left,
+          `strip__sources: ${cluster[i].cls} starts inside ${cluster[i - 1].cls}`,
+        ).toBeGreaterThanOrEqual(cluster[i - 1].right - 0.5);
+      }
+      // …and the cluster's last child does not reach the next thing on the strip. Deliberately
+      // NOT "inside the cluster's own box": at 1024 the cluster is genuinely handed less than
+      // its own children's minimum widths (a `<summary>` cannot draw itself narrower than
+      // `.chip`'s padding), so it overflows its box by a few pixels, and how many depends on
+      // the platform's font metrics. What must be true either way is that the overflow lands
+      // in the 12 px gap and touches nothing — which is the rule, where containment was a
+      // proxy for it.
+      const nextAfterCluster = await page.evaluate(() => {
+        const cl = document.querySelector(".strip__sources") as HTMLElement;
+        const sib = cl.nextElementSibling;
+        return sib ? sib.getBoundingClientRect().left : null;
+      });
+      if (cluster.length > 0 && nextAfterCluster !== null) {
+        expect(cluster[cluster.length - 1].right).toBeLessThanOrEqual(nextAfterCluster + 0.5);
       }
     });
 

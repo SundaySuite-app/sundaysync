@@ -80,6 +80,31 @@ the median clip is 3 px wide and **`waveform_meta` is called zero times** where 
 Gates at the end of the round: 399 vitest, 150 Playwright, both cargo workspaces clean under
 `fmt --check` / `clippy --all-targets -D warnings` / `test` in both D-025 PATH variants.
 
+**v0.6 (unreleased) is at R0–R3 complete — the round is done.** «Ett rom»: the app stops being
+a sequence of pages and becomes one fixed room the size of the window, with the five phases
+happening inside it. It is the round that started from one sentence of the owner's, and it is the
+first one built against an approved design canvas rather than against a description.
+
+| v0.6 stage | State | What it added |
+| --- | --- | --- |
+| R0 — blue | ✅ | `--blue`/`--blue-bg` as a semantic pair; `clip--analysed` between the pre-sync slate and the placed green, said in words too, and distinguishable at 3 px (D-080). |
+| R1 — the shell | ✅ | The fixed CSS grid (44 / band / stage / 38, plus a 300 px inspector spanning rows 2–4), the selection lifted to App and the transport portalled into the slot, the preview as a column with a 268×151 still, one primary action on the strip, the band that takes space and the banners that do not, «Legg til» as a strip control — with `SourcesPanel` deliberately left standing as a bridge (D-074/D-075/D-076/D-081/D-082/D-086/D-087). |
+| R2a — the panel is redistributed | ✅ | `SourcesPanel.tsx` deleted and its fourteen affordances placed where their question is asked; four `<details>` popovers that overlay the room; the unsynced shelf behind the problem chip; `sourcesModel.ts` as shared pure functions (D-077/D-078/D-079). |
+| R2b — the gutter | ✅ | Two-line gutters in 40 px lanes with the row's own grey→blue→green dot, the zoom in the ruler row's gutter cell, the timeline's words portalled into the slot, the result's warnings as a strip chip — and the frame's top edge finally identical in every phase (D-083). |
+| R3 — finpuss | ✅ | The zoom floor halved so «Tilpass» fits a 16-hour day (D-084); the spec-migration rule and the final locator table written down (D-085); the pixel pass against the canvas and the QA sweep (D-088). |
+
+What R3 measured, on the real window sizes: at 1280×800 the timeline's lane is **736 px**, which
+at the new floor makes «Tilpass» reach ~19.8 h — the owner's 15.5-hour wedding included, where the
+old floor left 40 of 386 clips off the right edge with no gesture that brought them back. The
+pixel pass rendered all five states plus a marked-clip result at 1280×800 and 1024×600 and fixed
+seven things the canvas caught; what it left standing is listed with reasons in D-088, and so is
+what the instrument could not see — Playwright at the window size is not the native window, and
+the owner's sign-off on the screenshots is what closes that gap.
+
+Gates at the end of the round: **422 vitest, 189 Playwright**, `tsc` over `src` and `e2e`, the
+frontend build, and both cargo workspaces clean under `fmt --check` / `clippy --all-targets
+-D warnings` / `test` in both D-025 PATH variants.
+
 The UX overhaul (branch `feat/ui-overhaul`) fixed two launch-blocking bugs found in
 review — the missing Tauri 2 capabilities file (dialogs/events/opener were ACL-denied)
 and drag-drop written against the Tauri 1 API (drops did nothing) — and rebuilt the app

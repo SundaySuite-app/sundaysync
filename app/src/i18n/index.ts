@@ -38,12 +38,11 @@ export const nb = {
   /** V06-R1 (D-081): topplinjas sammendrag. Enhet, ikke «kamera»/«lydopptaker» — stripa har
    *  plass til ett tall, og skillet mellom de to står i panelet under. */
   deviceCount: (n: number) => (n === 1 ? "1 enhet" : `${n} enheter`),
-  /** V06-R2a (D-077 #3): ikke lenger på skjermen. Stripa har plass til ÉN påstand, og den er
-   *  «N filer · M enheter»; skillet mellom kamera og lydopptaker står i ikonet foran hver
-   *  enhetsgruppe i «Kilder»-panelet og i tidslinjas egen gutter. Nøklene blir stående til
-   *  R3 rydder — en tekst som kanskje trengs igjen er billigere enn en som må skrives på nytt. */
-  cameraCount: (n: number) => (n === 1 ? "1 kamera" : `${n} kameraer`),
-  recorderCount: (n: number) => (n === 1 ? "1 lydopptaker" : `${n} lydopptakere`),
+  /* V06-R2a (D-077 #3) dropped «1 kamera · 1 lydopptaker» from the strip: 44 px holds ONE
+     claim, and it is «N filer · M enheter». The two keys were kept one stage in case the
+     distinction was wanted back; R3 prunes them, because it is not — the camera/recorder split
+     lives in the icon in front of every device group in «Kilder» and in the timeline's own
+     gutter, which is where the operator is already looking when it matters. */
   problemCount: (n: number) => (n === 1 ? "1 problemfil" : `${n} problemfiler`),
   deviceLabel: (id: string, label: string) =>
     id.startsWith("folder-") ? `Mappe: ${label}` : label,
@@ -103,6 +102,7 @@ export const nb = {
   // prikken gjelder alle filene på raden under ett, som er hele grunnen til at den står i
   // hodet og ikke på hvert klipp.
   trackAnalysing: "Analyserer lyden",
+  trackAnalysisFailed: "Lyden er ikke analysert",
   trackAnalysed: "Lyden er analysert",
   trackPlaced: "Plassert av synken",
   rulerAria: "Tidslinjal — klikk eller dra for å flytte markøren",
@@ -460,8 +460,6 @@ export const en: Strings = {
   scanningInputs: "Reading the sources …",
   fileCount: (n: number) => (n === 1 ? "1 file" : `${n} files`),
   deviceCount: (n: number) => (n === 1 ? "1 device" : `${n} devices`),
-  cameraCount: (n: number) => (n === 1 ? "1 camera" : `${n} cameras`),
-  recorderCount: (n: number) => (n === 1 ? "1 audio recorder" : `${n} audio recorders`),
   problemCount: (n: number) => (n === 1 ? "1 problem file" : `${n} problem files`),
   deviceLabel: (id: string, label: string) =>
     id.startsWith("folder-") ? `Folder: ${label}` : label,
@@ -511,6 +509,7 @@ export const en: Strings = {
   subTrackAria: (n: number) => `Sub-track ${n}`,
   // V06-R2b (D-083) — see the nb comments above.
   trackAnalysing: "Analysing the audio",
+  trackAnalysisFailed: "Audio not analysed",
   trackAnalysed: "Audio analysed",
   trackPlaced: "Placed by the sync",
   rulerAria: "Time ruler — click or drag to move the playhead",

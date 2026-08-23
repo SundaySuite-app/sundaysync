@@ -15,9 +15,28 @@ export interface TimelineView {
   widthPx: number;
 }
 
-/** Zoom bounds. ~0.00002 px/ms ≈ 11 h across 1000px (way-out); 2 px/ms is
- *  sub-frame-level (0.5ms per pixel). */
-export const MIN_PX_PER_MS = 0.00002;
+/**
+ * Zoom bounds. 1e-5 px/ms is the way-out floor — 1 px per 100 s, so a 736 px lane (the
+ * width the timeline actually has at 1280×800: the window less the 300 px inspector, the
+ * 224 px gutter and the frame's own chrome) shows ~20 hours, and «Tilpass» — which fits
+ * with `FIT_PADDING_PX` to spare — reaches ~19.8 h. 2 px/ms is sub-frame-level at the
+ * other end (0.5 ms per pixel).
+ *
+ * **The floor was 2e-5 until V06-R3 (D-084), and that number could not fit the owner's own
+ * wedding.** 2e-5 across 736 px is 10.2 h; the shoot is 15.5 h, so «Tilpass» clamped, the
+ * view stopped at ten hours of it, and 40 of the 386 clips sat past the right edge with no
+ * gesture that brought them back — the Fit button is the gesture that is supposed to. It
+ * was v0.5's highest-value open item, and halving the floor is the whole fix: 19.8 h covers
+ * a wedding that starts with the hairdresser and ends with the last dance, with a night's
+ * margin left over.
+ *
+ * What halving it costs is one step of waveform detail at the very floor, and the ladder
+ * already has the answer: `MIN_WAVEFORM_PX` (D-072) means a clip narrower than 24 px draws
+ * no waveform at all, which at this zoom is every clip shorter than 40 minutes — and for
+ * the handful that are longer, `barGeometry`'s stride cap groups 2–3 bins per bar rather
+ * than emitting an `xs` entry per bin. Both are measured in `waveformDraw.test.ts`.
+ */
+export const MIN_PX_PER_MS = 0.00001;
 export const MAX_PX_PER_MS = 2;
 
 export function clampZoom(pxPerMs: number): number {
@@ -122,6 +141,25 @@ export function rulerTicks(view: TimelineView, minPxBetween = 80): number[] {
   const ticks: number[] = [];
   for (let ms = first; ms <= end; ms += interval) ticks.push(ms);
   return ticks;
+}
+
+/**
+ * A ruler tick's label: the timecode, minus the part the chosen tick spacing cannot
+ * resolve (V06-R3).
+ *
+ * `formatTimecode` always prints milliseconds, and it is right to: it is the transport's
+ * clock, and the offsets this app measures are sub-frame (see the note below). A RULER is a
+ * different reader. At the zoom a whole shoot is looked at, `tickIntervalMs` picks one tick
+ * per hour — and every label then ended in the same `.000`, four characters of nothing
+ * repeated across the whole ruler, on the one row where the width of a label decides
+ * whether the rightmost one can be drawn at all.
+ *
+ * The rule is the interval, not the zoom: milliseconds are dropped exactly when a tick is a
+ * whole second or more apart, because that is when no two ticks could differ in them.
+ */
+export function tickLabel(ms: number, intervalMs: number): string {
+  const full = formatTimecode(ms);
+  return intervalMs >= 1000 ? full.slice(0, -4) : full;
 }
 
 /**

@@ -56,6 +56,58 @@ test.describe("export", () => {
     await expect(page.getByRole("button", { name: en.revealInFinder })).toBeVisible();
   });
 
+  test("the receipt is opaque and does not eat the timeline underneath it", async ({ page }) => {
+    // V06-R3 pixel pass, two findings in one place — and one place is right, because they are
+    // the same fact about the same rectangle.
+    //
+    // 1. It floats over the room (D-082), and `--green-bg` is a 10 %-alpha wash: correct for a
+    //    banner in a page's flow, unreadable here, because what is behind a toast is not the
+    //    page background but a timeline full of clips showing through the sentence. The export
+    //    receipt is the longest thing this app ever says, so it is where this shows first.
+    // 2. D-082 turned pointer events off on the LAYER so a transparent rectangle could not eat
+    //    a click. The banner itself kept them — and it is three lines tall over the top device
+    //    rows, so after an export the operator could not mark a clip there at all until they
+    //    dismissed it. Its ✕ turns them back on for itself.
+    await reachResult(page, {
+      "plugin:dialog|save": "/Users/e2e/out/SundaySync.fcpxml",
+      export_timeline: 1,
+    });
+    await page.getByRole("button", { name: en.exportButton }).click();
+    const banner = page.locator(".banner--ok");
+    await expect(banner).toBeVisible();
+
+    // Opaque: no alpha channel left in the painted background.
+    const bg = await banner.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(bg, `banner background ${bg}`).not.toMatch(/rgba\([^)]*,\s*0?\.\d+\s*\)/);
+
+    // Inert: a hit test in the middle of the banner resolves to whatever is UNDERNEATH it.
+    // Asked of the browser directly rather than inferred from two boxes overlapping — how
+    // many lines this sentence wraps to, and therefore whether it reaches the first device
+    // row, is a function of the platform's font metrics; whether it eats a press is not.
+    const overBody = await banner.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return at !== null && el.contains(at);
+    });
+    expect(overBody).toBe(false);
+
+    // …and the ✕ is the one thing in there that IS a control: it hit-tests to itself, and it
+    // works.
+    const overDismiss = await page.locator(".banner__dismiss").evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return at !== null && el.contains(at);
+    });
+    expect(overDismiss).toBe(true);
+
+    // The journey the finding was found by: mark a clip with the receipt still on screen.
+    await page.locator(".clip").first().click();
+    await expect(page.locator(".preview__name")).toBeVisible();
+
+    await page.locator(".banner__dismiss").click();
+    await expect(banner).toBeHidden();
+  });
+
   test("cancelling the save dialog never calls export_timeline", async ({ page }) => {
     await reachResult(page, {
       "plugin:dialog|save": null,

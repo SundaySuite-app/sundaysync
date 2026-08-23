@@ -11,6 +11,7 @@ import {
   rulerTicks,
   formatTimecode,
   MIN_PX_PER_MS,
+  tickLabel,
   MAX_PX_PER_MS,
   type TimelineView,
 } from "./geometry";
@@ -120,5 +121,28 @@ describe("formatTimecode", () => {
 
   it("clamps negative input to zero", () => {
     expect(formatTimecode(-500)).toBe("00:00.000");
+  });
+});
+
+describe("tickLabel", () => {
+  // V06-R3. `formatTimecode` is the transport's clock and always prints milliseconds; a
+  // ruler at one tick per hour printed the same `.000` on every label, which is four
+  // characters of nothing on the one row where a label's width decides whether the
+  // rightmost tick can be drawn at all.
+  it("keeps the milliseconds while a tick is under a second", () => {
+    expect(tickLabel(1_234, 100)).toBe("00:01.234");
+    expect(tickLabel(1_234, 500)).toBe("00:01.234");
+  });
+
+  it("drops them the moment no two ticks could differ in them", () => {
+    expect(tickLabel(90_000, 1_000)).toBe("01:30");
+    expect(tickLabel(3_600_000, 3_600_000)).toBe("1:00:00");
+    expect(tickLabel(0, 60_000)).toBe("00:00");
+  });
+
+  it("drops exactly four characters and nothing else", () => {
+    for (const ms of [0, 999, 3_599_999, 60 * 3_600_000]) {
+      expect(tickLabel(ms, 1_000)).toBe(formatTimecode(ms).slice(0, -4));
+    }
   });
 });

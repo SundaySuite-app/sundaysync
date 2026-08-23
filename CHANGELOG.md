@@ -2,80 +2,106 @@
 
 ## Ikke sluppet ennå
 
-### Nytt
+**v0.6 — «Ett rom».** SundaySync var en side. Du slapp inn en mappe og slippfeltet krympet; du
+trykket Synkroniser og knappen ble til en framdriftslinje; resultatet kom og det dukket opp en
+eksportrad under en tidslinje som nettopp hadde skiftet høyde. Hver eneste gang programmet svarte
+på noe, flyttet det på det du satt og så på. v0.6 gjør appen om til **ett rom**: en topplinje, en
+tidslinje, en kolonne til høyre og en stripe langs bunnen — like store i alle faser, fra tomt
+vindu til ferdig eksport. Det er ikke pynt. På et bryllup med fire hundre filer er hvert klipp tre
+piksler bredt, og et rom som rykker er et rom du bommer i.
 
-- **Klippene blir blå med én gang lyden i dem er analysert (D-080).** Når du slipper inn et
-  kort begynner programmet å analysere lyden i bakgrunnen med det samme. Det har det gjort
-  lenge — men den eneste måten å se hvor langt det var kommet, var at bølgeformen i et klipp
-  dukket opp, og den ser du bare hvis du har zoomet langt nok inn på akkurat det klippet. På et
-  bryllup med fire hundre filer er hvert klipp tre piksler bredt. Nå sier fargen det i stedet:
-  **grå venter, blå er analysert, grønn er plassert av synken.** Du ser hele slippet gå fra grå
-  til blå mens du sitter og ser på kildelista, og du ser det fra andre siden av rommet.
-  Skjermleseren får det samme sagt med ord («lyd analysert»), og et klipp som allerede sier noe
-  om seg selv — at tidspunktet er anslått, at rekkefølgen kommer fra filnavnet, at fila er
-  stemplet en annen dag — sier det fortsatt: kanten er uendret, det er fyllet som skifter.
+### Ingenting flytter seg
 
-### Endret
-
-- **Sporhodet er enhetens hjem (V06-R2b).** Til venstre for hvert spor står det nå to linjer:
-  hvem enheten er (ikon, navn, «Referanse», M/S) og hva den har med seg — «3 filer · 1 t 42
-  min» og én prikk som sier hvor langt den er kommet. **Grå venter, blå er ferdig analysert,
-  grønn er plassert av synken**, akkurat som klippene, men sagt om hele raden på én gang. På
-  et bryllup med fire hundre filer er hvert klipp tre piksler bredt; raden er det eneste på
-  skjermen som er stor nok til å leses fra andre siden av rommet. Sporene er 40 px høye nå, så
-  begge linjene får plass.
-- **Ingenting står lenger over tidslinja.** Zoom-knappene har flyttet inn i linjalens egen
-  celle rett over klippene, forklaringslinja og setninga om hva du ser på står i bunnstripa
-  ved siden av avspillingen, og advarsler fra synken er blitt til «2 advarsler» oppe på
-  topplinja — ved siden av problemfilene, for det er samme spørsmål. Resultatet er at
-  tidslinje-ramma begynner på nøyaktig samme sted i alle faser: å trykke Synkroniser flytter
-  ikke lenger på en eneste piksel av det du sitter og ser på.
-- **Appen er ett rom (V06-R1).** SundaySync leses ikke lenger som en rekke sider som dytter
-  hverandre rundt. Det er en 44 px topplinje med navnet, «Legg til», én setning om hva du har
-  sluppet inn og den ene tingen du skal trykke på nå; tidslinja fyller alt under den; en
-  300 px kolonne til høyre viser klippet du har merket — bildet, hva fila er, og hva synken
-  fant ut om den; og en tynn stripe langs bunnen bærer avspillingen. De fire er like store i
-  alle fasene, så det å slippe inn en mappe, trykke Synkroniser og få et resultat flytter ikke
-  lenger på det du sitter og ser på. Vinduet er 1280×800 og kan dras ned til 1024×600.
-- **Stillbildet er nesten fire ganger så stort.** I høyrekolonna er en forhåndsvisning
-  268×151 i stedet for 140×79 — forskjellen på å kjenne igjen en kameravinkel og å gjette.
+- **De fire flatene står stille.** 44 px topplinje med navnet, «Legg til», én setning om hva du
+  har sluppet inn og **den ene tingen du skal trykke på nå**. Tidslinja fyller alt under den. En
+  300 px kolonne til høyre viser klippet du har merket. En tynn stripe langs bunnen bærer
+  avspillinga. Vinduet er 1280×800 og kan dras ned til 1024×600; ingenting i rommet endrer
+  størrelse fordi noe inni det fikk mer å si.
 - **Framdrift er det eneste som får lov til å flytte tidslinja**, og bare mens appen faktisk
   jobber: en 34 px stripe under topplinja mens den leser kildene eller kjører synken, og den
-  dytter tidslinja ned nøyaktig så mye. Den blir stående gjennom hoppet, så tidslinja og
-  klippene aldri beveger seg samtidig.
-- **Meldinger legger seg over i stedet for å dytte.** En advarsel, et oppdateringsvarsel eller
-  en eksportfeil legger seg oppå tidslinja i stedet for å skyve alt under seg nedover.
-  «Kildene er endret siden forrige synkronisering» er én stille linje langs bunnen nå.
-- **Eksport, prosjektnavn og «Vis i Finder» flyttet opp** i topplinja, ved siden av «Synk på
-  nytt» — resultatfasens handlinger står der alle de andre fasenes handling står.
-- **Kildelista er borte fra skjermen, og alt den kunne står igjen.** Panelet under tidslinja
-  tok 40 % av rommet hele tida for å svare på fem ulike spørsmål samtidig. Nå henger lista bak
-  linja som teller den — «3 filer · 2 enheter» er selve knappen som åpner mappene, enhetene og
-  hver enkelt fil, og en filrad merker klippet og lukker panelet igjen. Å finne én fil på navn
-  i et 386-klipps opptak er det tidslinja ikke kan, så lista blir — men den ligger over rommet
-  i stedet for å ta av det.
-- **Stjerne, «Flytt til enhet» og ✕ står på klippet du ser på.** Før satt alle tre på hver
-  eneste rad; nå står det ett av hvert, i høyre kolonne, under det fila faktisk er. Filer som
-  ikke kunne leses beholder sin egen ✕ i sitt eget panel — «om de kan leses eller ikke» er
-  fortsatt ett ønske.
-- **Problemer, fjernede filer og oversprungne filer er brikker du kan åpne.** Den røde
-  problembrikka i topplinja teller både det skanninga ikke fikk lest og det motoren ikke fikk
-  plassert, og «Ikke synkronisert»-hylla ligger inni den. «Fjernet (N)» og «… ble hoppet over»
+  dytter tidslinja ned nøyaktig så mye. Den blir stående gjennom hoppet, så tidslinja og klippene
+  aldri beveger seg samtidig — for øyet klarer ikke skille et klipp som flyttet seg fra et rom som
+  flyttet seg under klippet.
+- **Meldinger legger seg over i stedet for å dytte.** En advarsel, et oppdateringsvarsel eller en
+  eksportfeil legger seg oppå tidslinja. «Kildene er endret siden forrige synkronisering» er én
+  stille linje langs bunnen. Kvitteringa etter en eksport er ugjennomsiktig og lar deg klikke rett
+  gjennom seg på klippene under — den er noe programmet sier, ikke noe som stenger av rommet.
+- **Ingenting står lenger over tidslinja.** Zoom-knappene har flyttet inn i linjalens egen celle
+  rett over klippene, forklaringslinja og setninga om hva du ser på står i bunnstripa ved siden av
+  avspillinga, og advarsler fra synken er blitt til «2 advarsler» oppe på topplinja. Tidslinje-ramma
+  begynner på nøyaktig samme sted i alle faser: å trykke Synkroniser flytter ikke lenger på en
+  eneste piksel.
+- **Én hovedhandling, alltid på samme sted.** Den gylne knappen står sist på topplinja, rett før
+  tannhjulet — «Vis i Finder» og «Synk på nytt» legger seg til venstre for den. Før dukket «Vis i
+  Finder» opp til høyre for den og skjøv den 110 piksler sidelengs i samme øyeblikk som du skulle
+  til å trykke på den igjen.
+
+### Blått når lyden er lest
+
+- **Klippene blir blå med én gang lyden i dem er analysert.** Når du slipper inn et kort begynner
+  programmet å analysere lyden i bakgrunnen med det samme. Det har det gjort lenge — men den eneste
+  måten å se hvor langt det var kommet, var at bølgeformen i et klipp dukket opp, og den ser du bare
+  hvis du har zoomet langt nok inn på akkurat det klippet. Nå sier fargen det i stedet: **grå
+  venter, blå er analysert, grønn er plassert av synken.** Du ser hele slippet gå fra grå til blå
+  mens du sitter og ser på kildelista. Skjermleseren får det samme sagt med ord, og et klipp som
+  allerede sier noe om seg selv — at tidspunktet er anslått, at rekkefølgen kommer fra filnavnet, at
+  fila er stemplet en annen dag — sier det fortsatt: kanten er uendret, det er fyllet som skifter.
+- **Sporhodet er enhetens hjem.** Til venstre for hvert spor står det nå to linjer: hvem enheten er
+  (ikon, navn, «Referanse», M/S) og hva den har med seg — «3 filer · 1 t 42 min» og **én prikk** som
+  sier hvor langt hele raden er kommet, i samme grå-blå-grønn. Raden er det eneste på skjermen som
+  er stort nok til å leses fra andre siden av rommet. Sporene er 40 px høye nå, så begge linjene får
+  plass. En rad der lyden ikke lot seg lese sier det rett ut — «Lyden er ikke analysert» — i stedet
+  for å påstå at den fortsatt holder på.
+
+### Kildene i stripa
+
+- **Kildelista er borte fra skjermen, og alt den kunne står igjen.** Panelet under tidslinja tok
+  40 % av rommet hele tida for å svare på fem ulike spørsmål samtidig. Nå henger lista bak linja som
+  teller den — «386 filer · 7 enheter» er selve knappen som åpner mappene, enhetene og hver enkelt
+  fil, og en filrad merker klippet og lukker panelet igjen. Å finne én fil på navn i et 386-klipps
+  opptak er det tidslinja ikke kan, så lista blir — men den ligger **over** rommet i stedet for å ta
+  av det.
+- **Stjerne, «Flytt til enhet» og ✕ står på klippet du ser på.** Før satt alle tre på hver eneste
+  rad — 386 stjerner, 386 nedtrekk, 386 kryss. Nå står det ett av hvert, i høyre kolonne, under det
+  fila faktisk er. Filer som ikke kunne leses beholder sin egen ✕ i sitt eget panel.
+- **Problemer, fjernede og oversprungne filer er brikker du kan åpne.** Den røde problembrikka
+  teller både det skanninga ikke fikk lest og det motoren ikke fikk plassert — for derfra du står er
+  det ett spørsmål. «Ikke synkronisert»-hylla ligger inni den. «Fjernet (N)» og «… ble hoppet over»
   er brikker langs bunnen, og hver av dem er borte når den ikke har noe å si.
+- **Panelene lukker hverandre.** Det er alltid bare ett åpent om gangen, enten du åpner det med
+  musa eller med tastaturet.
+- **Stillbildet er nesten fire ganger så stort.** I høyrekolonna er en forhåndsvisning 268×151 i
+  stedet for 140×79 — forskjellen på å kjenne igjen en kameravinkel og å gjette.
+
+### «Tilpass» tilpasser faktisk
+
+- **Et bryllup på 15,5 timer får plass på skjermen.** «Tilpass» kunne før vise omtrent ti timer, og
+  ikke en time mer uansett hvor mange ganger du trykket: 40 av 386 klipp lå utenfor høyre kant med
+  ingen måte å hente dem inn på annet enn å dra seg dit. Nå rekker «Tilpass» **rundt 19,5 timer** —
+  fra frisøren om morgenen til siste dans etter midnatt, med natta til overs.
+- **Linjalen sier «1:00:00», ikke «1:00:00.000».** Når det er en time mellom hver strek, er de fire
+  siste tegnene fire tegn med ingenting i — og det var akkurat de som gjorde at det siste klokkeslettet
+  på linjalen ble kappet midt i et siffer.
 
 ### Internt
 
-- «Ett rom»-skallet er et fast CSS-rutenett (D-074); det merkede klippet og avspillinga havner
-  der designet vil ha dem uten å flytte på hvor dataene deres bor (D-075); forhåndsvisninga er
-  en kolonne (D-076); én hovedhandling per fase (D-081); framdriftsstripa og meldingslaget er
-  to ulike slags ting og er bygget ulikt (D-082); «Legg til» er en topplinje-kontroll (D-086).
-  Kildepanelet hang under tidslinja som en bevisst bro (D-087) og er fjernet i R2a: de fjorten
-  tingene panelet kunne er fordelt på fire steder i rommet (D-077), de fire panelene er
-  `<details>` som legger seg over rommet i stedet for å ta av det (D-078), og hylla flyttet med
-  dem (D-079). Ingenting fra R1 ble sluppet alene.
-- `app/e2e/ett-rom.spec.ts` måler rommet i piksler i to vindusstørrelser, sampler hver eneste
-  ramme av hoppet for å bevise at framdriftsstripa aldri blinker vekk under det, og åpner alle
-  fire panelene for å bevise at ingen av dem flytter en eneste boks.
+- «Ett rom»-skallet er et fast CSS-rutenett (D-074); det merkede klippet og avspillinga havner der
+  designet vil ha dem uten å flytte på hvor dataene deres bor (D-075); forhåndsvisninga er en kolonne
+  (D-076); én hovedhandling per fase (D-081); framdriftsstripa og meldingslaget er to ulike slags ting
+  og er bygget ulikt (D-082); «Legg til» er en topplinje-kontroll (D-086). Kildepanelet hang under
+  tidslinja som en bevisst bro (D-087) og ble fjernet i R2a: de fjorten tingene panelet kunne er
+  fordelt på fire steder i rommet (D-077), de fire panelene er `<details>` som legger seg over rommet
+  (D-078), og hylla flyttet med dem (D-079). Sporhodet, linjalens zoom-celle og bunnstripas ord er
+  R2b (D-083). Zoom-golvet halveres til 1e-5 px/ms (D-084), spec-migreringsregelen for hele runden er
+  skrevet ned med den endelige locator-tabellen (D-085), og finpussen mot lerretet — hva en rad gir
+  fra seg først, hvorfor en melding som svever må være ugjennomsiktig, og hva som *ikke* ble endret —
+  er D-088.
+- `app/e2e/ett-rom.spec.ts` måler rommet i piksler i to vindusstørrelser, sampler hver eneste ramme
+  av hoppet for å bevise at framdriftsstripa aldri blinker vekk under det, åpner alle fire panelene
+  for å bevise at ingen av dem flytter en eneste boks, og går gjennom hvert eneste element i
+  topplinja og bunnstripa i den travleste tilstanden appen kan nå for å bevise at ingenting tegnes
+  oppå noe annet. `timeline-scale.spec.ts` har fått et 16-timers opptak som beviser at «Tilpass»
+  faktisk tilpasser.
 
 
 ## v0.5.0-beta.1

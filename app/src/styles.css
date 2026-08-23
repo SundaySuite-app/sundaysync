@@ -180,14 +180,49 @@ body {
 /* The summary line shrinks (and ellipsises) before anything else does, and the chip and the
    tick sit right beside it rather than at the far end of the strip: the count and «1
    problemfil» are one sentence about one drop, and a whole window between them reads as two. */
-.strip__sources .popover--sources { flex: 0 1 auto; min-width: 0; }
-.strip__sources .popover--problems,
-.strip__sources .popover--warnings,
-.strip__sources .strip__status,
+/* `min-width: 0`, and deliberately no floor. This `<summary>` is BOTH the summary line and
+   the control that opens «Kilder» (D-078), and at 1024 with two chips, the project name and
+   three buttons also on the strip it is handed a handful of pixels — which is a real
+   problem, and NOT one a floor fixes: a floor here does not create room, it makes the
+   cluster overflow and paint across the controls to its right. What the strip actually
+   needs is a stated order of what it gives up first at a narrow window, which is a design
+   decision, not a number. Written down in KNOWN_LIMITATIONS and priced as its own stage;
+   until then the row degrades predictably instead of overlapping. */
+.strip__sources .popover--sources { min-width: 0; }
 .strip__sources .prewarm { flex: 0 0 auto; }
+/* ── Who gives up room first, when the strip has more to carry than it has room for ──────
+   The summary is the absorber and the chips are the last resort, and that ORDER is what the
+   shrink factors state (V06-R3). `flex-shrink` distributes a deficit in proportion to
+   `factor × basis`, so a factor of 200 on the sentence against 1 on the chips means the
+   sentence gives up essentially all of it — down to nothing, if it has to — before either
+   chip loses a character. That is the right way round: the sentence is a sentence and
+   carries its whole self as a `title`, while «5 problemfiler» is four words that mean
+   nothing at «5 problemf…».
+   The chips were `0 0 auto` before, which is the same priority stated as an absolute — and
+   an absolute is what broke: at 1024 in the exported phase («Vis i Finder» is on the row
+   too, and that is exactly when the operator has the most to read) the two chips at their
+   natural widths were wider than the whole cluster, so they OVERFLOWED it and were painted
+   under the project-name field. Shrinking last is the same priority that also has an
+   answer for the case where there is genuinely not enough room for anybody. */
+.strip__sources .popover--sources { flex: 0 200 auto; }
+/* The floor is the chip's own padding, not zero: `.chip` is `4px 12px` and a border, so a
+   `<summary>` cannot draw itself narrower than 26 px however hard it is squeezed — and a
+   `<details>` allowed to shrink to 8 px around a 26 px child is a chip hanging out of its
+   own box and over the one beside it, which is what 1024-exported produced. 2rem clears the
+   padding with a character's room to spare. */
+.strip__sources .popover--problems,
+/* `.strip__status` and not `.popover--warnings`: the warnings chip is PORTALLED into that
+   span by the timeline (D-083), so the span — not the chip — is the flex item the strip is
+   sizing, and leaving it rigid meant the chip inside it never shrank however little room the
+   cluster had. It carries the same floor for the same reason. */
+.strip__sources .strip__status { flex: 0 1 auto; min-width: 2rem; }
+.strip__sources .popover--problems > summary,
+.strip__sources .popover--problems > summary,
+.strip__sources .popover--warnings > summary { min-width: 0; }
 /* The timeline's warnings chip lands here (V06-R2b, D-083). It is a portal target, so it is
    empty — and a zero-width flex item — in every phase and every run that has no warnings. */
-.strip__status { display: inline-flex; align-items: center; }
+.strip__status { display: inline-flex; align-items: center; min-width: 0; }
+.strip__status > .popover--warnings { flex: 1 1 auto; min-width: 0; }
 /* A sync is running: readable, but not a surface you can change mid-run — an override or a
    removal accepted now would silently belong to the NEXT run. Same rule the panel applied to
    its whole block (D-061), on the cluster that replaced it. */
@@ -286,7 +321,33 @@ body {
   gap: 6px;
   pointer-events: none;
 }
-.toasts .banner { pointer-events: auto; box-shadow: var(--shadow); }
+.toasts .banner {
+  /* `none`, not `auto` (V06-R3). D-082 turned pointer events off on the LAYER so a
+     transparent rectangle over the timeline could not eat a click — but the banner itself
+     is not transparent and is not small: the export receipt is three lines over the top two
+     device rows, and with `auto` it swallowed every press on the clips underneath until it
+     was dismissed. Found by a spec that tried to click a clip after an export and was told,
+     fifty-five times, that a `<span>` was in the way. The one thing in here that IS a
+     control turns them back on for itself, below. */
+  pointer-events: none;
+  box-shadow: var(--shadow);
+  /* V06-R3: a banner that floats over the room has to be OPAQUE. `--red-bg`/`--orange-bg`/
+     `--green-bg` are 10 %-alpha washes — exactly right for a block in a page's flow, and
+     unreadable here, because what is under a toast is not the page background but a
+     timeline full of green boxes showing straight through the sentence. Seen on the export
+     receipt, which is the longest thing the app ever says. The tint is kept: it is painted
+     as a background IMAGE over an opaque surface, so the class's own `background`
+     shorthand still chooses the colour and only the ground beneath it changes. */
+  background-color: var(--surface2);
+  /* …and it stops stretching to the width of the room. A three-line paragraph across a
+     956 px stage reads as a page, not as a remark; capped, it reads as one. */
+  max-width: 44rem;
+  align-self: flex-start;
+}
+.toasts .banner--error { background-image: linear-gradient(var(--red-bg), var(--red-bg)); }
+.toasts .banner--warn  { background-image: linear-gradient(var(--orange-bg), var(--orange-bg)); }
+.toasts .banner--ok    { background-image: linear-gradient(var(--green-bg), var(--green-bg)); }
+.toasts .banner--info  { background-color: var(--surface2); }
 
 /* ── The progress band (D-082) ───────────────────────────────────────────────────────── */
 
@@ -352,17 +413,36 @@ body {
   gap: 12px;
   min-width: 0;
   flex: 1 1 auto;
+  /* A backstop, not the mechanism. What actually keeps the row honest is the `flex: 0 0
+     auto` below; this guarantees that if anything ever does exceed the slot it is CLIPPED
+     at the slot's edge rather than painted across the room. */
+  overflow: hidden;
 }
+/* The transport is a fixed set of controls — a play button, a stop button, a clock and a
+   volume slider — and not one of them can shrink. Left at the flex default it shrank as a
+   BOX while its children kept their sizes, so at 1024 with a stale notice also in the row
+   the meta sentence was drawn straight across the volume slider. What absorbs the squeeze
+   is the meta sentence, which ellipsises and carries its own `title` (D-083's rule for the
+   legend, applied to the other side of the slot). */
+.slot__transport > .transport { flex: 0 0 auto; }
 /* The stale notice, moved out of the body (D-082). The banner's colour, none of its box: at
    38 px there is no room for a bordered block, and nothing has gone WRONG — the result simply
    describes sources that have moved on. */
 .slot__stale {
+  /* Pushed to the right end of the row — but only when it is the FIRST thing there.
+     `.slot__chips` carries the same `margin-left: auto`, and two auto margins in one flex
+     row SPLIT the free space between them rather than stacking at the end: with both
+     present the chips floated in the middle of the slot and the notice sat between them and
+     the edge, which is neither of the two places either of them belongs. The chips come
+     first in the DOM, so they keep the auto and the notice follows them. */
   margin-left: auto;
+  min-width: 0;
   color: var(--orange);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.slot__chips ~ .slot__stale { margin-left: 0; }
 .slot__stale::before { content: "● "; }
 
 /* ── The slot's footnotes (V06-R2a, D-077 #7/#13/#14) ───────────────────────────────────
@@ -381,7 +461,14 @@ body {
   font-size: 0.75rem;
   white-space: nowrap;
 }
-.slot__chips > .popover { flex: 0 0 auto; }
+/* Shrinkable, with the same floor and for the same reason as the strip's chips (V06-R3):
+   `.slot__chips` itself gives way when the row is full, and a rigid chip inside a cluster
+   that has given way is a chip drawn OVER whatever is next to it — at 1024 with a stale
+   notice also in the row, «1 stillbilde ble hoppet over» covered the first four words of
+   «Kildene er endret siden forrige synkronisering». */
+.slot__chips > .popover,
+.slot__chips > .slot__auto { flex: 0 1 auto; min-width: 2rem; }
+.slot__chips .popover > summary.chip { min-width: 0; }
 .slot__chips .popover > summary:hover .chip,
 .slot__chips .popover > summary.chip:hover { border-color: var(--accent-border); color: var(--text); }
 /* The promise, not a chip: it is a sentence the app is keeping, not a thing to open. */
@@ -514,6 +601,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   color: var(--text);
 }
 .banner__dismiss { margin-left: auto; }
+/* …and the dismiss button is the exception: the banner is inert, its ✕ is not. */
+.toasts .banner__dismiss { pointer-events: auto; }
 .banner--error { background: var(--red-bg); border-color: rgba(239, 68, 68, 0.4); }
 .banner--error::before { content: "●"; color: var(--red); }
 .banner--warn { background: var(--orange-bg); border-color: rgba(245, 158, 11, 0.4); }
@@ -539,6 +628,19 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   gap: 0.4rem;
 }
 .chip svg { flex-shrink: 0; }
+/* Every chip's words live in their own element, and it is the element that ellipsises
+   (V06-R3). `.chip` is an `inline-flex`, and a bare text node inside one is an ANONYMOUS
+   flex item: it cannot carry `text-overflow`, so a squeezed chip wrapped to two lines
+   instead — in a 44 px strip, a chip taller than the row it is in, on top of the one beside
+   it. A real element also gets the shrinking right to the sub-pixel: `overflow: hidden` on
+   the `<summary>` itself put an ellipsis on a chip that fitted, because `clientWidth`
+   rounds a 107.3 px box down to 107 and the text needed 107.3. */
+.chip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* The result's warnings, as a chip on the strip (V06-R2b, D-083). Amber, like the banner it
    replaced and like the clips it is usually about — the engine noticed something, nothing
    failed. The one warning colour there is; `.banner--warn` keeps the box for the places that
@@ -949,6 +1051,10 @@ select:hover, input:hover { border-color: var(--accent-border); }
   background: var(--text4);
 }
 .track__dot--pending { background: var(--text4); }
+/* Grey, exactly like `--pending` (V06-R3): the row's vocabulary is grey → blue → green and a
+   fourth colour would make it four. What is different is the SENTENCE the dot carries — see
+   `useTrackMeta`. Its own class only so the state can be asserted. */
+.track__dot--failed  { background: var(--text4); }
 .track__dot--ready   { background: var(--blue); }
 .track__dot--placed  { background: var(--green); }
 

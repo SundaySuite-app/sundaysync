@@ -343,6 +343,54 @@ reads one frame, writes nothing, makes no copy of the media, and the third claus
 spawn is bounded by W4a (D-069): two permits, so a preview can never starve a running sync's
 decoders, and no claim on the D-046 activity slot, so a sync never blanks the picture either.
 
+**Amendment (v0.6, D-074…D-087) — «Ett rom».** Everything above described a **page**: a drop
+zone, then a summary, then a button, then a result view, then an export row, stacked down one
+scrolling column. Five phases meant five different vertical stacks, and moving between them
+moved the material the operator was looking at while they were looking at it. v0.6 replaces the
+page with a **room**, and each of the points above lands in a fixed place inside it.
+
+- **The room is the window** (D-074). A CSS grid the size of the viewport: a 44 px strip, an
+  `auto` band row, the stage, a 38 px slot, and a 300 px inspector column spanning rows two
+  through four. `html, body { overflow: hidden }` — the document does not scroll at all; the
+  tracks and the inspector scroll inside themselves and say so. `tauri.conf.json` follows:
+  1280×800, never below 1024×600, which is where the shell is asserted.
+- **The inspector is BESIDE the timeline, and this supersedes D-070's "under"** (D-076). The
+  v0.5 amendment above put the preview in a fixed-height panel below the timeline, for one
+  reason: a panel in a vertical stack that appeared on selection would shove the timeline. A
+  column cannot shove the timeline at all — it is 300 px wide in every phase whether or not a
+  clip is marked — so the rule survives the move and the fixed height it needed does not. The
+  still frame goes 140×79 → **268×151**, and the file facts, the device selector and the sync
+  detail stack under it instead of sharing a row with it.
+- **The strip is the only action bar** (D-081/D-086). Points 1, 2, 3 and 5 all live on one 44 px
+  line: the wordmark, «Legg til», one sentence of summary, the phase's **single** primary action,
+  and the gear. The export row and the `resyncHint` moved here from the body; the sources panel's
+  fourteen affordances were redistributed rather than relocated (D-077), four of them behind
+  `<details>` popovers whose panels OVERLAY the room rather than taking space in it (D-078). In
+  the empty phase the strip carries no add control, because the stage IS the drop zone and
+  exactly one `DropZone` may be mounted at a time.
+- **The band is the one permitted motion** (D-082). Progress is something the app is *doing*, so
+  it takes a real 34 px grid row for as long as it is true — and it is held through the hop, so
+  the room never moves in the same frame the clips do. A banner is something the app has to
+  *say*, and says it in a layer over the stage instead.
+- **Blue means "the audio has been read"** (D-080). Point 4's colour language gains one term
+  between the neutral pre-sync slate and the placed green, and the device's gutter carries the
+  same three states as a dot for its whole row (D-083) — because at four hundred files a clip is
+  three pixels wide and the row is the only object with enough area to answer «hvor langt er
+  denne enheten kommet?» from across a room.
+- **The gutter is the device's home** (D-083). Two lines — identity, then «N filer · lengde ·
+  dot» — in 40 px lanes, with the zoom buttons in the ruler row's own gutter cell and the
+  timeline's words (the legend, the off-session line, the meta sentence) portalled into the slot.
+- **«Tilpass» fits a 16-hour day** (D-084). The zoom floor halves to `1e-5` px/ms, so Fit reaches
+  ~19.8 h in the lane the room actually has — the owner's 15.5-hour wedding included, which the
+  old floor could not show.
+
+**Deferred, and named rather than left implicit (D-079):** point 4's red «Ikke synkronisert» shelf
+is one click behind the strip's problem chip, not a row under the timeline. The version the room
+actually wants is the unplaced clip **in its own device row, at the left edge, numbered** — real
+timeline work (a lane that is not a time axis, hit-testing, the hop's arithmetic), priced as its
+own stage. Until then the shelf has the same standing the problem list has had since D-061:
+folded, never hidden.
+
 ## 10. Performance targets
 
 - Cold sync of an 8 h / 100-file day: < 6 min on a modern 8-core laptop (decode-bound); warm-cache

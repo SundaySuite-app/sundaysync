@@ -73,7 +73,9 @@ function RemovedChip({
 
   return (
     <details className="popover popover--up slot__removed" ref={ref}>
-      <summary className="chip">{t.removedTitle(removed.length)}</summary>
+      <summary className="chip" title={t.removedTitle(removed.length)}>
+        <span className="chip__text">{t.removedTitle(removed.length)}</span>
+      </summary>
       <div className="popover__panel" role="group" aria-label={t.removedTitle(removed.length)}>
         {removed.map(({ file, entry, problem }) => (
           <div key={file} className="filerow filerow--removed">
@@ -116,7 +118,9 @@ function SkippedChip({
 
   return (
     <details className="popover popover--up slot__skipped" ref={ref}>
-      <summary className="chip">{summary}</summary>
+      <summary className="chip" title={summary}>
+        <span className="chip__text">{summary}</span>
+      </summary>
       <div className="popover__panel" role="group" aria-label={summary}>
         {skipped.files.map((s) => (
           <div key={s.file} className="filerow filerow--skipped">

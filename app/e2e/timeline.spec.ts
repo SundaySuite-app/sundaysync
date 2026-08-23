@@ -163,8 +163,24 @@ test.describe("timeline tracks", () => {
     const ticks = page.locator(".timeline__tick");
     expect(await ticks.count()).toBeGreaterThan(1);
     await expect(ticks.first()).toBeVisible();
-    // Ticks read as HH:MM:SS.mmm / MM:SS.mmm — never a bare millisecond count.
-    await expect(ticks.first()).toHaveText(/^\d+(:\d{2})*:\d{2}\.\d{3}$/);
+    // Ticks read as a TIMECODE — never a bare millisecond count. Re-expressed in V06-R3
+    // (D-085): the claim was written as `HH:MM:SS.mmm`, which was the mechanism rather than
+    // the rule. `tickLabel` now drops the milliseconds whenever the chosen tick spacing is
+    // a whole second or more, because at that spacing no two ticks could differ in them —
+    // and the four characters they cost were what pushed the rightmost label off the end of
+    // the lane. Both forms are asserted here, and the pure choice between them is pinned in
+    // `geometry.test.ts`.
+    await expect(ticks.first()).toHaveText(/^\d+(:\d{2})*:\d{2}(\.\d{3})?$/);
+    // At this fixture's fit zoom the spacing really is seconds or more, so the shortened
+    // form is the one on screen — otherwise the alternation above would pass vacuously.
+    await expect(ticks.first()).not.toHaveText(/\.\d{3}$/);
+    // …and the LAST tick is never a number cut off mid-digit: a label that would not fit
+    // inside the lane is dropped and its line kept (V06-R3).
+    const lane = (await page.locator("#timeline-viewport").boundingBox())!;
+    const rights = await ticks.evaluateAll((els) =>
+      els.map((el) => el.getBoundingClientRect().left + (el.textContent ?? "").length * 7 + 4),
+    );
+    for (const r of rights) expect(r).toBeLessThanOrEqual(lane.x + lane.width + 1);
   });
 });
 
