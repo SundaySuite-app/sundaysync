@@ -14,17 +14,27 @@ import type { Unsynced, UnsyncedReason } from "../../types";
  * v0.4 (D-062) adds the second fix: the row can also be taken out of the run. "Move it to
  * the right device" is the answer when the file belongs in the edit; when it does not,
  * removing it is, and every other list in the app now offers that.
+ *
+ * v0.6 (V06-R2a, D-079): the shelf's MARKUP is untouched and its home moved. It is rendered
+ * inside the strip's problem popover now, beside the scan's own refusals, because "the engine
+ * would not place this" and "the scan could not read this" are one question from where the
+ * operator stands — and because a room with a fixed timeline has no row under the timeline to
+ * put a red box in. The one concession is `heading`: the popover says «Ikke synkronisert» at
+ * the top of the panel already, and the shelf must not say it a second time.
  */
 export function UnsyncedShelf({
   t,
   unsynced,
   deviceIds,
+  heading = true,
   onOverride,
   onExclude,
 }: {
   t: Strings;
   unsynced: Unsynced[];
   deviceIds: string[];
+  /** Draw the shelf's own title. False when the container already carries it (D-079). */
+  heading?: boolean;
   onOverride: (file: string, device: string) => void;
   onExclude: (file: string) => void;
 }) {
@@ -37,7 +47,7 @@ export function UnsyncedShelf({
 
   return (
     <div className="shelf">
-      <h2 className="shelf__title">{t.unsyncedTitle}</h2>
+      {heading && <h2 className="shelf__title">{t.unsyncedTitle}</h2>}
       {unsynced.map((u) => (
         <div key={u.file} className="shelf__row">
           <span>{basename(u.file)}</span>

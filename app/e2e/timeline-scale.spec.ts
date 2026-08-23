@@ -349,7 +349,13 @@ test.describe(`timeline scale (${TOTAL_PLACEMENTS} placements, 6 devices, 3-hour
       page.getByRole("group", { name: en.trackAria("Device 0") }).getByRole("group", { name: en.subTrackAria(2) }),
     ).toBeVisible();
     expect(TOTAL_PLACEMENTS).toBeGreaterThanOrEqual(50);
-    // The unsynced shelf actually carries the two entries the scenario planted.
+    // The unsynced shelf actually carries the two entries the scenario planted — behind the
+    // strip's problem chip since V06-R2a (D-079), so the chip's own count is asserted too.
+    const problems = page
+      .getByRole("region", { name: en.sourcesTitle })
+      .locator(".popover--problems");
+    await expect(problems.locator("> summary")).toHaveText(en.problemCount(2));
+    await problems.locator("> summary").click();
     await expect(page.locator(".shelf__row")).toHaveCount(2);
   });
 

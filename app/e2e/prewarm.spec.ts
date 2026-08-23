@@ -185,6 +185,11 @@ test.describe("the pass starts on its own", () => {
     await reachSources(page, { ...prewarmHeld(), ...cancelPrewarmSpy() });
     await waitForPending(page, "prewarm_analysis");
 
+    // V06-R2a (D-077 #1): the root chips are inside the «Kilder» popover now.
+    await page
+      .getByRole("region", { name: en.sourcesTitle })
+      .locator(".popover--sources > summary")
+      .click();
     await page.locator(".roots .root button").click();
     await expect(page.getByRole("button", { name: en.dropAction })).toBeVisible();
 

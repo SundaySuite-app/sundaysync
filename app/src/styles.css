@@ -117,6 +117,11 @@ body {
 
 .app__header {
   grid-area: strip;
+  /* The strip and the slot carry popovers that open over the stage (D-078), and `.stage` is
+     itself positioned — so these two rows have to be positioned and stacked above it, or the
+     panels are painted (and hit-tested) behind the timeline they overlay. */
+  position: relative;
+  z-index: 40;
   height: 44px;
   padding: 0 12px;
   display: flex;
@@ -146,6 +151,74 @@ body {
   color: var(--text2);
   font-size: 0.8125rem;
 }
+
+/* ── The strip's sources cluster (V06-R2a, D-077) ────────────────────────────────────────
+   `region(sourcesTitle)` — the summary popover, the problem chip and the pre-analysis tick.
+   It takes the flexible middle of the strip, and everything in it either ellipsises or hangs
+   off a disclosure: the strip is 44 px in every phase and this is the part of it whose
+   contents change the most. */
+.strip__sources {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The summary line shrinks (and ellipsises) before anything else does, and the chip and the
+   tick sit right beside it rather than at the far end of the strip: the count and «1
+   problemfil» are one sentence about one drop, and a whole window between them reads as two. */
+.strip__sources .popover--sources { flex: 0 1 auto; min-width: 0; }
+.strip__sources .popover--problems,
+.strip__sources .prewarm { flex: 0 0 auto; }
+/* A sync is running: readable, but not a surface you can change mid-run — an override or a
+   removal accepted now would silently belong to the NEXT run. Same rule the panel applied to
+   its whole block (D-061), on the cluster that replaced it. */
+.strip__sources--busy { opacity: 0.5; pointer-events: none; }
+
+/* ── Popovers (V06-R2a, D-078) ───────────────────────────────────────────────────────────
+   One shape for all four: `<details class="popover">` with a `<summary>` that is already a
+   control the strip or the slot wanted anyway — the summary line, the problem chip, the
+   removed chip, the skipped chip — and a panel that OVERLAYS the room rather than taking
+   space in it. That is the whole point: the room is fixed (D-074), so a list that appeared in
+   the layout would move the material the operator is reading. `usePopoverDismiss` adds the
+   two behaviours `<details>` has no opinion about, Escape and an outside press; everything
+   else (tab stop, Enter/Space, the announced open state) is the element's own. */
+.popover { position: relative; }
+.popover > summary { list-style: none; cursor: pointer; user-select: none; }
+.popover > summary::-webkit-details-marker { display: none; }
+.popover > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.popover__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 320px;
+  max-width: 520px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lg);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-size: 0.9375rem;
+  color: var(--text);
+  text-align: left;
+  white-space: normal;
+  cursor: default;
+}
+/* Anchored to the bottom slot, so it grows upwards into the room instead of off-screen. */
+.popover--up .popover__panel { top: auto; bottom: calc(100% + 6px); }
+/* Anchored to the right edge, so a panel on a control near the window edge stays inside it. */
+.popover--right .popover__panel { left: auto; right: 0; }
+.popover__title { font-size: 0.9rem; font-weight: 600; color: var(--text2); }
+/* The summary line is a `<summary>` now, and a `<summary>` is `display: list-item` by
+   default — which ignores the ellipsis rules the line has always had. */
+.popover--sources > summary.strip__summary { display: block; }
+.popover--sources > summary:hover { color: var(--text); }
 
 /* Strip-sized controls. The page's own `.primary` is a 1rem call-to-action with 0.8rem of
    padding — right for the middle of an empty screen, two rows too tall for a 44 px line. */
@@ -197,19 +270,6 @@ body {
 }
 .toasts .banner { pointer-events: auto; box-shadow: var(--shadow); }
 
-/* THE BRIDGE (D-087). The sources panel keeps working exactly as it did, in its own scroller
-   under the timeline, until R2a takes it out. `40%` rather than a pixel height so it shrinks
-   with the window instead of squeezing the timeline to nothing on a short screen. */
-.stage__legacy {
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 40%;
-  overflow-y: auto;
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
-}
-
 /* ── The progress band (D-082) ───────────────────────────────────────────────────────── */
 
 .band {
@@ -249,6 +309,8 @@ body {
 
 .slot {
   grid-area: slot;
+  position: relative;
+  z-index: 40;
   height: 38px;
   padding: 0 12px;
   display: flex;
@@ -274,6 +336,33 @@ body {
   text-overflow: ellipsis;
 }
 .slot__stale::before { content: "● "; }
+
+/* ── The slot's footnotes (V06-R2a, D-077 #7/#13/#14) ───────────────────────────────────
+   «Fjernet (N)», the skipped line and the auto-reference promise. Each is absent when it has
+   nothing to say, so the cluster is usually empty — and it must never grow the 38 px row, so
+   its chips are slot-sized and its panels open upwards over the room. */
+.slot__chips {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.slot__chips .chip {
+  padding: 0.1rem 0.6rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.slot__chips > .popover { flex: 0 0 auto; }
+.slot__chips .popover > summary:hover .chip,
+.slot__chips .popover > summary.chip:hover { border-color: var(--accent-border); color: var(--text); }
+/* The promise, not a chip: it is a sentence the app is keeping, not a thing to open. */
+.slot__auto {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .muted  { color: var(--text2); font-size: 0.875rem; }
 .subtle { color: var(--text3); font-size: 0.8125rem; }
@@ -408,7 +497,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ── Chips / device summary ─────────────────────────────────────── */
 
-.chips { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+/* (`.chips`, the panel's wrapping row of them, went with the panel in V06-R2a: the chips
+   that are left are single items on the strip and in the slot, each placed by its own row.) */
 .chip {
   background: var(--surface2);
   border: 1px solid var(--border);
@@ -422,41 +512,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .chip svg { flex-shrink: 0; }
 
-/* ── Sources view ───────────────────────────────────────────────── */
-
-.sources { display: flex; flex-direction: column; gap: 1rem; }
-
-/* v0.4 (D-061): the panel under the timeline. The list is no longer the main view, so it
-   is tightened — smaller rows, tighter gaps — to sit as a reference table beneath the
-   thing that now answers the first question. */
-.sources--panel { gap: 0.6rem; font-size: 0.9375rem; }
-.sources--panel .filerow { padding: 0.3rem 0.75rem; }
-.sources--panel .device-group__head { padding: 0.4rem 0.75rem; }
-/* A sync is running: readable, but not a surface you can change mid-run — an override
-   applied now would silently belong to the NEXT run. */
-.sources--busy { opacity: 0.5; pointer-events: none; }
-
-/* The one collapsed group: files the scan could not use. Shut by default — a footnote on
-   a good drop, with its count still on the summary line and in the chip above. */
-.device-group--problems > summary {
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-.device-group--problems > summary::-webkit-details-marker { display: none; }
-/* Own disclosure triangle, so it reads the same in every browser and rotates on open. */
-.device-group--problems > summary::before {
-  content: "▸";
-  color: var(--text3);
-  font-size: 0.75rem;
-  transition: transform 0.15s;
-}
-.device-group--problems[open] > summary::before { transform: rotate(90deg); }
-.device-group--problems > summary:hover { background: var(--surface3); }
-.device-group--problems > summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
+/* ── Sources: the lists that live inside the popovers now (V06-R2a, D-077) ─────────────
+   The panel is gone; its ROWS are not. Everything below is what the «Kilder», problem,
+   removed and skipped panels are built from, and it is the same styling the panel used —
+   a list of files reads the same whether it is a block on a page or a panel over one. The
+   old `.sources`/`.sources--panel`/`.sources--busy` block went with the panel; the dimming
+   rule it carried is `.strip__sources--busy` now, and the `<details>` chrome it gave the
+   problem group is `.popover`'s. */
 
 .roots { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
 .root {
@@ -486,6 +548,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   background: var(--surface2);
   border-bottom: 1px solid var(--border);
 }
+.device-group__head { padding: 0.4rem 0.75rem; }
 .device-group__name { font-weight: 600; font-size: 0.9rem; }
 .device-group__meta { color: var(--text3); font-size: 0.8125rem; margin-left: auto; }
 
@@ -494,7 +557,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   grid-template-columns: 1fr auto auto auto;
   gap: 0.75rem;
   align-items: center;
-  padding: 0.55rem 1rem;
+  padding: 0.3rem 0.75rem;
   border-bottom: 1px solid var(--border);
   font-size: 0.875rem;
 }
@@ -503,10 +566,31 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .filerow__badges { display: flex; gap: 0.35rem; }
 .filerow--problem { color: var(--text2); }
 .filerow--problem .filerow__name { text-decoration: line-through; text-decoration-color: var(--text4); }
-/* v0.4 (D-062): a readable row carries one control more than a problem row — the star,
-   the device select AND the ✕ — so it gets its own column count rather than squeezing
-   two controls into one cell. */
-.filerow--removable { grid-template-columns: 1fr auto auto auto auto; }
+/* V06-R2a (D-077 #8): a row in the «Kilder» panel is a BUTTON — its whole job is "show me
+   this file", and the three per-file decisions it used to carry moved to the inspector. So it
+   is one flex line rather than the grid, and it resets the chrome the browser gives a button.
+   (`.filerow--removable`, the five-column readable row, went with the panel: no list in the
+   room carries a star, a select and a ✕ on every row any more.) */
+.filerow--pick {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 0.875rem;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  cursor: pointer;
+  padding: 0.35rem 0.75rem;
+}
+.filerow--pick:last-child { border-bottom: none; }
+.filerow--pick:hover { background: var(--surface2); }
+.filerow--pick .filerow__name { flex: 1 1 auto; min-width: 0; }
+.filerow--pick .filerow__badges { flex: 0 0 auto; }
 .filerow--removed { color: var(--text2); }
 .filerow--removed .filerow__name { text-decoration: line-through; text-decoration-color: var(--text4); }
 /* D-066: a skipped file is a footnote, not a complaint. Muted like the removed rows, but
@@ -1120,6 +1204,25 @@ select:hover, input:hover { border-color: var(--accent-border); }
 }
 .preview .field--inline > select { flex: 0 1 auto; min-width: 0; }
 
+/* ── The inspector's action row (V06-R2a, D-077 #9/#10/#11) ─────────────────────────────
+   Star, move-to-device, ✕ — the three decisions about the marked clip, between what the file
+   IS and what the engine made of it. One of each, on one line: these were on all 386 rows of
+   the sources list, which is what made the list unreadable and a mis-click cheap. */
+.inspector__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+/* The label/`<select>` pair keeps the one-line shape `.preview .field--inline` already gives
+   it; what it needs here is to be the row's flexible middle, between the star and the ✕. */
+.inspector__actions .field--inline { flex: 1 1 auto; min-width: 0; }
+/* The ✕ is a quiet control everywhere else because it hides until its row is hovered. There
+   is no row to hover here, so it carries its own weight. */
+.inspector__actions .removebtn { opacity: 1; }
+
 /* ── Unsynced shelf ─────────────────────────────────────────────── */
 
 .shelf {
@@ -1138,6 +1241,34 @@ select:hover, input:hover { border-color: var(--accent-border); }
 }
 .shelf__reason { color: var(--text2); }
 .shelf__row select { margin-left: auto; }
+/* Inside the problem popover (D-079) the panel already supplies the padding and the panel's
+   own heading names the list, so the shelf is a tinted block rather than a card. The row was
+   a page-wide line and the panel is at most 520 px, so the REASON — the longest and least
+   urgent part of it — takes a line of its own instead of being squeezed into a five-word-tall
+   column beside the name. */
+.popover__panel .shelf { padding: 0.6rem 0.75rem; }
+/* The shelf row carries three controls and a sentence; 320 px is enough for the scan's own
+   two-column problem rows and not for this one, and a truncated FILENAME is the one thing a
+   list of problems may not do. */
+.popover--problems .popover__panel { min-width: 400px; }
+.popover__panel .shelf__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "name   select remove"
+    "reason reason reason";
+  gap: 0.2rem 0.6rem;
+}
+.popover__panel .shelf__row > span:first-child {
+  grid-area: name;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popover__panel .shelf__reason { grid-area: reason; }
+.popover__panel .shelf__row > label { grid-area: select; }
+.popover__panel .shelf__row > button { grid-area: remove; }
+.popover__panel .shelf__row select { margin-left: 0; }
 
 /* ── Dialog ─────────────────────────────────────────────────────── */
 

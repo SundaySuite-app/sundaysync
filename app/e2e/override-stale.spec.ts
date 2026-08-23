@@ -96,6 +96,11 @@ test.describe("override after sync marks the result stale", () => {
     await page.getByRole("button", { name: en.dropFolder }).click();
     await page.getByRole("button", { name: en.syncButton }).click();
 
+    // V06-R2a (D-079): the shelf hangs off the strip's problem chip now.
+    await page
+      .getByRole("region", { name: en.sourcesTitle })
+      .locator(".popover--problems > summary")
+      .click();
     const shelf = page.locator(".shelf");
     await expect(shelf).toBeVisible();
     await expect(page.getByText(en.staleResult)).toBeHidden();

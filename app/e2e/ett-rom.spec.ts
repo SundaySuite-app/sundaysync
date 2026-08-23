@@ -255,6 +255,51 @@ for (const size of SIZES) {
       sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
     });
 
+    test("every popover overlays the room — opening one moves nothing", async ({ page }) => {
+      // V06-R2a (D-078). The sources panel used to take 40 % of the stage under the timeline;
+      // what replaced it is four disclosures whose panels are LAYERS. That is the whole reason
+      // they are layers: a list that took space when it opened would move the material the
+      // operator is reading, in a room built to promise that nothing does.
+      //
+      // All four are opened in turn, at both window sizes, against one set of boxes — a
+      // popover that pushed only at 1024×600 is exactly the failure this file exists for.
+      await reachSources(page, size, {
+        scan_inputs: scanManifest({
+          unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
+          skipped: [{ file: "/Users/e2e/shoot/IMG_0001.HEIC", reason: "still_image" }],
+        }),
+      });
+      // Something removed, so the slot's «Fjernet» chip exists to be opened.
+      await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+      await expect(page.locator(".preview__name")).toHaveText("C0001.MP4");
+      await page.locator(".inspector").getByLabel(`${en.removeFile}: C0001.MP4`).click();
+
+      const before = await room(page);
+      const frameBefore = (await page.locator(".timeline__frame").boundingBox())!;
+
+      for (const selector of [
+        ".popover--sources",
+        ".popover--problems",
+        ".slot__removed",
+        ".slot__skipped",
+      ]) {
+        const popover = page.locator(selector);
+        await popover.locator("> summary").click();
+        await expect(popover.locator(".popover__panel")).toBeVisible();
+
+        const after = await room(page);
+        sameBox(after.strip, before.strip);
+        sameBox(after.slot, before.slot);
+        sameBox(after.inspector, before.inspector);
+        sameBox(after.stage, before.stage);
+        sameBox(after.gutter, before.gutter);
+        sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
+
+        await page.keyboard.press("Escape");
+        await expect(popover.locator(".popover__panel")).toBeHidden();
+      }
+    });
+
     test("an error banner floats over the stage instead of pushing it", async ({ page }) => {
       // Banners used to be a row between the header and everything else, so an export that
       // failed — or an update notice arriving on its own — shoved the timeline down by the

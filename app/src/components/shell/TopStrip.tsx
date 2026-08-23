@@ -13,9 +13,15 @@ import { GearIcon } from "../icons";
  * whole reason the room used to jump three times per run.
  *
  * What goes in `actions` is the phase's own decision (App owns the phase machine); this
- * component owns only the shape. `summary` is a single already-composed string rather than
- * a set of counts, for the same reason: the strip must never grow a second line, and the
- * one place that can decide what fits is the place that knows what the phase is.
+ * component owns only the shape.
+ *
+ * `sources` is the same bargain, one stage further on (V06-R2a, D-077): it used to be a
+ * single composed string, and it is now the whole sources cluster — the «Kilder» disclosure
+ * whose `<summary>` IS that string, the problem chip, and the pre-analysis tick. The strip
+ * still must never grow a second line, so the cluster is given the flexible middle of the row
+ * and everything inside it ellipsises or hangs off a popover. App passes an empty
+ * `.strip__summary` in the phases that have nothing to say, so the slot is never missing and
+ * the primary action never shifts sideways under the operator's hand.
  */
 export function TopStrip({
   t,
@@ -23,13 +29,13 @@ export function TopStrip({
    *  full-size one instead. Exactly one `DropZone` may be mounted at a time: its drag-drop
    *  listener is webview-global (see `DropZone.tsx`), so two would take every drop twice. */
   add,
-  summary,
+  sources,
   actions,
   onSettings,
 }: {
   t: Strings;
   add: ReactNode;
-  summary: string | null;
+  sources: ReactNode;
   actions: ReactNode;
   onSettings: () => void;
 }) {
@@ -39,9 +45,7 @@ export function TopStrip({
         Sunday<span className="accent">Sync</span>
       </h1>
       {add}
-      {/* Always rendered, even when there is nothing to say: an element that appears would
-          re-flex the row and shift the primary action sideways under the operator's hand. */}
-      <span className="strip__summary">{summary}</span>
+      {sources}
       {actions}
       <button
         type="button"

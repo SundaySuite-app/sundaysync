@@ -30,7 +30,6 @@ import { PlayheadLine } from "./PlayheadLine";
 import { Ruler } from "./Ruler";
 import { Track } from "./Track";
 import { Transport } from "./Transport";
-import { UnsyncedShelf } from "./UnsyncedShelf";
 import { useHop } from "./useHop";
 import { warningText } from "./warnings";
 
@@ -140,13 +139,10 @@ export function TimelineView({
   prewarm,
   outcome,
   stale,
-  deviceIds,
   selected,
   onSelect,
   slotEl,
   onHopSettled,
-  onOverride,
-  onExclude,
 }: {
   t: Strings;
   phase: TimelinePhase;
@@ -165,7 +161,6 @@ export function TimelineView({
   /** Null until a sync has produced one. */
   outcome: SyncOutcome | null;
   stale: boolean;
-  deviceIds: string[];
   /**
    * The marked clip, as a FILE PATH — owned by App since V06-R1 (D-075).
    *
@@ -187,8 +182,6 @@ export function TimelineView({
   slotEl: HTMLElement | null;
   /** The hop has come to rest (D-082) — App holds the progress band open until it has. */
   onHopSettled?: () => void;
-  onOverride: (file: string, device: string) => void;
-  onExclude: (file: string) => void;
 }) {
   const result = outcome?.result ?? null;
 
@@ -455,13 +448,10 @@ export function TimelineView({
     return Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : undefined;
   }, [result]);
 
-  // D-062: the shelf is where a file that would not sync gets its ✕. It is the row the
-  // operator is most likely to want gone — "this one never works, stop telling me" — and
-  // before this stage the only way to act on it was to re-drop the folder without it.
-  const shelved = useMemo(
-    () => (result ? result.unsynced.filter((u) => !excluded.has(u.file)) : []),
-    [result, excluded],
-  );
+  // (The unsynced shelf moved into the strip's problem popover in V06-R2a (D-079). It was
+  // never about the timeline — an unplaced clip has no position, so it has no x coordinate —
+  // and in a room whose timeline fills the stage there is no row under it to put a red box in.
+  // App owns the list and the two callbacks now; `excluded` is still read here, by the spans.)
 
   const toggleMute = useCallback((id: string) => engine.toggleMute(id), [engine]);
   const toggleSolo = useCallback((id: string) => engine.toggleSolo(id), [engine]);
@@ -895,16 +885,6 @@ export function TimelineView({
       {result &&
         slotEl !== null &&
         createPortal(<Transport t={t} clips={audioClips} fps={fps} />, slotEl)}
-
-      {result && shelved.length > 0 && (
-        <UnsyncedShelf
-          t={t}
-          unsynced={shelved}
-          deviceIds={deviceIds}
-          onOverride={onOverride}
-          onExclude={onExclude}
-        />
-      )}
     </section>
   );
 }

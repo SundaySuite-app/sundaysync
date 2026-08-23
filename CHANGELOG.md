@@ -35,6 +35,20 @@
   «Kildene er endret siden forrige synkronisering» er én stille linje langs bunnen nå.
 - **Eksport, prosjektnavn og «Vis i Finder» flyttet opp** i topplinja, ved siden av «Synk på
   nytt» — resultatfasens handlinger står der alle de andre fasenes handling står.
+- **Kildelista er borte fra skjermen, og alt den kunne står igjen.** Panelet under tidslinja
+  tok 40 % av rommet hele tida for å svare på fem ulike spørsmål samtidig. Nå henger lista bak
+  linja som teller den — «3 filer · 2 enheter» er selve knappen som åpner mappene, enhetene og
+  hver enkelt fil, og en filrad merker klippet og lukker panelet igjen. Å finne én fil på navn
+  i et 386-klipps opptak er det tidslinja ikke kan, så lista blir — men den ligger over rommet
+  i stedet for å ta av det.
+- **Stjerne, «Flytt til enhet» og ✕ står på klippet du ser på.** Før satt alle tre på hver
+  eneste rad; nå står det ett av hvert, i høyre kolonne, under det fila faktisk er. Filer som
+  ikke kunne leses beholder sin egen ✕ i sitt eget panel — «om de kan leses eller ikke» er
+  fortsatt ett ønske.
+- **Problemer, fjernede filer og oversprungne filer er brikker du kan åpne.** Den røde
+  problembrikka i topplinja teller både det skanninga ikke fikk lest og det motoren ikke fikk
+  plassert, og «Ikke synkronisert»-hylla ligger inni den. «Fjernet (N)» og «… ble hoppet over»
+  er brikker langs bunnen, og hver av dem er borte når den ikke har noe å si.
 
 ### Internt
 
@@ -42,10 +56,13 @@
   der designet vil ha dem uten å flytte på hvor dataene deres bor (D-075); forhåndsvisninga er
   en kolonne (D-076); én hovedhandling per fase (D-081); framdriftsstripa og meldingslaget er
   to ulike slags ting og er bygget ulikt (D-082); «Legg til» er en topplinje-kontroll (D-086).
-  Kildepanelet blir hengende under tidslinja som en bevisst bro til R2a fjerner det (D-087) —
-  ingenting fra denne etappen slippes alene.
-- `app/e2e/ett-rom.spec.ts` måler rommet i piksler i to vindusstørrelser, og sampler hver
-  eneste ramme av hoppet for å bevise at framdriftsstripa aldri blinker vekk under det.
+  Kildepanelet hang under tidslinja som en bevisst bro (D-087) og er fjernet i R2a: de fjorten
+  tingene panelet kunne er fordelt på fire steder i rommet (D-077), de fire panelene er
+  `<details>` som legger seg over rommet i stedet for å ta av det (D-078), og hylla flyttet med
+  dem (D-079). Ingenting fra R1 ble sluppet alene.
+- `app/e2e/ett-rom.spec.ts` måler rommet i piksler i to vindusstørrelser, sampler hver eneste
+  ramme av hoppet for å bevise at framdriftsstripa aldri blinker vekk under det, og åpner alle
+  fire panelene for å bevise at ingen av dem flytter en eneste boks.
 
 
 ## v0.5.0-beta.1
