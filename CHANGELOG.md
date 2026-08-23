@@ -1,5 +1,12 @@
 # Changelog
 
+## Ikke utgitt
+
+- **Kvitteringene fra Innstillinger leses over dialogen, ikke bak den.** «Buffer tømt»,
+  «data slettet» og de andre svarene fra panelet lå bak den mørke sperren og var knapt
+  synlige før dialogen ble lukket; nå ligger de over, og leses i det de fortjenes (D-089).
+  Popovere som står åpne når fasen skifter blir stående — det er et valg, ikke en glipp.
+
 ## v0.6.0-beta.2
 
 Etter en kontroll-for-kontroll gjennomgang av «Ett rom» (hver eneste knapp, i hver fase, trykket

@@ -309,13 +309,17 @@ body {
 
 /* Banners float over the stage rather than taking a row (D-082). `pointer-events` is off on
    the layer and back on for each banner: the layer covers the top of the timeline, and a
-   transparent rectangle that ate clicks there would be worse than the stacking it replaced. */
+   transparent rectangle that ate clicks there would be worse than the stacking it replaced.
+   z-index 50 sits ABOVE the dialog backdrop (40): the owner decided (D-089) that a receipt
+   for a Settings action — cache cleared, data deleted — is read the moment it is earned,
+   not after the dialog it answers is closed. `.stage` carries no z-index of its own, so
+   this absolute layer participates in the root stacking context and the number holds. */
 .toasts {
   position: absolute;
   top: 8px;
   left: 12px;
   right: 12px;
-  z-index: 20;
+  z-index: 50;
   display: flex;
   flex-direction: column;
   gap: 6px;

@@ -1490,20 +1490,15 @@ test.describe("settings dialog", () => {
     await expect(banner).toContainText(en.errIo("/Users/e2e/out"));
   });
 
-  test("what Settings says back is said BEHIND the modal — recorded, not endorsed", async ({
+  test("what Settings says back is read OVER the modal — the owner's call (D-089)", async ({
     page,
   }) => {
-    // ❓ for the owner. Five of this panel's controls answer with a banner — clear cache, the
-    // cap's eviction count, «Delete my data», «Export diagnostics», and the telemetry
-    // unavailable notice — and every one of those banners is painted in the stage's `.toasts`
-    // layer at `z-index: 20`, under a `.dialog-backdrop` at `z-index: 40` carrying a 72 %
-    // black scrim. So the answer to a Settings action exists, is correct, and is 28 % visible
-    // until the operator closes the dialog it belongs to.
-    //
-    // Left as it is deliberately: the button works and the notice is right, and WHERE that
-    // notice belongs (over the modal, or as a line inside the panel beside the control) is a
-    // design decision, not a bug fix. This asserts the current state so a change to it is a
-    // deliberate one.
+    // Decided by the owner (D-089): the five banners a Settings control answers with —
+    // clear cache, the cap's eviction count, «Delete my data», «Export diagnostics», the
+    // telemetry unavailable notice — are painted ABOVE the dialog backdrop (`.toasts` at
+    // z-index 50 over the scrim's 40), so the receipt is read the moment it is earned,
+    // with the dialog still open. The sweep first recorded the opposite; this is the
+    // deliberate change it asked for.
     await openSettings(page, {
       cache_status: { dir: "/Users/e2e/cache", entries: 4, bytes: 1000 },
       ...spy("clear_cache", "1000"),
@@ -1513,18 +1508,27 @@ test.describe("settings dialog", () => {
     await dialog.getByRole("button", { name: en.cacheClear }).click();
     await expect(page.locator(".banner--ok")).toContainText(en.cacheCleared(formatBytes(1000)));
 
-    // The scrim really is over it: a hit test in the middle of the banner lands on the
-    // backdrop, not on the banner.
-    const covered = await page.locator(".banner--ok").evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-      return at instanceof HTMLElement && at.closest(".dialog-backdrop") !== null;
-    });
-    expect(covered).toBe(true);
+    // The banner really is over the scrim — while the dialog is still open. The banner's
+    // BODY is deliberately click-through (`.toasts` pointer-events choreography), which
+    // `elementFromPoint` honours, so the honest probe is the one part that takes the
+    // pointer: the dismiss. A hit test at its middle must land on it, not the backdrop —
+    // that proves both paint order and that the receipt can be dismissed without closing
+    // the dialog first.
+    await expect(page.getByRole("dialog", { name: en.settings })).toBeVisible();
+    const onTop = await page
+      .locator(".banner--ok .banner__dismiss")
+      .evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return at instanceof HTMLElement && (el === at || el.contains(at));
+      });
+    expect(onTop).toBe(true);
 
-    // …and it is plainly readable the moment the dialog is out of the way.
+    // Closing the dialog afterwards neither hides nor duplicates the receipt.
     await dialog.getByRole("button", { name: en.close }).click();
+    await expect(page.getByRole("dialog", { name: en.settings })).toBeHidden();
     await expect(page.locator(".banner--ok")).toBeVisible();
+    await expect(page.locator(".banner--ok")).toHaveCount(1);
   });
 
   test("the telemetry block: the toggle, the preview, the consent text and the deletion", async ({
