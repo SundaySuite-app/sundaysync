@@ -1297,23 +1297,108 @@ select:hover, input:hover { border-color: var(--accent-border); }
 .clip:hover { filter: brightness(1.1); }
 .clip:focus-visible { outline: 2px solid var(--accent2); outline-offset: -2px; }
 
-/* ── The hop (v0.4, D-063) ──────────────────────────────────────────────────
+/* ── The hop: shuffle, travel, bounce (v0.4 D-063 → V06 D-090) ──────────────────────────
    When the sync lands, every clip that survives it travels from where its camera's clock
    claimed it was to where the audio says it actually was. `transform` and nothing else:
    `left`/`width` are rewritten on every pan and zoom frame, so animating those would be
    two writers on one property, taking turns, at the exact moment the operator is most
-   likely to grab the timeline. The 450 ms is mirrored in `useHop.ts`, which needs it only
-   to size the safety timer — the browser reads the duration from here.
-   The reduced-motion block at the top of this file already kills this transition; the hop
-   is skipped in JS as well, so a clip never gets a transform it cannot animate away. */
-.clip--hop { transition: transform 450ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+   likely to grab the timeline.
+
+   D-090 replaced the single 450 ms `transition` with ONE keyframe animation per clip,
+   because the owner asked for three moves rather than one — «ting hopper litt rundt på
+   tidslinjen og spretter på plassen hvor de skal være, for så å bli grønne». A chain of
+   transitions would have a seam at every join (and a `transitionend` to mis-schedule at
+   each of them); one animation has none.
+
+   **Read this as FLIP, or the signs make no sense.** The clip is already RENDERED at its
+   new, solved position. `translate(--hop-dx, --hop-dy)` is what puts it back on its old
+   one, so the wander at the start of the number happens AROUND the old spot and `0,0` is
+   home. `useHop.ts` writes the five custom properties; `timeline/hop.ts` computes them.
+
+     0 → 35 %   «stokking» — 280 ms of small wander around the old position.
+    35 → 85 %   the travel, 400 ms, to a point 6 % PAST home…
+    85 → 100 %  …and 120 ms of spring back onto it. That is the «sprett».
+
+   The 800 ms is mirrored in `timeline/hop.ts` as `HOP_TRAVEL_MS`, which needs it only to
+   size the safety net and the progress band's hold — the browser reads it from here.
+   `linear` at the shorthand level is deliberate: every segment states its own easing
+   below, and an outer easing would be applied on top of them.
+
+   `both` is load-bearing, not tidiness: `backwards` holds the 0 % keyframe through the
+   clip's start delay, so a clip waiting its turn waits on its OLD position instead of
+   flashing at its new one for up to 250 ms.
+
+   The reduced-motion block at the top of this file already kills this animation; the whole
+   sequence is skipped in JS as well, so a clip never gets an offset it cannot animate away. */
+.clip--hop { animation: clip-shuffle-bounce 800ms linear var(--hop-delay, 0ms) both; }
+
+@keyframes clip-shuffle-bounce {
+  /* Wandering. `ease-in-out` on each leg so the clip drifts rather than ticks. */
+  0% {
+    animation-timing-function: ease-in-out;
+    transform: translate(var(--hop-dx), var(--hop-dy));
+  }
+  12% {
+    animation-timing-function: ease-in-out;
+    transform: translate(calc(var(--hop-dx) + var(--hop-jx)), calc(var(--hop-dy) + var(--hop-jy)));
+  }
+  24% {
+    animation-timing-function: ease-in-out;
+    transform: translate(
+      calc(var(--hop-dx) - var(--hop-jx) * 0.6),
+      calc(var(--hop-dy) - var(--hop-jy) * 0.6)
+    );
+  }
+  /* Found itself. Now the travel: slow to leave, fast in the middle, arriving hard. */
+  35% {
+    animation-timing-function: cubic-bezier(0.45, 0, 0.25, 1);
+    transform: translate(var(--hop-dx), var(--hop-dy));
+  }
+  /* Past home by 6 % of the distance it came — the overshoot the spring undoes. A clip that
+     travelled 400 px overshoots by 24; one that travelled 12 px overshoots by 0.7 and the
+     bounce is honestly invisible, which is right: it barely moved. */
+  85% {
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    transform: translate(calc(var(--hop-dx) * -0.06), calc(var(--hop-dy) * -0.06));
+  }
+  100% { transform: translate(0px, 0px); }
+}
+
+/* On a clip for exactly as long as its own animation runs (D-090). The journey is BLUE —
+   `--blue` is already the app's word for "analysed, not yet placed" (D-080) — and the green
+   arrives when `useHop` takes this class off at `animationend`. Green is §9.4's word for
+   "the engine placed this and stands behind it", and a clip still in the air has not landed
+   anywhere to be stood behind. With the staggered delays the removals arrive as a wave.
+
+   One class of specificity, stated AFTER `.clip--warn` and the pre-sync marks, so it wins
+   on source order over every fill a clip can otherwise wear — which is the point: for these
+   800 ms there is one state, and it is "travelling". */
+.clip--travelling { background: var(--blue); color: #04122a; }
+/* …with the one exception that is not a fill at all. A clip whose duration is unknown is a
+   hollow dashed sliver *because* it is not a measurement (`clip--nodur`), and filling it in
+   for the journey would be the app claiming a length for 800 ms that it never had. It
+   travels in blue too — as an outline. */
+.clip--nodur.clip--travelling {
+  background: none;
+  border-color: var(--blue);
+  color: var(--blue);
+}
 
 /* A clip the run did NOT place (unsynced, or removed) has no node left to fade — React
    took it out with the rest of the old layout — so a copy is drawn where it used to be and
-   that fades instead. Shorter than the hop: it is leaving, and the eye belongs on what is
-   arriving. `pointer-events: none` because it is scenery, not a control. */
+   that fades instead. `pointer-events: none` because it is scenery, not a control.
+
+   D-090 gave the fade a 150 ms delay: the survivors spend the first 280 ms of the number
+   milling about, and a clip that vanished before they had finished doing so was gone before
+   anyone had a reason to look at it. It leaves once the room is moving. An animation rather
+   than a transition, so the ghost needs no forced reflow to prime it — `backwards` holds it
+   opaque through the delay, `forwards` holds it transparent afterwards. */
 .clip--ghost { pointer-events: none; opacity: 1; }
-.clip--fade { opacity: 0; transition: opacity 260ms ease-out; }
+.clip--fade { animation: clip-ghost-fade 260ms ease-out 150ms both; }
+@keyframes clip-ghost-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 
 .timeline__ghosts {
   position: absolute;
@@ -1326,8 +1411,8 @@ select:hover, input:hover { border-color: var(--accent-border); }
    device gained or lost a sub-track has to be able to travel ACROSS a track boundary, and
    `overflow: hidden` on the lane it lands in would cut it in half on the way. The frame
    still clips, so nothing escapes onto the page. The gutter and the scrollbar row are
-   lifted above the clips for the same 450 ms, so a box passing over them slides BEHIND the
-   device names rather than across them. */
+   lifted above the clips for the length of the number, so a box passing over them slides
+   BEHIND the device names rather than across them. */
 .timeline--hopping .track__lanes,
 .timeline--hopping .track__lane { overflow: visible; }
 .timeline--hopping .track__gutter,

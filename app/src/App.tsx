@@ -492,6 +492,13 @@ export function App() {
   // `onHopSettled` is the ordinary release — `useHop` fires it from both of the ways a hop can
   // end, its own finish and any gesture that cancels it. The timer is the promise that there
   // IS an end: the same safety net `useHop` sizes its own from, plus a frame.
+  //
+  // D-090 lengthened the number to ~1.05 s (`HOP_TOTAL_MS`) and this backstop grew with it
+  // without being touched, which is the point of importing it rather than restating it:
+  // `HOP_SAFETY_MS` IS `HOP_TOTAL_MS + 250`, and the extra 100 keeps this timer behind the
+  // sequence's real end (the number, then the ~300 ms fit) rather than cutting the band off
+  // mid-move. A backstop that fired first would be a band that vanished while the timeline
+  // was still travelling — exactly the flicker D-082 exists to prevent.
   useEffect(() => {
     if (!bandHeld) return;
     const timer = setTimeout(() => setBandHeld(false), HOP_SAFETY_MS + 100);

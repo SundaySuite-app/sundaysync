@@ -2,6 +2,16 @@
 
 ## Ikke utgitt
 
+- **Klippene stokker seg, reiser og spretter på plass — og blir grønne i det de lander.** Når
+  synken treffer, hopper filene litt rundt på tidslinjen først, som om de finner seg selv;
+  så setter de av gårde mot der lyden sier de hører hjemme, går et lite hakk forbi og
+  spretter tilbake på plass. Hvert klipp starter på sitt eget lille forsprang, så tidslinja
+  koker et øyeblikk og faller til ro igjen — omtrent ett sekund fra ende til ende. Fargen
+  følger bevegelsen: et klipp er blått så lenge det er i lufta, og blir grønt i landingen.
+  Grønt betyr «motoren har plassert denne», og et klipp som fortsatt flyr har ikke landet
+  noe sted å stå inne for. Ett tak i tidslinja underveis — dra, rull, zoom — og alt står
+  ferdig og grønt i samme frame. Har du bedt om mindre bevegelse i systemet, skjer ingenting
+  av dette: resultatet står grønt og riktig med én gang, som før (D-090).
 - **Kvitteringene fra Innstillinger leses over dialogen, ikke bak den.** «Buffer tømt»,
   «data slettet» og de andre svarene fra panelet lå bak den mørke sperren og var knapt
   synlige før dialogen ble lukket; nå ligger de over, og leses i det de fortjenes (D-089).

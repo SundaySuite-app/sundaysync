@@ -8,7 +8,15 @@ import {
   type RefObject,
 } from "react";
 import type { TimelineView as View } from "../../timeline/geometry";
-import { CLIP_HEIGHT_PX, hopDeltas, hopExits, type HopTrack } from "../../timeline/hop";
+import {
+  CLIP_HEIGHT_PX,
+  HOP_TOTAL_MS,
+  clipBoxes,
+  hopChoreography,
+  hopDeltas,
+  hopExits,
+  type HopTrack,
+} from "../../timeline/hop";
 import { clampScroll, fitPxPerMs } from "../../timeline/viewport";
 
 /**
@@ -24,10 +32,36 @@ import { clampScroll, fitPxPerMs } from "../../timeline/viewport";
  *      re-laid-out under a new zoom in the same frame the hop starts, and the distance each
  *      one appears to travel would be a mix of "where the audio says it was" and "how far
  *      the camera moved" — which is not a thing anyone can read.
- *   2. **Hop.** Every clip drawn in both layouts is pushed back to its old position with a
- *      `transform`, then released. One transition, 450 ms, on the compositor.
+ *   2. **Hop.** Every clip drawn in both layouts is pushed back to its old position and
+ *      handed one keyframe animation. On the compositor, ~1.05 s end to end.
  *   3. **Fit.** Only then does the view travel — one interpolated ~300 ms zoom/pan to the
  *      result's own fit, after which ordinary fit behaviour resumes.
+ *
+ * ## What step 2 became in V06 (D-090)
+ *
+ * The owner watched v0.4's hop and asked for a livelier number: «ting hopper litt rundt på
+ * tidslinjen og spretter på plassen hvor de skal være, for så å bli grønne». Three owner
+ * choices, all of them visible in the code below:
+ *
+ *   - **Shuffle, then bounce.** Each clip wanders a little around its old position before it
+ *     sets off, then travels PAST its target and springs back onto it. One `@keyframes`
+ *     covers all of it (`styles.css`), parameterised per clip by five custom properties
+ *     written here — one animation and not a chain, so there is no seam to mis-schedule and
+ *     no `animationend` to hand off at.
+ *   - **Green on landing.** A clip wears `TRAVELLING_CLASS` for exactly as long as its own
+ *     animation runs, which paints it blue; the class comes off at that clip's
+ *     `animationend`, and the clip is green from that instant. Green is the engine's claim,
+ *     and a clip still in the air has not landed anywhere for the engine to stand behind.
+ *   - **A wave, not a queue.** Every clip draws its own 0–250 ms start delay, so the
+ *     landings — and therefore the greens — arrive spread across the timeline. Seeded from
+ *     the file path (`timeline/hop.ts`), never `Math.random()`: a re-render mid-flight must
+ *     not re-roll a clip's numbers, and a spec cannot assert a distribution it cannot
+ *     reproduce.
+ *
+ * A clip whose delta is ZERO takes part too. It is the same one decision as the green: the
+ * moment is «hele tidslinja finner seg selv», and one box sitting perfectly still and
+ * already green in the middle of that reads as a clip that failed rather than as a clip that
+ * happened not to move.
  *
  * **Transform-based FLIP, and no DOM measurement.** A clip's `left`/`width` are inline and
  * recomputed on every pan and zoom frame, so a `transition: left` would be fighting the pan
@@ -39,40 +73,66 @@ import { clampScroll, fitPxPerMs } from "../../timeline/viewport";
  * exists as the previous render's data.
  *
  * **Reduced motion skips the work, not just the animation.** `styles.css` kills every
- * transition under `prefers-reduced-motion: reduce`, so a hop there would set a transform,
- * get no transition, and sit on the old position until a `transitionend` that never comes.
- * The gate is therefore at the top of the sequence: no transforms, no ghosts, no
- * interpolated fit — the layout lands final and correct, which it already is.
+ * transition and animation under `prefers-reduced-motion: reduce`, so a hop there would set
+ * an offset, get no animation, and sit on the old position — blue — until an `animationend`
+ * that never comes. The gate is therefore at the top of the sequence: no offsets, no
+ * travelling class, no ghosts, no interpolated fit — the layout lands final, green and
+ * correct, which it already is.
  *
  * **The user always wins.** Any pan, zoom or fit the operator asks for while this is
- * running cancels the whole sequence on the spot: every inline transform is dropped, the
- * clips snap to their true positions, and the view is left exactly where the operator put
- * it (`fittedSpan` is marked done so nothing snaps it back afterwards).
+ * running cancels the whole sequence on the spot: every animation and every offset is
+ * dropped, the clips snap to their true positions — GREEN, all of them, in the same frame —
+ * and the view is left exactly where the operator put it (`fittedSpan` is marked done so
+ * nothing snaps it back afterwards). A cancelled hop is a finished hop as far as the colour
+ * is concerned: the engine's answer is in, whether or not anyone watched it arrive.
  */
 
-/** How long a clip takes to travel. Long enough to read as movement rather than a cut.
- *  Must match `.clip--hop`'s transition duration in `styles.css`, which is where the
- *  browser reads it from — this copy exists only to size the safety net below. */
-const HOP_MS = 450;
+/** The whole number's wall-clock length: the widest start delay plus one clip's travel.
+ *  Stated once, in `timeline/hop.ts`, alongside the arithmetic that produces the delays —
+ *  and mirrored in `styles.css`, which is where the browser actually reads the duration
+ *  from. Re-exported here because `useHop` is the module App already imports the hop's
+ *  timings from, and a second import path is a second thing to keep in step. */
+export { HOP_TOTAL_MS } from "../../timeline/hop";
 
-/** `transitionend` can be dropped — an interrupted transition, a clip scrolled out of the
- *  virtualization window mid-flight, a backgrounded tab. Nothing may be left wearing an
- *  inline transform because of it, so a timer finishes the job regardless.
+/** `animationend` can be dropped — a clip scrolled out of the virtualization window
+ *  mid-flight, a backgrounded tab, a re-render that replaced the node. Nothing may be left
+ *  wearing an offset or the travelling blue because of it, so a timer finishes the job
+ *  regardless.
  *
  *  Exported since V06-R1 (D-082): App holds the progress band open across the hop and needs
- *  the same backstop, sized from the same number rather than from a second guess. */
-export const HOP_SAFETY_MS = HOP_MS + 250;
+ *  the same backstop, sized from the same number rather than from a second guess. Since
+ *  D-090 the number it is sized from is `HOP_TOTAL_MS`, so the band grew with the animation
+ *  rather than having to be re-tuned beside it. */
+export const HOP_SAFETY_MS = HOP_TOTAL_MS + 250;
 
 /** The one smooth view move afterwards. */
 const FIT_MS = 300;
 
-/** How long a departing clip takes to fade out. Shorter than the hop: it is leaving, and
- *  the eye should be on the clips that are arriving. */
-const FADE_MS = 260;
+/** How long a departing clip takes to leave: `.clip--fade`'s 150 ms delay plus its 260 ms
+ *  fade (D-090). The delay is so the survivors' shuffle is legible before anything vanishes;
+ *  this copy only sizes the timer for the case where nothing else is moving. */
+const FADE_MS = 150 + 260;
 
+/** Carries the animation. Kept under its v0.4 name: it is still "this clip is doing the
+ *  hop", and everything that watches the timeline move — specs included — already says so. */
 export const HOP_CLASS = "clip--hop";
+
+/** Carries the COLOUR, and only the colour (D-090): blue while travelling, off at the
+ *  landing. A separate class from `HOP_CLASS` because they answer separate questions — "is
+ *  this clip moving?" and "has the engine's answer arrived for it?" — and because the
+ *  reduced-motion path has to be able to state that neither is ever applied. */
+export const TRAVELLING_CLASS = "clip--travelling";
+
 export const FADE_CLASS = "clip--fade";
 export const GHOST_CLASS = "clip--ghost";
+
+/** The `@keyframes` name in `styles.css`. The delegated `animationend` listener filters on
+ *  it: the ghosts' own fade animation bubbles through the same node. */
+const HOP_ANIMATION = "clip-shuffle-bounce";
+
+/** The five properties `styles.css` reads the number's shape out of. Listed once so
+ *  `release` cannot forget one and leave a clip carrying a stale delta into the next hop. */
+const HOP_PROPS = ["--hop-dx", "--hop-dy", "--hop-jx", "--hop-jy", "--hop-delay"] as const;
 
 /** On the section for the length of the clips' travel only — it relaxes the lane clipping
  *  so a clip can cross a track boundary (see `styles.css`). */
@@ -85,7 +145,7 @@ export const HOPPING_CLASS = "timeline--hopping";
  * Real state, not a test hook, though it is what lets the browser tier wait for the view to
  * come to rest instead of sampling a tween (which is the one thing an animation test must
  * never do). It is also the honest answer to "is the timeline showing its final layout?",
- * which for ~750 ms after a sync lands is no.
+ * which for ~1.35 s after a sync lands is no (D-090: the number, then the fit).
  */
 export const HOP_ATTR = "data-hop";
 
@@ -102,11 +162,13 @@ export function motionAllowed(): boolean {
 
 /** Everything one running hop has to be able to undo. */
 interface HopRun {
-  /** Clips currently wearing `HOP_CLASS` + an inline transform. */
+  /** Clips still in the air: wearing `HOP_CLASS` + `TRAVELLING_CLASS` + the five custom
+   *  properties. A clip leaves this set at its own `animationend`, so the set's size IS the
+   *  outstanding count, and its emptying is «the last clip has landed». */
   nodes: Set<HTMLElement>;
   timers: ReturnType<typeof setTimeout>[];
   raf: number | null;
-  onTransitionEnd: ((e: TransitionEvent) => void) | null;
+  onAnimationEnd: ((e: AnimationEvent) => void) | null;
 }
 
 export interface HopHandle {
@@ -172,10 +234,16 @@ export function useHop({
   const viewRef = useRef(view);
   const spanRef = useRef(contentSpanMs);
 
-  /** Strip a clip back to no transition and no transform, whatever state it was in. */
+  /**
+   * Strip a clip back to no animation, no offset and no travelling blue, whatever state it
+   * was in — which is also, and not incidentally, the moment it turns green. Every ending
+   * the sequence has goes through here: a clip's own `animationend`, the safety timer, and
+   * every gesture that cancels. There is therefore exactly one way for a clip to land, and
+   * it lands the same way whether the number finished or the operator interrupted it.
+   */
   const release = useCallback((node: HTMLElement) => {
-    node.classList.remove(HOP_CLASS);
-    node.style.transform = "";
+    node.classList.remove(HOP_CLASS, TRAVELLING_CLASS);
+    for (const prop of HOP_PROPS) node.style.removeProperty(prop);
     node.style.willChange = "";
   }, []);
 
@@ -192,8 +260,8 @@ export function useHop({
     if (current.raf !== null) cancelAnimationFrame(current.raf);
     for (const node of current.nodes) release(node);
     current.nodes.clear();
-    if (current.onTransitionEnd && bodyRef.current) {
-      bodyRef.current.removeEventListener("transitionend", current.onTransitionEnd);
+    if (current.onAnimationEnd && bodyRef.current) {
+      bodyRef.current.removeEventListener("animationend", current.onAnimationEnd);
     }
     sectionRef.current?.classList.remove(HOPPING_CLASS);
     sectionRef.current?.removeAttribute(HOP_ATTR);
@@ -206,7 +274,7 @@ export function useHop({
       const section = sectionRef.current;
       if (!body || !section) return;
 
-      const current: HopRun = { nodes: new Set(), timers: [], raf: null, onTransitionEnd: null };
+      const current: HopRun = { nodes: new Set(), timers: [], raf: null, onAnimationEnd: null };
       run.current = current;
       frozen.current = true;
       section.setAttribute(HOP_ATTR, "");
@@ -255,6 +323,11 @@ export function useHop({
       // ---- The hop itself -------------------------------------------------------------
       const deltas = hopDeltas(from.tracks, from.view, to.tracks, to.view);
       const exits = hopExits(from.tracks, from.view, to.tracks);
+      // The clips' DRAWN widths, under the frozen view they are about to be animated in.
+      // Arithmetic, not `offsetWidth`: reading a width off a node inside the same loop that
+      // writes its custom properties would interleave a layout read with a style write once
+      // per clip, which on a 386-file wedding is 386 forced reflows in one frame.
+      const widths = clipBoxes(to.tracks, to.view);
 
       // Address clips by their own `data-file` rather than by a selector built from a
       // path: a file name may contain anything a POSIX path may contain, quotes and
@@ -267,14 +340,26 @@ export function useHop({
       }
 
       for (const [file, delta] of deltas) {
-        // A clip that did not move gets no transform, and therefore no `transitionend` to
-        // wait for. Off-screen clips have no node at all (virtualization) — they simply
-        // appear where they belong when they are scrolled to.
-        if (delta.dx === 0 && delta.dy === 0) continue;
+        // Off-screen clips have no node at all (virtualization) — they simply appear where
+        // they belong, green, when they are scrolled to.
+        //
+        // A clip whose delta is ZERO still takes part (D-090). It has no travel to make, so
+        // what it does is shuffle in place and go green with everyone else — which is the
+        // owner's number: the whole timeline finds itself at once. Skipping it, as v0.4 did,
+        // would leave one already-green box standing perfectly still in the middle of the
+        // wave, and the eye reads that as the clip that went wrong.
         const node = byFile.get(file);
         if (!node) continue;
+        const choreography = hopChoreography(file, widths.get(file)?.width ?? 0);
         node.style.willChange = "transform";
-        node.style.transform = `translate(${delta.dx}px, ${delta.dy}px)`;
+        // FLIP: the node is RENDERED at its solved position, so this offset is what puts it
+        // back on its old one. `styles.css` animates from here to `translate(0, 0)`, by way
+        // of the wander and the overshoot.
+        node.style.setProperty("--hop-dx", `${delta.dx}px`);
+        node.style.setProperty("--hop-dy", `${delta.dy}px`);
+        node.style.setProperty("--hop-jx", `${choreography.jx}px`);
+        node.style.setProperty("--hop-jy", `${choreography.jy}px`);
+        node.style.setProperty("--hop-delay", `${choreography.delayMs}ms`);
         current.nodes.add(node);
       }
 
@@ -298,16 +383,14 @@ export function useHop({
         }
       }
 
-      // One forced reflow, here and nowhere else: the browser must observe the clips at
-      // their old transforms before the transition class arrives, or it coalesces both
-      // writes into one style recalculation and there is nothing to animate from.
-      void body.offsetHeight;
-
+      // No forced reflow anywhere in here, and that is a change worth stating: v0.4's hop
+      // was a TRANSITION, which has to be primed — the browser must observe the old value
+      // before the new one arrives or it coalesces both writes and there is nothing to
+      // animate from. An ANIMATION carries both ends in its own keyframes and needs no such
+      // ceremony, and the ghosts' fade became an animation for the same reason (D-090). So
+      // the whole sequence is now style writes only: nothing here reads layout.
       section.classList.add(HOPPING_CLASS);
-      for (const node of current.nodes) {
-        node.classList.add(HOP_CLASS);
-        node.style.transform = "";
-      }
+      for (const node of current.nodes) node.classList.add(HOP_CLASS, TRAVELLING_CLASS);
       if (ghosts) {
         for (const ghost of Array.from(ghosts.children)) ghost.classList.add(FADE_CLASS);
       }
@@ -318,9 +401,9 @@ export function useHop({
         current.timers.length = 0;
         for (const node of current.nodes) release(node);
         current.nodes.clear();
-        if (current.onTransitionEnd) {
-          body.removeEventListener("transitionend", current.onTransitionEnd);
-          current.onTransitionEnd = null;
+        if (current.onAnimationEnd) {
+          body.removeEventListener("animationend", current.onAnimationEnd);
+          current.onAnimationEnd = null;
         }
         section.classList.remove(HOPPING_CLASS);
         if (ghosts) ghosts.replaceChildren();
@@ -328,23 +411,32 @@ export function useHop({
       };
 
       if (current.nodes.size === 0) {
-        // Nothing moved (or nothing was on screen to move). The ghosts still need their
-        // fade, but the view need not wait for it.
+        // No surviving clip has a node to animate — every one of them is outside the
+        // virtualization window, or the run placed nothing that was here before. The ghosts
+        // still need their fade, but the view need not wait for it.
         current.timers.push(setTimeout(finish, ghosts && exits.size > 0 ? FADE_MS : 0));
         return;
       }
 
-      // Fast path: finish as soon as the last clip has actually landed.
-      const onTransitionEnd = (e: TransitionEvent) => {
-        if (e.propertyName !== "transform") return;
+      // ONE listener for every clip, delegated on the body (D-090) — 386 clips would
+      // otherwise mean 386 listeners bound and unbound inside one commit. The filter on
+      // `animationName` is not defensive tidiness: the ghosts' own fade is an animation in
+      // the same subtree and bubbles through this very node.
+      //
+      // This is also where the GREEN happens. A clip leaves the outstanding set at its own
+      // `animationend` and `release` takes its blue off in the same statement, so «bli
+      // grønne» is not a separate effect to keep in step with the motion — it IS the end of
+      // the motion, per clip. The staggered delays turn that into the wave.
+      const onAnimationEnd = (e: AnimationEvent) => {
+        if (e.animationName !== HOP_ANIMATION) return;
         const node = e.target as HTMLElement;
         if (!current.nodes.has(node)) return;
         release(node);
         current.nodes.delete(node);
         if (current.nodes.size === 0) finish();
       };
-      current.onTransitionEnd = onTransitionEnd;
-      body.addEventListener("transitionend", onTransitionEnd);
+      current.onAnimationEnd = onAnimationEnd;
+      body.addEventListener("animationend", onAnimationEnd);
       // …and the promise that it ends anyway.
       current.timers.push(setTimeout(finish, HOP_SAFETY_MS));
     },

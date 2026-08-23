@@ -4422,3 +4422,112 @@ Escape or a press anywhere else still closes it. The one wrinkle the sweep named
 accepted: during the sync the strip's sources cluster is inert, so the panel's own summary
 cannot be clicked shut until the run ends — Escape can. The sweep's assertion of this
 behaviour is now its documentation.
+
+## D-090 — De stokker seg, reiser og spretter på plass — grønne i landingen
+
+**Decided by the owner, 2026-08-23**, watching v0.4's hop (D-063) land and asking for a
+different number: **«ting hopper litt rundt på tidslinjen og spretter på plassen hvor de skal
+være, for så å bli grønne».** Three choices, made explicitly, and all three are the design:
+
+1. **Stokking, så sprett.** When the sync lands, the clips first move around a little — a
+   short random wander, «de finner seg selv» — and only then travel to their solved
+   positions, overshooting and springing back into place.
+2. **Grønt per landing.** A clip is blue while it is in the air and turns green as it lands.
+   Not a sweep at the end, and not green all along: green is §9.4's word for «motoren har
+   plassert denne», and a clip still travelling has not landed anywhere for the engine to
+   stand behind.
+3. **En livlig bølge, ~1–1,2 s.** Small per-clip start delays, so the timeline «koker» for a
+   moment and then settles — rather than every clip setting off on the same whistle.
+
+### One animation, not a chain
+
+The whole of a clip's number is a single `@keyframes clip-shuffle-bounce` (`styles.css`),
+800 ms, behind that clip's own `animation-delay` of 0–250 ms:
+
+| segment | of the 800 ms | what happens |
+|---|---|---|
+| «stokking» | 0 → 35 % (280 ms) | small wander around the clip's OLD position |
+| reisen | 35 → 85 % (400 ms) | travel to 6 % PAST the solved position |
+| spretten | 85 → 100 % (120 ms) | spring back onto it exactly |
+
+A chain — wander, then `transitionend`, then travel — was the obvious alternative and is the
+one that would have had a seam at every join, plus a handoff to mis-schedule at each of them
+on a busy frame. One animation has none, and it is one composited animation per clip: at 386
+clips (the wedding) the cost is 386 style writes at the start and nothing per frame.
+
+The shape is parameterised by five inline custom properties `useHop` writes per clip —
+`--hop-dx/--hop-dy` (the FLIP delta), `--hop-jx/--hop-jy` (the wander) and `--hop-delay`.
+Remember the FLIP inversion when reading the keyframes: the clip is *rendered* at its solved
+position, so `translate(--hop-dx, --hop-dy)` is what puts it back where it used to be, the
+wander happens around the OLD spot, and `0,0` is home.
+
+Dropping the transition dropped the forced reflow with it. A transition has to be primed —
+the browser must observe the old value before the new one arrives — and v0.4 spent one
+`offsetHeight` on that. An animation carries both ends in its own keyframes; the departing
+clips' fade became an animation for the same reason. The sequence now reads no layout at all.
+
+### The green is the end of the motion, not a second effect
+
+A clip wears `clip--travelling` for exactly as long as its animation runs, and `useHop`'s one
+delegated `animationend` listener takes it off. So «bli grønne» is not a timer to keep in
+step with the movement — it *is* the last statement of the movement, per clip, and the
+staggered delays turn it into the wave by themselves. The blue is `--blue`, which the app
+already uses for «analysert, ikke plassert» (D-080), so the journey borrows a word the eye
+has been taught rather than inventing one. A clip whose duration is unknown travels as a blue
+*outline*: `clip--nodur` is hollow because it is not a measurement, and filling it in for
+800 ms would be the app claiming a length it never had.
+
+**Cancel is a landing.** Any gesture that takes the view (pan, wheel, zoom, fit) drops every
+animation, every custom property and every blue in the same frame: the clips are green, at
+their true positions, at once. A cancelled number is a finished number as far as the answer
+is concerned — the engine placed these files whether or not anyone watched them arrive.
+`prefers-reduced-motion: reduce` skips the whole sequence as before, and the spec now states
+the stronger fact: the travelling blue must never appear there at all, not merely be cleaned
+up afterwards.
+
+### A clip that did not move takes part anyway
+
+v0.4 skipped zero-delta clips — no distance, so no transition to sit through — and the spec
+asserted their absence. They join now. The moment is the whole timeline finding itself at
+once, and one box standing perfectly still and already green in the middle of that does not
+read as «denne flyttet seg ikke», it reads as the one that failed. It shuffles in place and
+goes green with the rest; its delta is still zero, and the spec says so directly instead.
+
+### Seeded, never `Math.random()`
+
+Each clip's delay and wander are a pure function of its file path (FNV-1a → mulberry32,
+`timeline/hop.ts`). Two reasons, and the second is the one that decided it: a re-render
+mid-flight would otherwise re-roll a clip's numbers and jerk it sideways, and a spec cannot
+assert a distribution it cannot reproduce. The same drop choreographs identically on every
+machine and every run, which is what lets `hop.spec.ts` read the delays back and require them
+to differ.
+
+**The wander is capped at the clip's own width** (floor 2 px). A wedding draws 386 clips at
+`MIN_CLIP_WIDTH_PX`, and a box that narrow wandering ±8 px travels further than its own width
+and back inside 140 ms — flicker, or a clip that jumped somewhere else and returned. The cap
+is knowingly a little conservative: `MIN_CLIP_WIDTH_PX` is the *declared* width, while the
+drawn box at that setting measures ~12.8 px because `.clip`'s padding is wider than 3 px and
+the sheet is `border-box`. Reaching for the drawn number would make the arithmetic depend on
+a padding derived from the root font size, which is the sort of dependency `timeline/hop.ts`
+exists to refuse — and the error is in the safe direction.
+
+### The band grew with the number (D-082 extended)
+
+`HOP_TOTAL_MS` (= `HOP_MAX_DELAY_MS + HOP_TRAVEL_MS` = 1050) is stated once, in
+`timeline/hop.ts`, mirrored in `styles.css` where the browser reads the duration from, and is
+what `useHop`'s safety net and App's progress-band hold are both sized from. D-082's rule is
+that the band must not leave while the clips are still moving; lengthening the number from
+~450 ms to ~1.05 s therefore lengthened the hold, and it did so without either of them being
+re-tuned by hand. `ett-rom.spec.ts` samples every frame and now states the claim over the
+clips themselves: not one frame in which a clip is still travelling may be a frame in which
+the band has already gone.
+
+### What was looked at
+
+Ten seeked frames across the number (the animations paused and driven by hand, so each frame
+is an exact instant rather than whatever the screenshot pipeline caught) plus nine real-time
+frames of an eight-clip, three-device drop. The wander reads as boiling rather than as
+flicker; the overshoot reads as a landing; and at ~890 ms five clips are green while three are
+still blue, which is the picture the owner asked for. The green arrives as a **scatter**
+rather than as a left-to-right sweep — the delay is seeded from the path, not from the clip's
+position — and that is the owner's own choice 3 («små tilfeldige forsinkelser»), kept.

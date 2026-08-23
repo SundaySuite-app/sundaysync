@@ -221,12 +221,16 @@ for (const size of SIZES) {
 
       await page.evaluate(() => {
         const w = window as unknown as Record<string, unknown>;
-        const samples: { hop: boolean; band: boolean }[] = [];
+        const samples: { hop: boolean; band: boolean; travelling: number }[] = [];
         w.__E2E_BAND_SAMPLES__ = samples;
         const tick = () => {
           samples.push({
             hop: document.querySelector(".timeline[data-hop]") !== null,
             band: document.querySelector(".band") !== null,
+            // V06 (D-090): how many clips are still in the air. `data-hop` covers the whole
+            // sequence including the view's own fit afterwards; this is the number itself,
+            // and it is the half the operator is actually watching.
+            travelling: document.querySelectorAll(".clip--travelling").length,
           });
           if (samples.length < 400) requestAnimationFrame(tick);
         };
@@ -242,6 +246,7 @@ for (const size of SIZES) {
           (window as unknown as Record<string, unknown>).__E2E_BAND_SAMPLES__ as {
             hop: boolean;
             band: boolean;
+            travelling: number;
           }[],
       );
       // The hop really happened (a fixture that never hopped would make the rest vacuous)…
@@ -250,6 +255,20 @@ for (const size of SIZES) {
       expect(samples.filter((s) => s.hop && !s.band)).toEqual([]);
       // …and it did leave afterwards, rather than being held forever.
       expect(samples.some((s) => !s.hop && !s.band)).toBe(true);
+
+      // D-090 lengthened the number from ~450 ms to ~1.05 s, so the hold had to grow with
+      // it — and the constant it is sized from (`HOP_TOTAL_MS`) is now shared, precisely so
+      // that it does. Stated over the clips themselves rather than over `data-hop`: not one
+      // frame in which a clip was still travelling may be a frame in which the band had
+      // already gone, or the room shifts 34 px under a clip that is still moving.
+      expect(samples.some((s) => s.travelling > 0)).toBe(true);
+      expect(samples.filter((s) => s.travelling > 0 && !s.band)).toEqual([]);
+      // NOT asserted here: that the count comes down in STEPS. It is the right claim and it
+      // is the wave, but this fixture is three clips, and three seeded delays can fall
+      // inside one 16 ms frame — which would make the assertion a coin toss on a busy CI
+      // box, and a spec that fails by luck is worse than no spec. The wave is asserted where
+      // it is deterministic instead: `hop.spec.ts` reads the `--hop-delay` each clip is
+      // actually carrying and requires them to differ.
     });
 
     test("the gutter is the device's home: two lines, and the zoom in the ruler's cell", async ({
