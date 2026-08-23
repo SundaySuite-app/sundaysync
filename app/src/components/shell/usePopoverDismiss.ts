@@ -1,8 +1,9 @@
 import { useEffect, type RefObject } from "react";
 
 /**
- * The two ways a popover closes that the browser does not give a `<details>` for free
- * (V06-R2a, D-078): **Escape**, and a **pointer press outside it**.
+ * The three ways a popover closes that the browser does not give a `<details>` for free
+ * (V06-R2a, D-078; the third added in V06-R3): **Escape**, a **pointer press outside it**,
+ * and **another popover opening**.
  *
  * Everything else about the disclosure is the element's own — the summary is the toggle, it
  * is a tab stop, Enter and Space open it, the open state is announced. That is the whole
@@ -43,6 +44,28 @@ export function usePopoverDismiss(ref: RefObject<HTMLDetailsElement | null>): vo
       el.open = false;
     };
 
+    /**
+     * Another popover opened, so this one closes (V06-R3).
+     *
+     * The pointer listener above already covered the mouse: pressing a second summary is a
+     * press outside the first. It does NOT cover the keyboard, and the four summaries are
+     * tab stops precisely so they can be used that way — Tab, Enter, Tab, Enter left two
+     * panels open at once, overlaying each other and the room they float over. Found in the
+     * V06-R3 sweep.
+     *
+     * `toggle` does not bubble, so this listens in the CAPTURE phase; and it reacts to the
+     * element's own state rather than to what opened it, which is what makes it cover every
+     * way a `<details>` can be opened, including ones nobody has thought of yet.
+     */
+    const onToggle = (event: Event) => {
+      const el = ref.current;
+      if (!el || !el.open) return;
+      const other = event.target;
+      if (!(other instanceof HTMLDetailsElement) || other === el) return;
+      if (!other.open || !other.classList.contains("popover")) return;
+      el.open = false;
+    };
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       const el = ref.current;
@@ -55,9 +78,11 @@ export function usePopoverDismiss(ref: RefObject<HTMLDetailsElement | null>): vo
     };
 
     document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("toggle", onToggle, true);
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("toggle", onToggle, true);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [ref]);

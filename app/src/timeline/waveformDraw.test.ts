@@ -51,14 +51,23 @@ describe("pickLevel — zoom extremes", () => {
     expect(pickLevel(levels.slice(0, 9), MIN_PX_PER_MS)).toBe(8);
   });
 
-  it("the shipped ladder actually reaches the zoom floor, so the fallback never fires", () => {
-    // Finding 11: with only 9 levels (the old 2.56s bound) the coarsest bin is 0.05 px
-    // wide at MIN_PX_PER_MS — ~19.5 bins per pixel, i.e. a 4000-element `xs` array per
-    // clip per frame to paint a couple of hundred pixels. `peaks.rs` now runs the ladder
-    // to 40.96 s, which clears the ceiling at the floor zoom with room to spare.
+  it("the shipped ladder still lands within a bin or two of the zoom floor", () => {
+    // Finding 11 was about ORDERS OF MAGNITUDE, and that is what this pins. With only 9
+    // levels (the old 2.56 s bound) the coarsest bin was 0.05 px wide at the floor —
+    // ~19.5 bins per pixel, i.e. a 4000-element `xs` array per clip per frame to paint a
+    // couple of hundred pixels. `peaks.rs` runs the ladder to 40.96 s, and at the old
+    // 2e-5 floor that cleared MAX_BINS_PER_PX outright (1.22 bins/px).
+    //
+    // D-084 halved the floor to 1e-5 so «Tilpass» can fit the owner's 15.5-hour wedding,
+    // which halves every bin's on-screen width: the coarsest level now sits just OVER the
+    // ceiling at 2.44 bins/px instead of just under it, so `barGeometry`'s stride cap —
+    // which exists for exactly this — groups a couple of bins per bar. The claim that has
+    // to survive is the size of the number, not which side of 2 it falls on: a handful of
+    // bins per pixel, nowhere near twenty. The bounded `xs` itself is asserted below.
     const chosen = pickLevel(levels, MIN_PX_PER_MS);
+    expect(chosen).toBe(levels.length - 1);
     const pxPerBin = binDurationMs(levels[chosen]) * MIN_PX_PER_MS;
-    expect(1 / pxPerBin).toBeLessThanOrEqual(MAX_BINS_PER_PX + 1e-9);
+    expect(1 / pxPerBin).toBeLessThan(4);
   });
 
   it("picks a level in between at a middling zoom, never finer than the ceiling allows", () => {
@@ -314,6 +323,43 @@ describe("barGeometry — the strided fallback bounds xs (finding 11)", () => {
       const ceiling = MAX_BINS_PER_PX * g.widthCssPx * dpr + 2;
       expect(g.xs.length).toBeLessThanOrEqual(ceiling);
       expect(g.xs.length).toBe(g.binCount);
+    }
+  });
+
+  it("at the D-084 zoom floor, the coarsest level strides 2-3 bins into one bar", () => {
+    // The new floor's own case (D-084). A 90-minute clip — long enough that D-072's
+    // `MIN_WAVEFORM_PX` would still let it draw a waveform at this zoom, which is the only
+    // reason any of this arithmetic runs at the floor at all — over the shipped 13-level
+    // ladder, at exactly `MIN_PX_PER_MS`.
+    //
+    // At 1e-5 the coarsest level's 40.96 s bins are 0.4096 CSS px wide, so the display can
+    // use rather fewer of them than the level offers: 2.44 bins per device pixel at dpr 1,
+    // 1.22 at dpr 2. The stride cap turns that into one bar per 2 bins (dpr 1) — and no
+    // stride at all on a retina panel, which really can resolve the extra detail.
+    const ninetyMinMs = 90 * 60_000;
+    const meta = ladder(13, ANALYSIS_RATE_HZ * 90 * 60);
+    const span = { startMs: 0, endMs: ninetyMinMs };
+    const view: TimelineView = { pxPerMs: MIN_PX_PER_MS, scrollMs: 0, widthPx: 736 };
+
+    const g1 = barGeometry(span, meta, view, 1)!;
+    expect(g1).not.toBeNull();
+    expect(g1.level).toBe(12); // the coarsest rung, 40.96 s bins
+    expect(g1.stride).toBe(2);
+    const g2 = barGeometry(span, meta, view, 2)!;
+    expect(g2.stride).toBe(1);
+
+    // Whatever the stride, the bound is the same one finding 11 bought: a couple of bars
+    // per device pixel of drawn width, never one per bin.
+    for (const [g, dpr] of [
+      [g1, 1],
+      [g2, 2],
+    ] as const) {
+      expect(g.xs.length).toBeLessThanOrEqual(MAX_BINS_PER_PX * g.widthCssPx * dpr + 2);
+      expect(g.xs.length).toBe(g.binCount);
+      // Strided bars stay abutting — the property a naive `stride` breaks first.
+      for (let i = 1; i < g.xs.length; i++) {
+        expect(g.xs[i] - g.xs[i - 1], `dpr ${dpr}`).toBeCloseTo(g.barWidthPx, 6);
+      }
     }
   });
 

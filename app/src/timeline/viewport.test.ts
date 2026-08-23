@@ -3,6 +3,7 @@ import { MAX_PX_PER_MS, MIN_PX_PER_MS, type TimelineView } from "./geometry";
 import {
   clampScroll,
   contentBounds,
+  FIT_PADDING_PX,
   fitPxPerMs,
   scrollbarFracToScrollMs,
   scrollbarMetrics,
@@ -58,6 +59,23 @@ describe("fitPxPerMs", () => {
     expect(fitPxPerMs(360_000_000, 400)).toBe(MIN_PX_PER_MS);
     // A 2 ms result would want a zoom above the ceiling.
     expect(fitPxPerMs(2, 1200)).toBe(MAX_PX_PER_MS);
+  });
+
+  it("a 16-hour wedding fits in the lane the room actually has (D-084)", () => {
+    // The floor is not an abstract bound — it decides whether «Tilpass» can show the
+    // owner's own shoot. The lane at 1280×800 is the window less the 300 px inspector, the
+    // 224 px gutter and the frame's chrome: ~736 px. At the old 2e-5 floor that was 10.2 h
+    // and a 15.5-hour wedding clamped, leaving 40 of 386 clips past the right edge with no
+    // gesture that brought them back. 1e-5 fits ~19.8 h with `FIT_PADDING_PX` to spare.
+    const LANE_PX = 736;
+    const sixteenHoursMs = 16 * 3_600_000;
+    const fitted = fitPxPerMs(sixteenHoursMs, LANE_PX);
+    // Not clamped — the fit is a real fit, not the floor standing in for one.
+    expect(fitted).toBeGreaterThan(MIN_PX_PER_MS);
+    // …and the whole span really lands inside the lane.
+    expect(sixteenHoursMs * fitted).toBeLessThanOrEqual(LANE_PX);
+    // The floor's own reach, stated in the unit the decision was made in.
+    expect((LANE_PX - FIT_PADDING_PX) / MIN_PX_PER_MS / 3_600_000).toBeGreaterThan(19);
   });
 
   it("survives a viewport narrower than its own padding", () => {

@@ -150,23 +150,89 @@ median clip is 3 px and only 24 of 386 clear the threshold, so **most of a real 
 waveforms until you zoom in**, which is the intended behaviour and not a failure to load. They
 appear as soon as a clip is wide enough to hold one.
 
-## "Fit" does not fit a session longer than about eleven hours (v0.3, measured in v0.5)
+## "Fit" reaches about twenty hours, and a full day is longer than that (v0.6)
 
-`MIN_PX_PER_MS` is 2 × 10⁻⁵, so the widest view the timeline will ever adopt shows about
-**11.6 hours** in an 840 px lane column. The owner's real wedding spans **15.5 hours** end to
-end, and at Fit the last quarter of it is off the right edge — measured in this round: 346 of
-386 clips mounted, 40 (25 Fuji, 15 AVCHD) past the edge until the operator pans. Pressing Fit
-again changes nothing, because Fit is already at the floor.
+`MIN_PX_PER_MS` is 1 × 10⁻⁵ since v0.6 (D-084), so the widest view the timeline will adopt shows
+**about 20 hours**, and «Tilpass» — which fits with 24 px to spare — reaches **~19.8 hours** in the
+736 px lane the room has at 1280×800. The owner's 15.5-hour wedding fits, which the previous floor
+of 2 × 10⁻⁵ (~10.2 h in the same lane) did not: 40 of 386 clips sat past the right edge and Fit
+could not bring them back, because Fit was already at the floor.
 
-Nothing is lost — the scrollbar row is there and panning reaches them — but "Fit" quietly
-stops meaning "everything on screen" past that length, with nothing saying so.
+What is left, honestly:
 
-Deliberately **not** changed in v0.5. The zoom floor is a v0.3 constant that governs every
-timeline, and at the current floor one device pixel is already ~50 s of audio against a
-coarsest pyramid bin of ~41 s (`peaks.rs`, 13 levels) — lowering it puts the waveform layer in
-a regime it was not designed for. That is not a change to make at the last gate before a
-release, in a stage that cannot drive the native window to look at the result. It is the
-highest-value item this round found for the next one.
+- **A drop spanning more than about twenty hours still clamps**, and `PLAUSIBLE_SPREAD_MS`
+  (`recordingTime.ts`) admits up to **24 hours** as one session. So a genuine dusk-to-dusk day is
+  laid out correctly and cannot be seen all at once; the scrollbar row is there and panning reaches
+  it, but Fit stops meaning "everything on screen" past ~20 h with nothing saying so. Narrower
+  windows reach less: at 1024×600 the lane is ~480 px and Fit reaches ~13 h.
+- **Waveform detail at the very floor is one step coarser than it was.** The coarsest pyramid rung
+  is 40.96 s (`peaks.rs`, 13 levels), which at 1e-5 is 0.41 px per bin — just over the 2 bins/px
+  ceiling instead of just under it, so `barGeometry`'s stride cap groups 2–3 bins into one bar at
+  dpr 1 (and none at all at dpr 2). In practice almost nothing draws a waveform at that zoom at
+  all: `MIN_WAVEFORM_PX` is 24 px (D-072), which at the floor is a 40-minute clip. Pinned in
+  `waveformDraw.test.ts`.
+
+## Unsynced files are listed, not drawn in their own row (v0.6)
+
+What the engine refused to place is a list behind the strip's problem chip — filename, reason, a
+device selector and a ✕ — and the same chip counts the files the *scan* could not read, because
+from where the operator stands «er noe galt?» is one question (D-079).
+
+What the room actually wants is the unplaced clip **in its own device row**, at the timeline's left
+edge, numbered, so «which of my six cameras is the problem» is answered by looking at the row rather
+than by reading filenames. That is real timeline work — a lane that is not a time axis, hit-testing,
+the hop's arithmetic — and it is priced as its own stage rather than smuggled into a polish round.
+
+## The «Kilder» popover lists files; the timeline does not scroll to one (v0.6)
+
+Clicking a filename in the «Kilder» panel marks that clip and fills the inspector with it — the
+picture, the facts, the three decisions. It does **not** pan or zoom the timeline to bring the clip
+into view. On a wedding-sized drop at Fit the clip is three pixels wide and probably on screen
+somewhere; at any real zoom it very often is not, and the operator is then looking at a full
+inspector with no box highlighted anywhere they can see.
+
+Deliberate for now: "scroll the timeline to the selection" is a viewport write, and every gesture in
+this view has been read-mostly since D-051. It is the obvious next thing for the list to do and it
+needs a decision about whether the zoom changes too, which is a design question rather than a fix.
+
+## The 12 kHz playback note is a tooltip, not a caption (v0.6)
+
+«lyd for synk-kontroll (12 kHz analyselyd), ikke eksportkvalitet» was a visible caption under the
+transport. In the 38 px slot it is the transport bar's `title` (D-083): measured, the slot at
+1280×800 is exactly full without it, and at 1024×600 it overflowed by 38 px with it — and a sentence
+cut off mid-word is not a sentence anybody reads.
+
+**The loss is real.** Expectation-setting only works if it is read *before* the operator presses
+play, and on a `title` it is one hover away over the very control that raises the question. That is
+the best available placement in 38 px, not an equal substitute. If the room ever gains a line for
+it, it should come back. The full explanation of what playback is and is not is above, under
+"Playback is the analysis audio, not the mix".
+
+## The strip and the slot are over-subscribed at 1024×600 (v0.6)
+
+Both rows are one line of flex, and at the smallest window the app allows there is more to carry
+than there is room for. Nothing overlaps and nothing overflows — that is asserted, at both window
+sizes, in `ett-rom.spec.ts` — and every claim that ellipsises carries its whole self as a `title`.
+But at 1024:
+
+- in the exported phase, with a problem chip and a warnings chip on the strip, the summary line is
+  squeezed to nothing. It is also the `<summary>` that opens «Kilder» (D-078), so that disclosure
+  becomes a target the hand cannot find. The chips give up room only after the sentence has none
+  left, which is the right order and not a solution.
+- in a stale result, with the transport, the meta sentence and the footnote chips all in the slot,
+  the meta sentence ellipsises to a character or two.
+
+The honest fix is a stated rule for what the strip DROPS at a narrow window — «Legg til» becoming
+icon-only, or the project name moving off the strip — and that is a design decision about which
+claim matters least, not a number. Named here rather than guessed at.
+
+## The scan's ✕ needs a clip or a problem row (v0.6)
+
+Post-sync, removing a file needs either a clip on the timeline (the inspector's action row) or a row
+in the problem popover. A manifest file that the run neither placed nor shelved therefore has no
+remove control until the next scan. In practice the engine's answer covers every input file — placed
+or unsynced — so this is a shape the fixtures can build and the backend does not. Written down
+rather than guarded against; the guard would be a fourth list (D-077).
 
 ## A stale pre-analysis tick can survive one drop into the next (v0.5)
 

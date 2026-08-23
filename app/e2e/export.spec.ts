@@ -56,6 +56,45 @@ test.describe("export", () => {
     await expect(page.getByRole("button", { name: en.revealInFinder })).toBeVisible();
   });
 
+  test("the receipt is opaque and does not eat the timeline underneath it", async ({ page }) => {
+    // V06-R3 pixel pass, two findings in one place — and one place is right, because they are
+    // the same fact about the same rectangle.
+    //
+    // 1. It floats over the room (D-082), and `--green-bg` is a 10 %-alpha wash: correct for a
+    //    banner in a page's flow, unreadable here, because what is behind a toast is not the
+    //    page background but a timeline full of clips showing through the sentence. The export
+    //    receipt is the longest thing this app ever says, so it is where this shows first.
+    // 2. D-082 turned pointer events off on the LAYER so a transparent rectangle could not eat
+    //    a click. The banner itself kept them — and it is three lines tall over the top device
+    //    rows, so after an export the operator could not mark a clip there at all until they
+    //    dismissed it. Its ✕ turns them back on for itself.
+    await reachResult(page, {
+      "plugin:dialog|save": "/Users/e2e/out/SundaySync.fcpxml",
+      export_timeline: 1,
+    });
+    await page.getByRole("button", { name: en.exportButton }).click();
+    const banner = page.locator(".banner--ok");
+    await expect(banner).toBeVisible();
+
+    // Opaque: no alpha channel left in the painted background.
+    const bg = await banner.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(bg, `banner background ${bg}`).not.toMatch(/rgba\([^)]*,\s*0?\.\d+\s*\)/);
+
+    // …and a clip UNDER it is still clickable. `.clip` boxes exist from the sources phase on,
+    // so this is a press on the real thing, not on a stand-in.
+    const clip = page.locator(".clip").first();
+    const box = (await clip.boundingBox())!;
+    const over = (await banner.boundingBox())!;
+    // The finding only exists if the two really do overlap.
+    expect(box.y).toBeLessThan(over.y + over.height);
+    await clip.click();
+    await expect(page.locator(".preview__name")).toBeVisible();
+
+    // The ✕ is the one thing in there that IS a control.
+    await page.locator(".banner__dismiss").click();
+    await expect(banner).toBeHidden();
+  });
+
   test("cancelling the save dialog never calls export_timeline", async ({ page }) => {
     await reachResult(page, {
       "plugin:dialog|save": null,

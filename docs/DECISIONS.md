@@ -4152,3 +4152,246 @@ replaces R1's noted deviation. `presync-timeline.spec` asserts the legend's coun
 `title` — the parent claim survives in full, one attribute away — and the meta sentence by its
 `title`, which is the reading a window width cannot defeat. `hop.test.ts` gains the two pitch
 cases above.
+
+## D-084 — V06-R3: the zoom floor halves, because «Tilpass» could not fit the owner's own wedding
+
+`MIN_PX_PER_MS` in `src/timeline/geometry.ts` goes **2e-5 → 1e-5**, and everything else in this
+entry is why that number and not another.
+
+### What the old floor could not show
+
+At 1280×800 the lane the timeline actually has is the window less the 300 px inspector, the
+224 px gutter and the frame's own chrome — **736 px**, measured off the boxes the browser draws,
+not derived. At 2e-5 that is 10.2 hours. The owner's real wedding runs **15.5 hours**, from the
+hairdresser in the morning to the last dance after midnight, and v0.5 measured the consequence
+exactly: at Fit, **40 of 386 clips** (25 Fuji, 15 AVCHD) sat past the right edge, and pressing Fit
+again changed nothing because Fit was already at the floor. Nothing was lost — the scrollbar and
+panning reach them — but the one gesture whose entire job is «vis meg alt» silently stopped
+meaning it, with nothing on screen saying so. It was v0.5's highest-value open item.
+
+1e-5 across the same 736 px is 20.4 h, and `fitPxPerMs` leaves `FIT_PADDING_PX` to spare, so
+«Tilpass» reaches **~19.8 h**. A wedding fits with a night's margin.
+
+### What halving it costs, measured rather than assumed
+
+Two things could have been damaged, and both were checked at the floor rather than reasoned about.
+
+**The waveform ladder.** `peaks.rs` runs 13 levels to a coarsest bin of 40.96 s. At 2e-5 that bin
+was 0.82 px wide — 1.22 bins per pixel, comfortably under `MAX_BINS_PER_PX`. At 1e-5 it is 0.41 px:
+**2.44 bins per pixel**, just over the ceiling instead of just under it. So the coarsest rung is
+still the one chosen (there is nothing coarser), and `barGeometry`'s stride cap — which exists for
+exactly this, and was written for finding 11 — groups **2 bins into one bar** at dpr 1 and none at
+all at dpr 2, where the panel really can resolve the extra detail. `xs` stays bounded at a couple
+of entries per device pixel; the thing finding 11 was about (a 4000-element array per clip per
+frame, ~19.5 bins per pixel) is still two orders of magnitude away.
+
+`waveformDraw.test.ts`'s floor case is **re-expressed, not deleted** (D-085): it asserted
+`1 / pxPerBin <= MAX_BINS_PER_PX`, which was the mechanism; what it was *about* is the size of the
+number, so it now pins the coarsest level being chosen and the ratio staying under 4. A new case
+runs `barGeometry` at exactly `MIN_PX_PER_MS` over the shipped ladder and pins the stride at 2 (dpr
+1) and 1 (dpr 2), with the bars still abutting — the property a naive stride breaks first.
+
+**In practice almost nothing draws a waveform down there anyway.** `MIN_WAVEFORM_PX` is 24 px
+(D-072), which at 1e-5 is a clip of **40 minutes**. On the owner's corpus that is the mixer's three
+files and nothing else.
+
+### Asserted where it will actually be read
+
+- `viewport.test.ts` — a 16-hour span in a 736 px lane fits **without clamping**, and the floor's
+  reach is stated in the unit the decision was made in (hours). It fails at 2e-5.
+- `timeline-scale.spec.ts` — a **16-hour, 18-clip, 3-device result at the real 1280×800 window**,
+  Fit pressed by its own button, by name. Every clip mounted (18 of 18), the rightmost clip's right
+  edge inside the lane, and the zoom that produced it off the floor — all read off the boxes the
+  browser drew, never off component state. Before the change it failed with the last clip's right
+  edge at 1390 px in a lane ending at 967.
+
+### The one thing that still clamps, written down rather than left implicit
+
+`PLAUSIBLE_SPREAD_MS` (`recordingTime.ts`) admits **24 hours** as one session, and the floor reaches
+~20. A genuine dusk-to-dusk drop is therefore laid out correctly and cannot be seen all at once, and
+a narrower window reaches less (~13 h at 1024×600). Halving the floor again to close that gap would
+put every clip under half a pyramid bin and buy an hour of material nobody has yet dropped;
+KNOWN_LIMITATIONS.md carries the shape instead.
+
+## D-085 — the spec-migration rule, as applied across V06-R1 → R3
+
+The v0.6 redesign moved almost every control in the app and deleted one whole component, against a
+Playwright suite of ~180 journeys that were written about the old shape. The rule that governed
+every one of those edits, stated once here because it is the thing that made the redesign
+reviewable:
+
+> **A spec is re-expressed, never deleted.** When the shell changes, find the RULE the assertion
+> was making, and assert it against the new mechanism. If the rule genuinely no longer exists, say
+> so in a decision — do not quietly drop the test.
+
+The distinction it turns on is **rule versus mechanism**. `max-height ≤ 60vh` was never the rule;
+"the tracks cannot push the sync button off the screen" was, and the shell replaced a `vh` guess
+with a definite height, so the assertion became "at a cruel 400 px the tracks overflow, scroll, and
+end above the slot". A test that pins the mechanism is a test that has to be rewritten every time
+the mechanism improves — which is exactly the moment a suite starts being deleted instead.
+
+### What it cost, stage by stage
+
+| Stage | Specs touched | What changed in them |
+|---|---|---|
+| **R1** (the shell) | 4 edits, 150 specs untouched | `preview.spec` (the panel's 180 px was the mechanism; the timeline's box, the gutter and the column's width are the rule) · `presync-timeline.spec` (60vh → a definite height) · `timeline.spec` (finding 13's "the page scrolled" is unobservable in a room that does not scroll; `defaultPrevented === false` and "the timeline does not pan" are asserted directly) · `override-stale.spec` (the `resyncHint` is the button's `title`) |
+| **R2a** (the panel is redistributed) | 2 rewritten, 7 edited | `sources.spec` → `kilder.spec`, `removal.spec` → `inspector-actions.spec` — every claim the two made re-expressed against the popover and the inspector's action row, none dropped |
+| **R2b** (the gutter is the device's home) | `ett-rom`, `presync-timeline`, `playback`, `hop.test` | the two gutter lines, the dot's grey → blue → green, the zoom buttons' boxes in the ruler's gutter cell, the warnings chip, and the frame-y identity that replaced R1's noted deviation; the legend asserted by its counts AND its `title`; `playbackQualityNote` asserted as an attribute |
+| **R3** (finpuss) | `waveformDraw.test`, `timeline.spec` | the zoom floor's bins/px bound (mechanism → the size of the number, D-084) · the ruler's `HH:MM:SS.mmm` shape (mechanism → "a tick reads as a timecode, at the precision its spacing can resolve") |
+
+**Nothing in that table is a deletion.** The two rewritten files are the only places where the
+*subject* of a spec stopped existing, and both were rewritten claim for claim rather than replaced.
+
+### The locator table, final state
+
+Where the fourteen affordances of the old `SourcesPanel` are asserted from, after R3. The handles in
+the left column are what the specs and the operator's muscle memory both reach for, and they did not
+change even though everything behind them did — which is the point.
+
+| Handle | Resolves to | Asserted in |
+|---|---|---|
+| `region(sourcesTitle)` | the strip's sources cluster | `kilder.spec`, `ett-rom.spec`, `timeline-scale.spec` |
+| `.popover--sources > summary` | the summary line, which IS the «Kilder» disclosure | `kilder.spec`, `ett-rom.spec` |
+| `.popover--problems > summary` | the problem chip (scan + engine, one count) | `kilder.spec`, `ett-rom.spec`, `timeline-scale.spec` |
+| `.popover--warnings > summary` | the result's «N advarsler», portalled into `.strip__status` | `ett-rom.spec` |
+| `.slot__removed` / `.slot__skipped` | «Fjernet (N)» / the skipped chip | `ett-rom.spec`, `inspector-actions.spec` |
+| `.slot__auto` | «Referanse velges automatisk …» | `presync-timeline.spec` |
+| `.inspector__actions .refbtn` | ★ reference, one per marked clip | `inspector-actions.spec` |
+| `.inspector__actions select` | device override, one per marked clip | `inspector-actions.spec`, `override-stale.spec` |
+| `.inspector__actions .removebtn` | ✕ remove, one per marked clip | `inspector-actions.spec` |
+| `.shelf__row` | one unplaced file, inside the problem popover | `timeline-scale.spec`, `kilder.spec` |
+| `.preview__name` / `.preview__frame` | the inspector's name and 268×151 still | `preview.spec`, `ett-rom.spec` |
+| `.slot__transport` | the transport (result) or the legend (pre-sync) | `playback.spec`, `presync-timeline.spec` |
+| `.timeline__note` | the legend's counts; the whole sentence on its `title` | `presync-timeline.spec` |
+| `.track__gutter` / `.track__dot` | the device's home, and how far its row has got | `ett-rom.spec` |
+| `.band` | the one permitted motion, 34 px | `ett-rom.spec` |
+| `.timeline__zoom` | − + Tilpass, in the ruler row's gutter cell | `ett-rom.spec`, `timeline-scale.spec` |
+
+## D-088 — V06-R3: what a row gives up first, and a banner that floats must be opaque and inert
+
+The pixel pass rendered the real app in Playwright at 1280×800 and 1024×600 in each of the five
+states and compared them with the owner-approved canvas. Most of what it found was one bug wearing
+four hats, and the rest was the export receipt.
+
+### A flex row that runs out of room must state its PRIORITY, not an absolute
+
+The strip and the slot are each one line of flex carrying more than they have room for at 1024. Both
+had the same shape of failure, and it is a shape worth naming because it is invisible until the
+window is narrow and then it is the ugliest thing on screen: **a rigid item inside a container that
+is not rigid overflows it and is painted across whatever is next to it.**
+
+- the strip's problem and warnings chips were `flex: 0 0 auto` inside a cluster that shrinks — at
+  1024 in the exported phase (which is precisely when the strip has the most to carry, because «Vis
+  i Finder» is on it too) they were drawn under the project-name field;
+- the slot's footnote chips were the same, and «1 stillbilde ble hoppet over» covered the first four
+  words of «Kildene er endret siden forrige synkronisering»;
+- the transport was the mirror image — `flex-shrink: 1` on a box whose children cannot shrink, so at
+  1024 with a stale notice in the row the meta sentence was drawn across the volume slider;
+- and `.slot__chips` and `.slot__stale` both carried `margin-left: auto`, which does not stack two
+  items at the end of a row: it **splits the free space between them**, so the chips floated in the
+  middle and the notice sat between them and the edge.
+
+`flex: 0 0 auto` was an attempt to say "this matters more than the sentence beside it", and it is
+the right priority stated in a way that has no answer for the case where there is not enough room
+for anybody. The priority is stated as a **shrink factor** instead: `flex: 0 200 auto` on the
+summary line against `1` on the chips distributes a deficit in proportion to `factor × basis`, so
+the sentence gives up essentially all of it — down to nothing if it has to — before either chip
+loses a character, *and* the chips still shrink rather than overflow once the sentence has nothing
+left. Floors of `2rem` on the chips, because `.chip`'s own padding means a `<summary>` cannot draw
+itself narrower than 26 px however hard its `<details>` is squeezed.
+
+Two details that cost real time and are worth writing down:
+
+- **The warnings chip is portalled into `.strip__status` (D-083), so the SPAN is the flex item the
+  strip sizes, not the chip.** Styling `.popover--warnings` did nothing until the span was styled
+  too. A portal moves the pixels and leaves the box model behind.
+- **A bare text node inside an `inline-flex` is an anonymous flex item and cannot carry
+  `text-overflow`.** A squeezed chip therefore *wrapped to two lines* — in a 44 px strip, a chip
+  taller than the row it sits in. Forcing `display: block` fixed the wrap and introduced a subtler
+  one: `clientWidth` rounds a 107.3 px box down to 107, so a chip that fitted exactly got an
+  ellipsis. The answer is a real element: every chip's words live in a `.chip__text` span, which is
+  a proper flex item, shrinks to the sub-pixel, and ellipsises only when it is actually short.
+
+Everything that can ellipsise now carries its whole self as a `title` — the chips, the summary line,
+the stale notice — which is D-083's rule for the legend applied to every other claim in the two
+rows. And the invariant is asserted rather than eyeballed: `ett-rom.spec` walks the children of the
+strip, the sources cluster and the slot in the busiest state the app can reach (a stale, exported
+result with problems, warnings and a skipped file) at **both** window sizes, and requires each
+child's left edge to be at or past the previous child's right edge. It fails at 1024 against the
+old CSS.
+
+### A banner that floats over the room must be opaque, and must not eat it
+
+D-082 moved banners into a `.toasts` layer over the stage and turned pointer events off **on the
+layer** so a transparent rectangle could not eat a click. Both halves of that were half right.
+
+- `--green-bg` and its siblings are **10 %-alpha washes**. Correct for a banner in a page's flow;
+  unreadable over a timeline, because what is behind a toast is not the page background but a row of
+  clips showing straight through the sentence. The export receipt — the longest thing this app ever
+  says, three lines across the top two device rows — is where it shows first. The tint is now
+  painted as a background *image* over an opaque `--surface2`, so each class still chooses its own
+  colour and only the ground beneath it changed.
+- The banner itself kept `pointer-events: auto`, and a three-line rectangle over two device rows
+  **swallowed every press on the clips underneath** until it was dismissed. Found by a spec that
+  tried to click a clip after an export and was told, fifty-five times, that a `<span>` was in the
+  way. The banner is inert now; its ✕ turns pointer events back on for itself.
+- It also stopped stretching to the width of the room (`max-width: 44rem`): a paragraph across a
+  956 px stage reads as a page, not as a remark.
+
+### The primary action is the LAST control before the gear
+
+D-081 promised one primary action always in the same place. It was not: «Vis i Finder» appeared to
+the *right* of the gold button the instant an export succeeded, and slid it 110 px to the left in
+that same instant — the one control the operator's hand has learned, moving under it exactly when
+they were about to reach for it again. The approved canvas draws the secondaries first and the gold
+one last before the gear, which is also the only order in which the promise holds: pinned by the
+strip's own padding, with a label that never changes, nothing appearing to its left can move it.
+
+### The ruler stops saying `.000`, and stops being cut off
+
+At the zoom a whole shoot is read at, `tickIntervalMs` picks one tick per hour and every label ended
+in the same `.000` — four characters of nothing repeated across the ruler, on the one row where a
+label's width decides whether the rightmost one can be drawn at all. `tickLabel(ms, intervalMs)`
+drops the milliseconds exactly when a tick is a whole second or more apart, because that is when no
+two ticks could differ in them. And a label that would not fit inside the lane is dropped while its
+LINE is kept — a ruler is its lines; «6:00:0» is not a number.
+
+### Two things the sweep found that were not pixels
+
+- **Two popovers could be open at once.** The pointer case was covered by construction (pressing a
+  second summary is a press outside the first), the keyboard case was not — and the four summaries
+  are tab stops precisely so they can be used that way, which is D-078's whole argument for
+  `<details>`. `usePopoverDismiss` gains a capture-phase `toggle` listener: another `.popover`
+  opening closes this one. It reacts to the element's own state rather than to what opened it, so it
+  covers every way a `<details>` can be opened, including ones nobody has thought of yet.
+- **The gutter's dot went on saying «Analyserer lyden» about a row whose pass had ended.** D-083
+  folded `failed` into `pending`, which is right about the COLOUR — the vocabulary is grey → blue →
+  green and a fourth would make it four — and wrong about the WORDS: a card the analysis finished
+  with and could not read will never turn blue, and a dot claiming to still be working on it is the
+  app waiting for something that already happened. A row where nothing is still pending and
+  something failed keeps the same grey and says **«Lyden er ikke analysert»** instead — the register
+  the clip itself already uses for that state («Bølgeform utilgjengelig»): a statement about what
+  the app has, not a verdict on the card.
+
+### What was NOT changed, and why
+
+Everything here was a deviation from the approved canvas; these are the ones left standing, each
+with the reason, because "we compared them and fixed what was off" is worth nothing without the list
+of what was off and stayed off.
+
+| Canvas | The app | Why it stayed |
+|---|---|---|
+| wordmark at 20 px | 16 px | 24 px of the one part of the strip that is already crushed at 1024. Cosmetic, and the cheaper half of a trade the strip cannot currently afford. |
+| gold primary ~43 px tall in a 44 px strip | 30 px | 43 px leaves no ground above or below it; the conductor's brief specifies 30 and the strip reads as a strip at 30. |
+| 200 px gutter | 224 px | D-083 widened it deliberately for the second line's «3 filer · 1 t 42 min ●». |
+| section labels «ENHETER» / «INSPEKTØR» | absent | new markup, not CSS. Named for a follow-up. |
+| an empty 276×155 frame placeholder in the inspector | «Velg et klipp for å se det.» centred | same: new markup. The brief's own description of the approved design is the sentence. |
+| a full-bleed dashed drop panel filling the stage | a centred card, with the flow hint and explainer below it | `EmptyState` is three stacked things, not one; making the zone fill the stage is a restructure of the component, not a spacing change. |
+| device lanes filling the stage (~90 px each) | 40 px lanes, leaving the lower half of the stage empty on a seven-device drop | `LANE_HEIGHT_PX` is load-bearing arithmetic shared with the hop (D-083's "no `min-height`, anywhere on that chain"). Changing the row pitch at a polish gate is exactly the R5-class seam that note exists to prevent. |
+| the export hint as one quiet line in the strip | a three-line paragraph in a toast | the words are the owner's instruction copy in two languages and a spec asserts them; shortening them is a content decision, not a pixel one. The toast is legible now — that was the actual defect. |
+
+**What could not be observed.** Playwright at the window size is the instrument here, and it is not
+the app. The native window was never driven: no WKWebView rendering, no real macOS font
+rasterisation, no titlebar, no display scaling other than dpr 1, and no live drag, hover or focus
+ring under a real hand. Everything above is true of the DOM at 1280×800 and 1024×600 in Chromium.
+The owner's sign-off on the six screenshots is what closes that gap, and the rig test after it.

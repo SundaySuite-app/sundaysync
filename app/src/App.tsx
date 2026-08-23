@@ -658,12 +658,14 @@ export function App() {
             aria-label={t.projectName}
           />
         </label>
-        <button type="button" className="primary" onClick={exportTimeline} disabled={phase.stale}>
-          {t.exportButton}
-        </button>
-        <button type="button" className="secondary" onClick={runSync} title={t.resyncHint}>
-          {t.resyncButton}
-        </button>
+        {/* V06-R3: the secondaries come BEFORE the gold one, which is the order the approved
+            canvas draws and — more to the point — the only order in which D-081's promise
+            holds. «Vis i Finder» appears the instant an export succeeds; with it after the
+            primary, the primary slid 110 px to the left in that same instant, i.e. the one
+            control the operator's hand has learned moved under it exactly when they were
+            about to reach for it again. Last before the gear, its right edge is pinned by
+            the strip's own padding and its width never changes, so nothing that comes and
+            goes to its left can move it. */}
         {exportedPath && (
           <button
             type="button"
@@ -673,6 +675,12 @@ export function App() {
             {t.revealInFinder}
           </button>
         )}
+        <button type="button" className="secondary" onClick={runSync} title={t.resyncHint}>
+          {t.resyncButton}
+        </button>
+        <button type="button" className="primary" onClick={exportTimeline} disabled={phase.stale}>
+          {t.exportButton}
+        </button>
       </>
     ) : null;
 
@@ -832,7 +840,13 @@ export function App() {
             line at the bottom of the room rather than a banner between the operator and the
             timeline (D-082). Same words, same warn colour. */}
         {phase.name === "result" && phase.stale && (
-          <p className="slot__stale">{t.staleResult}</p>
+          // The `title` is the same rule D-083 applied to the legend and the meta sentence:
+          // at 1024, with a transport, a meta line and the footnote chips also in this row,
+          // this sentence ellipsises — and the claim survives in full, one hover away, on
+          // the element that could not finish saying it.
+          <p className="slot__stale" title={t.staleResult}>
+            {t.staleResult}
+          </p>
         )}
       </BottomSlot>
 

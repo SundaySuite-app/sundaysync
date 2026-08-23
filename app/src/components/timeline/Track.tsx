@@ -114,7 +114,9 @@ export const Track = memo(function Track({
       ? t.trackPlaced
       : meta.state === "ready"
         ? t.trackAnalysed
-        : t.trackAnalysing;
+        : meta.state === "failed"
+          ? t.trackAnalysisFailed
+          : t.trackAnalysing;
 
   return (
     <div className="track" role="group" aria-label={t.trackAria(name)} style={{ height: `${height}px` }}>
@@ -222,8 +224,9 @@ interface TrackMeta {
   /** Their spans' total length, in ms. Zero-length spans (an outcome that carries no
    *  duration for a file) contribute nothing rather than a guess. */
   lengthMs: number;
-  /** Grey / blue / green — see below. */
-  state: "pending" | "ready" | "placed";
+  /** Grey / blue / green — see below. `failed` is grey too; it is a different SENTENCE, not
+   *  a fourth colour. */
+  state: "pending" | "failed" | "ready" | "placed";
 }
 
 /**
@@ -241,6 +244,16 @@ interface TrackMeta {
  * be claiming the row was done. `failed` counts as not-ready for the same reason: the row
  * is not analysed, and the file that failed says so for itself on its own clip.
  *
+ * **What `failed` must NOT do is go on saying «Analyserer lyden» (V06-R3).** D-083 folded it
+ * into `pending` — right about the colour, wrong about the words: a card the pass finished
+ * with and could not read is a row that will never turn blue, and a dot that claims to still
+ * be working on it is the app waiting for something that already happened. So a row where
+ * nothing is still pending and something failed keeps the same grey — the vocabulary is
+ * three colours and stays three colours — and says «Lyden er ikke analysert» instead — the register the clip itself already uses for the
+ * same state («Bølgeform utilgjengelig»): a statement about what the app has, not a verdict
+ * on the card. Found
+ * in the V06-R3 sweep, on the case that produces it: a whole card of unreadable files.
+ *
  * A row with nothing drawn on it is `pending` rather than vacuously `ready` — and `Track`
  * draws no dot at all for it, because «ferdig analysert» (or «plassert») over «Ingen klipp
  * plassert» is two claims that cannot both be true.
@@ -254,6 +267,9 @@ function useTrackMeta(
     let files = 0;
     let lengthMs = 0;
     let allReady = true;
+    /** Nothing on this row is still being worked on — every drawn file has an answer. */
+    let allSettled = true;
+    let anyFailed = false;
     for (const row of rows) {
       for (const span of row) {
         // The same filter the lane applies below: with an outcome, a span whose file has no
@@ -261,11 +277,22 @@ function useTrackMeta(
         if (placements && !placements.get(span.file)) continue;
         files += 1;
         lengthMs += Math.max(0, span.endMs - span.startMs);
-        if (prewarm[span.file] !== "ready") allReady = false;
+        const status = prewarm[span.file];
+        if (status !== "ready") allReady = false;
+        if (status === "failed") anyFailed = true;
+        // A file the pass is not tracking at all is absent from the map, which is not the
+        // same as finished: it is a row the pass has not reached (or one nobody started).
+        else if (status !== "ready") allSettled = false;
       }
     }
     const state: TrackMeta["state"] =
-      placements !== null ? "placed" : files > 0 && allReady ? "ready" : "pending";
+      placements !== null
+        ? "placed"
+        : files > 0 && allReady
+          ? "ready"
+          : files > 0 && allSettled && anyFailed
+            ? "failed"
+            : "pending";
     return { files, lengthMs, state };
   }, [rows, placements, prewarm]);
 }

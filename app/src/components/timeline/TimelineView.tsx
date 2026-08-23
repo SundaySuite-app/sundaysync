@@ -945,7 +945,9 @@ function WarningsChip({ t, warnings }: { t: Strings; warnings: readonly Warning[
 
   return (
     <details className="popover popover--warnings" ref={ref}>
-      <summary className="chip badge--warn">{title}</summary>
+      <summary className="chip badge--warn" title={title}>
+        <span className="chip__text">{title}</span>
+      </summary>
       <div className="popover__panel" role="group" aria-label={title}>
         {warnings.map((w, i) => (
           <p key={i} className="warnrow">

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { boot, BOOT_FIXTURES, fn, SETTLED_SETTINGS, waitForResult } from "./harness";
 import { en } from "../src/i18n";
-import { visibleClips } from "../src/timeline/geometry";
+import { MIN_PX_PER_MS, visibleClips } from "../src/timeline/geometry";
 import { stackClips, type ClipSpan } from "../src/timeline/laneLayout";
 import { META_CONCURRENCY } from "../src/timeline/waveformStore";
 
@@ -911,5 +911,146 @@ test.describe(`the metadata storm (${STORM_TOTAL} clips, D-072)`, () => {
     // Each canvas that exists belongs to a clip wide enough to hold one.
     const canvases = await page.locator(".waveform__canvas").count();
     expect(canvases).toBeLessThanOrEqual(widths.filter((w) => w >= 24).length);
+  });
+});
+
+// ── The 16-hour day: «Tilpass» has to actually fit (V06-R3, D-084) ──────────────────────
+//
+// The owner's real wedding spans 15.5 hours — the hairdresser in the morning, the last
+// dance after midnight. At the old `MIN_PX_PER_MS` of 2e-5 the fit zoom for that shoot
+// clamped at the floor, which across the lane the room actually has (1280 less the 300 px
+// inspector, the 224 px gutter and the frame's chrome ≈ 736 px) is ~10.2 hours: 40 of the
+// 386 clips sat past the right edge, and Fit — the one gesture whose entire job is "show me
+// everything" — could not bring them back. It was v0.5's highest-value open item.
+//
+// `viewport.test.ts` pins the arithmetic. This pins the app: a 16-hour result, at the real
+// window size, with the real Fit button, measured off the boxes the browser drew.
+const LONG_SPAN_SEC = 16 * 3600;
+const LONG_CLIP_DUR_SEC = 20 * 60; // 20 min — a real card's worth, not a token
+const LONG_DEVICE_IDS = ["cam-a", "cam-b", "rec"];
+/** Six per device across sixteen hours, evenly spaced so the LAST clip's end lands exactly
+ *  on the span — the right edge is the whole point of this test. */
+const LONG_PER_DEVICE = 6;
+const LONG_SPACING_SEC = (LONG_SPAN_SEC - LONG_CLIP_DUR_SEC) / (LONG_PER_DEVICE - 1);
+
+function buildLongDay() {
+  const devices: Record<string, unknown>[] = [];
+  const placements: Placement[] = [];
+  const durations: Record<string, number> = {};
+  const scanFiles: Record<string, unknown>[] = [];
+
+  LONG_DEVICE_IDS.forEach((id, d) => {
+    const kind = d === 2 ? "audio" : "video";
+    const files: string[] = [];
+    for (let c = 0; c < LONG_PER_DEVICE; c += 1) {
+      const ext = kind === "video" ? "mp4" : "wav";
+      const file = `/nas/${id}/long_${d}_${c}.${ext}`;
+      // A small per-device stagger so the rows are not identical, but every device's last
+      // clip still ends at the span (device 0's does exactly).
+      const offset = c * LONG_SPACING_SEC + d * 30;
+      files.push(file);
+      placements.push({
+        file,
+        device: id,
+        offset_seconds: offset,
+        confidence: 0.9,
+        psr: 30,
+        drift_ppm: null,
+        projected_end_error_ms: null,
+        chain: [],
+        warnings: [],
+      });
+      durations[file] = LONG_CLIP_DUR_SEC;
+      scanFiles.push({
+        file,
+        device: id,
+        duration_seconds: LONG_CLIP_DUR_SEC,
+        format_name: kind === "video" ? "mov,mp4" : "wav",
+        audio: { codec: kind === "video" ? "aac" : "pcm_s16le", sample_rate: 48000, channels: 2 },
+        video: kind === "video" ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" } : null,
+        creation_time: startedAt(offset),
+      });
+    }
+    devices.push({ id, label: id.toUpperCase(), kind, files });
+  });
+
+  return { devices, placements, durations, scanFiles };
+}
+
+const LONG = buildLongDay();
+const LONG_TOTAL = LONG.placements.length;
+/** The last clip's end, in timeline-local ms — the number the right edge has to contain. */
+const LONG_END_MS = Math.max(
+  ...LONG.placements.map((p) => (p.offset_seconds + LONG_CLIP_DUR_SEC) * 1000),
+);
+
+async function reachLongResult(page: Page): Promise<void> {
+  await boot(page, {
+    fixtures: {
+      ...BOOT_FIXTURES,
+      "plugin:dialog|open": ["/Volumes/nas/wedding"],
+      scan_inputs: { schema: 1, devices: LONG.devices, files: LONG.scanFiles, unsynced: [] },
+      run_sync: {
+        result: {
+          schema: 1,
+          parameters: { analysis_rate: 12000, min_psr: 15 },
+          reference: { file: LONG.placements[0].file, device: LONG_DEVICE_IDS[0] },
+          devices: LONG.devices,
+          placements: LONG.placements,
+          unsynced: [],
+          sequence: { fps: "25/1", duration_seconds: LONG_SPAN_SEC },
+          warnings: [],
+        },
+        durations: LONG.durations,
+      },
+    },
+    settings: SETTLED_SETTINGS,
+  });
+  await page.getByRole("button", { name: en.dropFolder }).click();
+  await page.getByRole("button", { name: en.syncButton }).click();
+  await waitForResult(page);
+}
+
+test.describe(`«Tilpass» fits a ${LONG_SPAN_SEC / 3600}-hour day (D-084)`, () => {
+  // The REAL window size, deliberately — this test is about the lane the room actually has
+  // at 1280×800, which is the size `tauri.conf.json` opens at and the size the shell is
+  // asserted at everywhere else. A taller viewport would widen nothing, but it would make
+  // the number under test somebody else's.
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("every clip is mounted and the last one's right edge is inside the lane", async ({
+    page,
+  }) => {
+    await reachLongResult(page);
+    // Fit by its own button, by name — the operator's gesture, not an internal call.
+    await page.getByRole("button", { name: en.zoomFitAria }).click();
+
+    // 1. Nothing is hidden. At fit, `fitPxPerMs` makes the visible window the whole content
+    //    span, so every placement is genuinely inside the virtualization window and mounting
+    //    all of them is correct. Before D-084 this count fell short: the fit clamped at the
+    //    floor and the clips past ~10 h were outside the window `visibleClips` computed.
+    await expect(page.locator(".clip")).toHaveCount(LONG_TOTAL);
+
+    // 2. The right edge. Measured off the drawn boxes: the rightmost clip's right edge sits
+    //    inside the lane's own right edge, with `FIT_PADDING_PX` of the 24 px slack to spare.
+    const vp = (await page.locator(VIEWPORT).boundingBox())!;
+    const rights = await page
+      .locator(".clip")
+      .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().right));
+    expect(Math.max(...rights)).toBeLessThanOrEqual(vp.x + vp.width);
+    // …and it is a real fit, not everything crushed into the left third: the content
+    // genuinely uses the lane it was given.
+    expect(Math.max(...rights)).toBeGreaterThan(vp.x + vp.width * 0.75);
+
+    // 3. The zoom that produced it is off the floor — i.e. the fit is a fit, not a clamp.
+    //    Read from the drawn geometry (a clip's width over its known duration), never from
+    //    component state, so it stays true however the internals are tuned.
+    const widths = await page
+      .locator(".clip")
+      .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width));
+    const pxPerMs = Math.max(...widths) / (LONG_CLIP_DUR_SEC * 1000);
+    expect(pxPerMs).toBeGreaterThan(MIN_PX_PER_MS);
+    // The whole 16 hours really is on screen at that zoom.
+    expect(LONG_END_MS * pxPerMs).toBeLessThanOrEqual(vp.width + 1);
   });
 });

@@ -70,7 +70,13 @@ export function SourcesPopover({
 
   return (
     <details className="popover popover--sources" ref={ref}>
-      <summary className="strip__summary">{summary}</summary>
+      {/* The sentence is also the `title` (V06-R3). It ellipsises — hard, at a narrow window,
+          where the strip has more to carry than it has room for — and D-083 already made
+          this the rule for everything else in that position: the claim survives in full, one
+          hover away, on the element that could not finish saying it. */}
+      <summary className="strip__summary" title={summary}>
+        {summary}
+      </summary>
       <div className="popover__panel" role="group" aria-label={t.sourcesTitle}>
         <div className="roots">
           {inputs.map((root) => (

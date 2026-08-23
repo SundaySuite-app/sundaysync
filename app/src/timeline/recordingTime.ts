@@ -74,9 +74,10 @@ export interface RecordingTime {
  * writes that into every container it records, and reports it as confidently as a camera
  * with a GPS lock. Before this gate, one such file in a drop set the origin decades before
  * the rest: `contentBounds` returned a span of ~1.8 × 10¹² ms, `fitPxPerMs` clamped to
- * `MIN_PX_PER_MS`, and the operator got a timeline showing twelve hours of empty grid with
- * the dud clip at the far left and every real file fifty-six years off the right edge —
- * with nothing on screen saying why.
+ * `MIN_PX_PER_MS`, and the operator got a timeline showing the floor's whole reach as empty
+ * grid (twelve hours when this was measured; ~twenty since D-084 halved the floor) with the
+ * dud clip at the far left and every real file fifty-six years off the right edge — with
+ * nothing on screen saying why.
  *
  * A day is the honest bound: SundaySync exists to line up sources that were **recording at
  * the same time**, so anything the correlator could ever match is inside one session.

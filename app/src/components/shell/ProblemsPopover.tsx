@@ -58,7 +58,9 @@ export function ProblemsPopover({
 
   return (
     <details className="popover popover--problems" ref={ref}>
-      <summary className="chip badge--problem">{t.problemCount(total)}</summary>
+      <summary className="chip badge--problem" title={t.problemCount(total)}>
+        <span className="chip__text">{t.problemCount(total)}</span>
+      </summary>
       <div className="popover__panel" role="group" aria-label={t.unsyncedTitle}>
         {/* Said once. `UnsyncedShelf` carries the same words in its own `.shelf__title`, and
             two identical headings six rows apart is a screen reader saying "Ikke
