@@ -3498,10 +3498,11 @@ mod waveform_tests {
 
     /// The sample values a fixture window came back as.
     fn decode(bytes: &[u8]) -> Vec<f32> {
-        bytes
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-            .collect()
+        // `as_chunks` (stable since 1.88) is what clippy 1.98's
+        // `chunks_exact_to_as_chunks` asks for; the trailing remainder is empty for a
+        // whole number of samples, and a short read is exactly what the tests look for.
+        let (whole, _rest) = bytes.as_chunks::<4>();
+        whole.iter().map(|c| f32::from_le_bytes(*c)).collect()
     }
 
     fn window(
