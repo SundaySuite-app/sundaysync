@@ -1455,20 +1455,12 @@ select:hover, input:hover { border-color: var(--accent-border); }
 .preview .detail-grid { margin-bottom: 0.5rem; }
 .preview .detail-grid dd { min-width: 0; overflow-wrap: anywhere; }
 
-/* The one control in the panel, on one line so it costs a row rather than a block. */
-.field--inline { flex-direction: row; align-items: center; gap: 0.5rem; }
-.field--inline > span { color: var(--text2); font-weight: 400; font-size: 0.8125rem; }
-/* …and in the inspector it has to WIN that, which the bare class does not: `.field`'s own
-   `flex-direction: column` is declared later in this sheet (the settings block) at the same
-   specificity, so it takes the cascade — which is what put the label on one line and the
-   `<select>` on the next. Fixed here for the panel only; the identical shadowing in
-   `SettingsPanel`'s cache-cap row is older than this stage and is not R1's to change. */
-.preview .field--inline {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
+/* What is preview-SPECIFIC about the one-line control: the label pushes the `<select>` to
+   the far edge. The one-line shape itself comes from the base `.field--inline`, declared
+   AFTER `.field` in the settings block so the modifier actually modifies (D-089 follow-up:
+   R1 papered over the old declaration order with a specificity bump here; the order is now
+   right and the bump is gone). */
+.preview .field--inline { justify-content: space-between; }
 .preview .field--inline > select { flex: 0 1 auto; min-width: 0; }
 
 /* ── The inspector's action row (V06-R2a, D-077 #9/#10/#11) ─────────────────────────────
@@ -1578,6 +1570,12 @@ select:hover, input:hover { border-color: var(--accent-border); }
 .settings { display: flex; flex-direction: column; gap: 1.25rem; }
 .field { display: flex; flex-direction: column; gap: 0.35rem; }
 .field > span { font-weight: 550; font-size: 0.875rem; }
+/* The modifier sits BELOW the base on purpose — both rules, the box and its `> span`:
+   equal specificity means source order decides, and a `field field--inline` must render as
+   the one-line row it names. (It once sat in the preview block above `.field` and silently
+   lost — the cache-cap row in Settings stacked.) */
+.field--inline { flex-direction: row; align-items: center; gap: 0.5rem; }
+.field--inline > span { color: var(--text2); font-weight: 400; font-size: 0.8125rem; }
 .field small { color: var(--text3); line-height: 1.45; }
 .field__row { display: flex; gap: 0.5rem; align-items: center; }
 .field__error { color: var(--red); font-size: 0.8125rem; }
