@@ -434,6 +434,12 @@ test("the transport says what the audio actually is", async ({ page }) => {
   // Expectation-setting is a feature here: 12 kHz mono analysis audio sounds wrong to
   // someone expecting a mix, and a user who thinks the audio is broken stops trusting
   // the sync it is there to prove.
+  //
+  // V06-R2b (D-083): the sentence is the transport's `title` rather than a caption beside
+  // it. The slot's middle carries the meta sentence now, and the measurement said the
+  // caption no longer fit — 413 px of text in a 374 px box at 1280, and a slot overflowing
+  // its own 724 px at 1024. The claim is unchanged and the reading is stronger: an attribute
+  // is the whole sentence, where a clipped caption was most of one.
   await reachResult(page, twoDeviceOutcome());
-  await expect(page.getByText(en.playbackQualityNote)).toBeVisible();
+  await expect(page.locator(".transport")).toHaveAttribute("title", en.playbackQualityNote);
 });

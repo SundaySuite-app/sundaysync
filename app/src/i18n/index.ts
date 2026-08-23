@@ -97,6 +97,14 @@ export const nb = {
   timelineAria: "Tidslinje",
   trackAria: (name: string) => `Spor: ${name}`,
   subTrackAria: (n: number) => `Underspor ${n}`,
+  // V06-R2b (D-083): sporhodet er enhetens hjem, og prikken på andre linje er enhetens egen
+  // tilstand. Fargen sier det til øyet fra andre siden av rommet; disse tre sier det med ord
+  // til skjermleseren og til den som holder musepekeren i ro. «Enheten», ikke «filene»:
+  // prikken gjelder alle filene på raden under ett, som er hele grunnen til at den står i
+  // hodet og ikke på hvert klipp.
+  trackAnalysing: "Analyserer lyden",
+  trackAnalysed: "Lyden er analysert",
+  trackPlaced: "Plassert av synken",
   rulerAria: "Tidslinjal — klikk eller dra for å flytte markøren",
   zoomIn: "Zoom inn",
   zoomOut: "Zoom ut",
@@ -147,6 +155,24 @@ export const nb = {
     if (counts.ordered > 0) parts.push(`${counts.ordered} bare rekkefølge`);
     if (counts.offSession > 0) parts.push(`${counts.offSession} utenfor økta`);
     return `${parts.join(" · ")}.`;
+  },
+  // V06-R2b (D-083): legenden står i bunnstripa nå, ved siden av transporten og
+  // metasetninga, og 38 px har ikke plass til en setning per tall. Tallene er hele poenget
+  // — de fire påstandene og at summen er slippet — så tallene blir stående og ORDENE
+  // kortes ned. Hele setninga henger igjen som `title` på samme element, så ingenting er
+  // borte, bare foldet.
+  presyncLegendShort: (counts: {
+    placed: number;
+    estimated: number;
+    ordered: number;
+    offSession: number;
+  }) => {
+    const parts: string[] = [];
+    if (counts.placed > 0) parts.push(`${counts.placed} plassert`);
+    if (counts.estimated > 0) parts.push(`${counts.estimated} anslått`);
+    if (counts.ordered > 0) parts.push(`${counts.ordered} rekkefølge`);
+    if (counts.offSession > 0) parts.push(`${counts.offSession} utenfor økta`);
+    return parts.join(" · ");
   },
   // …og datoen sies rett ut, for det er den som gjør linja handlingsbar: eieren kjenner
   // igjen «juni-dronemappa» øyeblikkelig, men ikke «14 filer».
@@ -233,6 +259,10 @@ export const nb = {
   // The number here is what the export corrects, so the copy says so, not "later".
   drift: (ms: number) =>
     `Dette klippet driver ${Math.abs(ms).toFixed(0)} ms over lengden. Korrigeres automatisk ved eksport (kan slås av i Innstillinger).`,
+  // V06-R2b (D-083): advarslene sto som bannere over tidslinja, og et banner over tidslinja
+  // er nøyaktig det rommet ikke skal ha. Tallet står på topplinja ved siden av problemfilene
+  // — samme spørsmål, samme sted — og selve setningene henger bak det.
+  warningsCount: (n: number) => (n === 1 ? "1 advarsel" : `${n} advarsler`),
   metadataMismatch: "Tidsstempelet i fila stemmer ikke med lyden. Lyden er lagt til grunn.",
   mixedFps: "Klippene har ulik bildefrekvens.",
   frameSnap: "Plasseringen er rundet til nærmeste bilde.",
@@ -479,6 +509,10 @@ export const en: Strings = {
   timelineAria: "Timeline",
   trackAria: (name: string) => `Track: ${name}`,
   subTrackAria: (n: number) => `Sub-track ${n}`,
+  // V06-R2b (D-083) — see the nb comments above.
+  trackAnalysing: "Analysing the audio",
+  trackAnalysed: "Audio analysed",
+  trackPlaced: "Placed by the sync",
   rulerAria: "Time ruler — click or drag to move the playhead",
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
@@ -515,6 +549,20 @@ export const en: Strings = {
     if (counts.ordered > 0) parts.push(`${counts.ordered} in filename order only`);
     if (counts.offSession > 0) parts.push(`${counts.offSession} outside this session`);
     return `${parts.join(" · ")}.`;
+  },
+  // V06-R2b (D-083) — see the nb comment above.
+  presyncLegendShort: (counts: {
+    placed: number;
+    estimated: number;
+    ordered: number;
+    offSession: number;
+  }) => {
+    const parts: string[] = [];
+    if (counts.placed > 0) parts.push(`${counts.placed} placed`);
+    if (counts.estimated > 0) parts.push(`${counts.estimated} estimated`);
+    if (counts.ordered > 0) parts.push(`${counts.ordered} by order`);
+    if (counts.offSession > 0) parts.push(`${counts.offSession} outside`);
+    return parts.join(" · ");
   },
   presyncOffSession: (n: number, days: string[]) => {
     const when =
@@ -587,6 +635,8 @@ export const en: Strings = {
   // D-042 (E6): drift correction shipped — see the nb comment above.
   drift: (ms: number) =>
     `This clip drifts ${Math.abs(ms).toFixed(0)} ms over its length. It is corrected automatically on export (toggle in Settings).`,
+  // V06-R2b (D-083) — see the nb comment above.
+  warningsCount: (n: number) => (n === 1 ? "1 warning" : `${n} warnings`),
   metadataMismatch: "The file's timestamp disagrees with the audio. The audio was trusted.",
   mixedFps: "The clips have different frame rates.",
   frameSnap: "The placement was rounded to the nearest frame.",
