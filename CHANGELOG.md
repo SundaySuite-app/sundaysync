@@ -15,6 +15,39 @@
   om seg selv — at tidspunktet er anslått, at rekkefølgen kommer fra filnavnet, at fila er
   stemplet en annen dag — sier det fortsatt: kanten er uendret, det er fyllet som skifter.
 
+### Endret
+
+- **Appen er ett rom (V06-R1).** SundaySync leses ikke lenger som en rekke sider som dytter
+  hverandre rundt. Det er en 44 px topplinje med navnet, «Legg til», én setning om hva du har
+  sluppet inn og den ene tingen du skal trykke på nå; tidslinja fyller alt under den; en
+  300 px kolonne til høyre viser klippet du har merket — bildet, hva fila er, og hva synken
+  fant ut om den; og en tynn stripe langs bunnen bærer avspillingen. De fire er like store i
+  alle fasene, så det å slippe inn en mappe, trykke Synkroniser og få et resultat flytter ikke
+  lenger på det du sitter og ser på. Vinduet er 1280×800 og kan dras ned til 1024×600.
+- **Stillbildet er nesten fire ganger så stort.** I høyrekolonna er en forhåndsvisning
+  268×151 i stedet for 140×79 — forskjellen på å kjenne igjen en kameravinkel og å gjette.
+- **Framdrift er det eneste som får lov til å flytte tidslinja**, og bare mens appen faktisk
+  jobber: en 34 px stripe under topplinja mens den leser kildene eller kjører synken, og den
+  dytter tidslinja ned nøyaktig så mye. Den blir stående gjennom hoppet, så tidslinja og
+  klippene aldri beveger seg samtidig.
+- **Meldinger legger seg over i stedet for å dytte.** En advarsel, et oppdateringsvarsel eller
+  en eksportfeil legger seg oppå tidslinja i stedet for å skyve alt under seg nedover.
+  «Kildene er endret siden forrige synkronisering» er én stille linje langs bunnen nå.
+- **Eksport, prosjektnavn og «Vis i Finder» flyttet opp** i topplinja, ved siden av «Synk på
+  nytt» — resultatfasens handlinger står der alle de andre fasenes handling står.
+
+### Internt
+
+- «Ett rom»-skallet er et fast CSS-rutenett (D-074); det merkede klippet og avspillinga havner
+  der designet vil ha dem uten å flytte på hvor dataene deres bor (D-075); forhåndsvisninga er
+  en kolonne (D-076); én hovedhandling per fase (D-081); framdriftsstripa og meldingslaget er
+  to ulike slags ting og er bygget ulikt (D-082); «Legg til» er en topplinje-kontroll (D-086).
+  Kildepanelet blir hengende under tidslinja som en bevisst bro til R2a fjerner det (D-087) —
+  ingenting fra denne etappen slippes alene.
+- `app/e2e/ett-rom.spec.ts` måler rommet i piksler i to vindusstørrelser, og sampler hver
+  eneste ramme av hoppet for å bevise at framdriftsstripa aldri blinker vekk under det.
+
+
 ## v0.5.0-beta.1
 
 **v0.5 — the app stops claiming things it cannot support.** v0.4 put your files on the

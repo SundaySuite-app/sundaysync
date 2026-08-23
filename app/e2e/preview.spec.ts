@@ -219,28 +219,44 @@ test.describe("the preview panel", () => {
     ).toEqual([CAM_A, CAM_B]);
   });
 
-  test("the panel's box does not move when a clip is selected", async ({ page }) => {
-    // The reason the panel is always visible and a fixed height (D-070). If it appeared —
-    // or grew — on selection it would push the timeline in the very instant the operator
-    // clicked a three-pixel clip, and their next click would land on a different one. That
-    // is a broken interaction, not an annoyance, so it is asserted in pixels.
+  test("marking a clip does not move the timeline", async ({ page }) => {
+    // D-070's rule, asserted in pixels: if the panel appeared — or grew — on selection it
+    // would push the timeline in the very instant the operator clicked a three-pixel clip,
+    // and their next click would land on a different one. A broken interaction, not an
+    // annoyance.
+    //
+    // V06-R1 (D-076) keeps the rule and changes what enforces it. The panel used to be a
+    // 180 px band UNDER the timeline, so the rule had to be spelled as "the panel is always
+    // exactly 180 px tall" — a fixed height was the only way a box in the vertical stack
+    // could promise not to shove what was above it. The panel is now the content of the
+    // 300 px inspector COLUMN, which is a sibling of the stage rather than a block below it:
+    // it can say as much or as little as it likes and the timeline cannot hear about it. So
+    // the panel's own height is free (and does grow — an empty column is one sentence, a
+    // filled one is a still frame plus two tables), and what is asserted is the thing the
+    // rule was always about.
     await reachSources(page);
 
-    const empty = (await preview(page).boundingBox())!;
+    const columnBefore = (await page.locator(".inspector").boundingBox())!;
     const timelineBefore = (await page.locator(".timeline__frame").boundingBox())!;
+    const gutterBefore = (await page.locator(".track__gutter").first().boundingBox())!;
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
     await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
 
-    const filled = (await preview(page).boundingBox())!;
-    expect(filled.height).toBeCloseTo(empty.height, 0);
-    expect(filled.y).toBeCloseTo(empty.y, 0);
-
-    // …and the thing above it did not move either, which is the property that actually
-    // matters to the next click.
+    // The thing the next click depends on: the timeline's own box, to the pixel.
     const timelineAfter = (await page.locator(".timeline__frame").boundingBox())!;
     expect(timelineAfter.y).toBeCloseTo(timelineBefore.y, 0);
+    expect(timelineAfter.x).toBeCloseTo(timelineBefore.x, 0);
     expect(timelineAfter.height).toBeCloseTo(timelineBefore.height, 0);
+    expect(timelineAfter.width).toBeCloseTo(timelineBefore.width, 0);
+
+    // …and neither the column that filled up nor the lane origin every clip is drawn from.
+    const columnAfter = (await page.locator(".inspector").boundingBox())!;
+    expect(columnAfter.x).toBeCloseTo(columnBefore.x, 0);
+    expect(columnAfter.width).toBeCloseTo(columnBefore.width, 0);
+    const gutterAfter = (await page.locator(".track__gutter").first().boundingBox())!;
+    expect(gutterAfter.x).toBeCloseTo(gutterBefore.x, 0);
+    expect(gutterAfter.width).toBeCloseTo(gutterBefore.width, 0);
   });
 
   test("a selection that stops existing clears itself rather than describing a ghost", async ({

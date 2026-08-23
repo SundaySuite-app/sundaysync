@@ -56,11 +56,20 @@ test.describe("override after sync marks the result stale", () => {
 
     await expect(page.getByText(en.staleResult)).toBeVisible();
     await expect(page.getByRole("button", { name: en.exportButton })).toBeDisabled();
-    // The primary action still reads "Sync again" — that label is a property of being
+    // The re-sync action still reads "Sync again" — that label is a property of being
     // in the result phase at all, not new here, but the cached-analysis hint is the
     // part of the promise this scenario is actually about (D-027): a re-assign should
     // not force a cold re-decode.
-    await expect(page.getByText(en.resyncHint)).toBeVisible();
+    //
+    // V06-R1 (D-081) moved that sentence from a `<small>` under the button into the button's
+    // own `title`. Same promise, same words, attached to the same control — it stopped being
+    // a second line of body text because the 44 px strip has no second line. So the assertion
+    // asks the button rather than the page; a page-wide text match would now pass for a
+    // tooltip on anything at all.
+    await expect(page.getByRole("button", { name: en.resyncButton })).toHaveAttribute(
+      "title",
+      en.resyncHint,
+    );
   });
 
   test("reassigning via the unsynced shelf's own selector also marks it stale", async ({

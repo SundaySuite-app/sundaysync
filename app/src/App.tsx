@@ -7,7 +7,15 @@
  * simple mode does with an untouched configuration.
  */
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -19,21 +27,27 @@ import { DropZone } from "./components/DropZone";
 import { EmptyState } from "./components/EmptyState";
 import { Onboarding } from "./components/Onboarding";
 import { ProgressBar } from "./components/ProgressBar";
+import { PreviewPanel } from "./components/timeline/PreviewPanel";
 import { TimelineView } from "./components/timeline/TimelineView";
+import { HOP_SAFETY_MS, motionAllowed } from "./components/timeline/useHop";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SourcesPanel } from "./components/SourcesPanel";
-import { GearIcon } from "./components/icons";
+import { Band } from "./components/shell/Band";
+import { BottomSlot } from "./components/shell/BottomSlot";
+import { Inspector } from "./components/shell/Inspector";
+import { TopStrip } from "./components/shell/TopStrip";
 
 import { mapEngineError } from "./errors";
 import { invokeWithTimeout } from "./invoke";
-import { detectLang, dictionaries, type Lang, type Strings } from "./i18n";
-import { getSettings, saveSettings } from "./settings";
+import { detectLang, dictionaries, formatDuration, type Lang, type Strings } from "./i18n";
+import { getSettings } from "./settings";
 import { initialState, reducer, type PrewarmEndReason } from "./state";
 import {
   BUSY_PREFIX,
   invalidate as invalidateWaveform,
   invalidateAll as invalidateAllWaveforms,
 } from "./timeline/waveformStore";
+import { recordingTimes } from "./timeline/recordingTime";
 import { getTelemetryStatus, reportFrontendError } from "./telemetry";
 import { checkForUpdate } from "./update";
 import { gateErrorReport, initialErrorGateState, shapeErrorPayload } from "./telemetryErrors";
@@ -72,6 +86,19 @@ export function App() {
   const [showConsent, setShowConsent] = useState(false);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("SundaySync");
+  /**
+   * The marked clip, as a file path — lifted out of `TimelineView` in V06-R1 (D-075).
+   *
+   * The timeline used to own it because the panel that read it hung underneath the timeline.
+   * The inspector is a column of the room now, a sibling of the stage, and two siblings can
+   * only share a fact through the parent. `TimelineView` still enforces the rule that a
+   * selection must name a clip that is actually drawn — it is the only thing that knows —
+   * and reports a stale one back through `onSelect(null)`.
+   */
+  const [selected, setSelected] = useState<string | null>(null);
+  /** The bottom slot's portal target (D-075). A callback ref in state rather than a `useRef`
+   *  so the commit that mounts the node re-renders the tree that portals into it. */
+  const [slotEl, setSlotEl] = useState<HTMLDivElement | null>(null);
   const t = dictionaries[lang];
 
   // Screen readers pronounce by the document language — a hardcoded lang="nb" reads
@@ -424,6 +451,47 @@ export function App() {
     dispatch({ type: "banner/set", banner: { kind, text } });
   }, []);
 
+  // ---- The progress band's hold across the hop (V06-R1, D-082) -----------------------
+  //
+  // `syncing` → `result` removes the band, which is 34 px of the room, in the SAME frame the
+  // clips start hopping to their solved positions. Two movements at once, one of them the
+  // whole point of the moment and the other an accident of layout: the timeline appears to
+  // jump upwards under the very animation the operator is meant to read. So the band stays,
+  // showing the run it just finished at 100 %, until the hop has come to rest.
+  //
+  // **A LAYOUT effect, and that is the whole of it.** `useEffect` runs after the browser has
+  // painted, while `useHop`'s own layout effect sets `data-hop` during the commit — so an
+  // ordinary effect paints one frame with the band already gone and the hop already running,
+  // and then puts the band back. That is a flicker, which is worse than no hold at all, and
+  // it is not theoretical: `ett-rom.spec.ts` samples every frame of the hop and caught it
+  // (one dropped frame at 1280×800, ten at 1024×600). A layout effect's state update is
+  // flushed synchronously before paint, so the band never leaves the screen. Setting the
+  // state during render would do the same thing, and was tried — React drops a render-phase
+  // update when the same commit is re-rendered for another reason, which here it is.
+  //
+  // Under reduced motion there is no hop to wait for and the band goes at once; a hold there
+  // would be 750 ms of a bar that has finished.
+  const [bandHeld, setBandHeld] = useState(false);
+  const previousPhaseName = useRef(phase.name);
+  useLayoutEffect(() => {
+    const previous = previousPhaseName.current;
+    previousPhaseName.current = phase.name;
+    if (previous === "syncing" && phase.name === "result" && motionAllowed()) setBandHeld(true);
+  }, [phase.name]);
+  // `onHopSettled` is the ordinary release — `useHop` fires it from both of the ways a hop can
+  // end, its own finish and any gesture that cancels it. The timer is the promise that there
+  // IS an end: the same safety net `useHop` sizes its own from, plus a frame.
+  useEffect(() => {
+    if (!bandHeld) return;
+    const timer = setTimeout(() => setBandHeld(false), HOP_SAFETY_MS + 100);
+    return () => clearTimeout(timer);
+  }, [bandHeld]);
+  const onHopSettled = useCallback(() => setBandHeld(false), []);
+  /** The last tick of the run that is finishing, so the held band shows that run's own stage
+   *  filled rather than an indeterminate bar it has no reason to draw. */
+  const lastSyncProgress = useRef<ProgressEvent | null>(null);
+  if (phase.name === "syncing") lastSyncProgress.current = phase.progress;
+
   const manifest =
     phase.name === "sources" || phase.name === "syncing" || phase.name === "result"
       ? phase.manifest
@@ -443,142 +511,263 @@ export function App() {
     phase.name === "sources" || phase.name === "syncing" || phase.name === "result"
       ? phase.name
       : null;
+  const outcome = phase.name === "result" ? phase.outcome : null;
+
+  // ---- What the inspector column is looking at (V06-R1, D-075/D-076) -------------------
+  //
+  // Verbatim in intent from what `TimelineView` used to derive for the panel it hung under
+  // (D-070): one stored fact — the marked file's path — and every other view of it computed.
+  // `recordingTimes` is the same ladder `sourceLayout` runs (D-067), memoised on the manifest
+  // alone, so it costs one pass per scan and nothing per selection; it answers in the RESULT
+  // phase too, where the pre-sync `timeSource` map is empty but the file's own clock is still
+  // a fact worth showing beside the engine's answer.
+  const selectedPlacement = useMemo(
+    () =>
+      outcome !== null && selected !== null
+        ? (outcome.result.placements.find((p) => p.file === selected) ?? null)
+        : null,
+    [outcome, selected],
+  );
+  const selectedEntry =
+    selected !== null ? (manifest?.files.find((f) => f.file === selected) ?? null) : null;
+  const recorded = useMemo(() => (manifest ? recordingTimes(manifest.files) : null), [manifest]);
+  // Nothing is dropped, so nothing can be marked. The timeline's own pruning effect cannot
+  // say this: by the empty phase it is unmounted.
+  useEffect(() => {
+    if (phase.name === "empty") setSelected(null);
+  }, [phase.name]);
+
+  /**
+   * The strip's one sentence (V06-R1, D-081).
+   *
+   * The same two numbers the bridge panel below puts in its chips, counted the same way —
+   * after the exclusion filter and under the override overlay — because a strip that
+   * disagreed with the panel about how many files are in the run would be the loudest
+   * possible bug in a 44 px line. Result adds what the run produced: frame rate and length.
+   */
+  const stripSummary = useMemo(() => {
+    if (manifest === null || phase.name === "empty" || phase.name === "scanning") return null;
+    const gone = new Set(state.excluded);
+    const devices = new Set<string>();
+    let files = 0;
+    for (const entry of manifest.files) {
+      if (gone.has(entry.file)) continue;
+      files += 1;
+      devices.add(state.overrides[entry.file] ?? entry.device);
+    }
+    const counts = `${t.fileCount(files)} · ${t.deviceCount(devices.size)}`;
+    if (outcome === null) return counts;
+    const { fps, duration_seconds } = outcome.result.sequence;
+    return `${counts} · ${t.sequenceMeta(fps, formatDuration(duration_seconds))}`;
+  }, [manifest, phase.name, state.excluded, state.overrides, outcome, t]);
+
+  // ---- The strip's single primary action, per phase --------------------------------------
+  const stripActions =
+    phase.name === "sources" ? (
+      <button
+        type="button"
+        className="primary"
+        onClick={runSync}
+        // The cached-analysis promise (D-027) used to be a `<small>` under the button label,
+        // which is a second line the strip does not have. Same sentence, on the control it
+        // is about.
+        title={overridesDirty ? t.resyncHint : undefined}
+      >
+        {t.syncButton}
+      </button>
+    ) : phase.name === "result" ? (
+      <>
+        {/* The project name travels with the export, so it sits beside it. */}
+        <label>
+          <span className="visually-hidden">{t.projectName}</span>
+          <input
+            type="text"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            aria-label={t.projectName}
+          />
+        </label>
+        <button type="button" className="primary" onClick={exportTimeline} disabled={phase.stale}>
+          {t.exportButton}
+        </button>
+        <button type="button" className="secondary" onClick={runSync} title={t.resyncHint}>
+          {t.resyncButton}
+        </button>
+        {exportedPath && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => revealItemInDir(exportedPath)}
+          >
+            {t.revealInFinder}
+          </button>
+        )}
+      </>
+    ) : null;
 
   return (
     <main className="app">
-      <header className="app__header">
-        <h1>
-          Sunday<span className="accent">Sync</span>
-        </h1>
-        <div className="app__header-actions">
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => {
-              const next: Lang = lang === "nb" ? "en" : "nb";
-              setLang(next);
-              saveSettings({ lang: next });
-            }}
-          >
-            {lang === "nb" ? "English" : "Norsk"}
-          </button>
-          <button
-            type="button"
-            className="iconbtn"
-            onClick={() => setShowSettings(true)}
-            aria-label={t.settings}
-          >
-            <GearIcon />
-          </button>
-        </div>
-      </header>
+      <TopStrip
+        t={t}
+        // Exactly one `DropZone` may be mounted at a time — its drag-drop listener is
+        // webview-global (DropZone.tsx). In the empty phase the stage's own full-size zone is
+        // the one; from `scanning` onwards the strip carries it.
+        add={
+          phase.name === "empty" ? null : (
+            <DropZone
+              t={t}
+              compact
+              onFiles={chooseFiles}
+              onFolder={chooseFolder}
+              onDropPaths={addPaths}
+            />
+          )
+        }
+        summary={stripSummary}
+        actions={stripActions}
+        onSettings={() => setShowSettings(true)}
+      />
 
-      {state.sidecarOk === false && !showOnboarding && (
-        <p className="banner banner--error" role="alert">
-          <span>{t.errSidecar}</span>
-        </p>
-      )}
-
-      <BannerRegion t={t} banner={state.banner} onDismiss={() => dispatch({ type: "banner/clear" })} />
-
-      {phase.name === "empty" && (
-        <EmptyState t={t} onFiles={chooseFiles} onFolder={chooseFolder} onDropPaths={addPaths} />
-      )}
-
-      {phase.name !== "empty" && phase.name !== "syncing" && (
-        <DropZone t={t} compact onFiles={chooseFiles} onFolder={chooseFolder} onDropPaths={addPaths} />
-      )}
-
+      {/* The band (D-082) — the one thing that is allowed to move the timeline, and only
+          while the app is genuinely working. */}
       {phase.name === "scanning" && (
-        <div className="run">
+        <Band>
           <ProgressBar t={t} progress={phase.progress} idleLabel={t.scanningInputs} />
-        </div>
+        </Band>
       )}
-
-      {/* The run bar sits ABOVE the timeline, so pressing Sync and watching the progress
-          happen never moves the material the operator is looking at. */}
-      {phase.name === "syncing" ? (
-        <div className="run">
+      {phase.name === "syncing" && (
+        <Band>
           <ProgressBar t={t} progress={phase.progress} />
-          <button type="button" className="secondary" onClick={cancelSync} disabled={state.cancelling}>
+          <button
+            type="button"
+            className="secondary"
+            onClick={cancelSync}
+            disabled={state.cancelling}
+          >
             {state.cancelling ? t.cancelling : t.cancel}
           </button>
-        </div>
-      ) : (
-        phase.name !== "empty" &&
-        phase.name !== "scanning" && (
-          <div className="actions">
-            <button type="button" className="primary" onClick={runSync}>
-              {phase.name === "result" ? t.resyncButton : t.syncButton}
-              {(phase.name === "result" || overridesDirty) && <small>{t.resyncHint}</small>}
-            </button>
-          </div>
-        )
+        </Band>
+      )}
+      {phase.name === "result" && bandHeld && (
+        <Band>
+          <ProgressBar
+            t={t}
+            progress={
+              lastSyncProgress.current === null
+                ? null
+                : { ...lastSyncProgress.current, completed: lastSyncProgress.current.total }
+            }
+          />
+        </Band>
       )}
 
-      {phase.name === "result" && phase.stale && (
-        <p className="banner banner--warn">
-          <span>{t.staleResult}</span>
-        </p>
-      )}
-
-      {timelinePhase && manifest && (
-        <TimelineView
-          t={t}
-          phase={timelinePhase}
-          manifest={manifest}
-          overrides={state.overrides}
-          reference={state.reference}
-          excluded={excludedSet}
-          prewarm={state.prewarm}
-          outcome={phase.name === "result" ? phase.outcome : null}
-          stale={phase.name === "result" && phase.stale}
-          deviceIds={deviceIds}
-          onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
-          onExclude={(file) => dispatch({ type: "files/exclude", file })}
-        />
-      )}
-
-      {phase.name === "result" && (
-        <div className="exportbar">
-          <label>
-            <span className="visually-hidden">{t.projectName}</span>
-            <input
-              type="text"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              aria-label={t.projectName}
-            />
-          </label>
-          <button type="button" className="primary" onClick={exportTimeline} disabled={phase.stale}>
-            {t.exportButton}
-          </button>
-          {exportedPath && (
-            <button type="button" className="secondary" onClick={() => revealItemInDir(exportedPath)}>
-              {t.revealInFinder}
-            </button>
+      <section className="stage">
+        {/* Banners float over the stage instead of taking a row of their own (D-082). A
+            message the app has to say is not a reason for everything under it to move — and
+            an error banner arriving mid-sync used to do exactly that. */}
+        <div className="toasts">
+          {state.sidecarOk === false && !showOnboarding && (
+            <p className="banner banner--error" role="alert">
+              <span>{t.errSidecar}</span>
+            </p>
           )}
+          <BannerRegion
+            t={t}
+            banner={state.banner}
+            onDismiss={() => dispatch({ type: "banner/clear" })}
+          />
         </div>
-      )}
 
-      {timelinePhase && manifest && (
-        <SourcesPanel
+        {phase.name === "empty" && (
+          <EmptyState t={t} onFiles={chooseFiles} onFolder={chooseFolder} onDropPaths={addPaths} />
+        )}
+
+        {/* `scanning` deliberately renders NOTHING here. The band above says what is
+            happening; the empty state flashing back under it for the length of a probe would
+            say the opposite. */}
+
+        {timelinePhase && manifest && (
+          <TimelineView
+            t={t}
+            phase={timelinePhase}
+            manifest={manifest}
+            overrides={state.overrides}
+            reference={state.reference}
+            excluded={excludedSet}
+            prewarm={state.prewarm}
+            outcome={outcome}
+            stale={phase.name === "result" && phase.stale}
+            deviceIds={deviceIds}
+            selected={selected}
+            onSelect={setSelected}
+            slotEl={slotEl}
+            onHopSettled={onHopSettled}
+            onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+            onExclude={(file) => dispatch({ type: "files/exclude", file })}
+          />
+        )}
+
+        {/* THE BRIDGE (V06-R1, D-087). The sources panel is unchanged and still mounted,
+            under the timeline, inside its own scroller — so every journey that goes through
+            it keeps working while the room is rebuilt around it. R2a is what takes it out;
+            nothing in R1 ships on its own. */}
+        {timelinePhase && manifest && (
+          <div className="stage__legacy">
+            <SourcesPanel
+              t={t}
+              manifest={manifest}
+              inputs={phase.name === "empty" || phase.name === "scanning" ? [] : phase.inputs}
+              overrides={state.overrides}
+              reference={state.reference}
+              excluded={excludedSet}
+              prewarmProgress={state.prewarmProgress}
+              busy={phase.name === "syncing"}
+              onRemoveRoot={(path) => dispatch({ type: "inputs/removeRoot", path })}
+              onClearAll={() => dispatch({ type: "inputs/clear" })}
+              onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+              onReference={(file) => dispatch({ type: "reference/set", file })}
+              onExclude={(file) => dispatch({ type: "files/exclude", file })}
+              onRestore={(file) => dispatch({ type: "files/restore", file })}
+            />
+          </div>
+        )}
+      </section>
+
+      <Inspector>
+        <PreviewPanel
           t={t}
-          manifest={manifest}
-          inputs={phase.name === "empty" || phase.name === "scanning" ? [] : phase.inputs}
-          overrides={state.overrides}
-          reference={state.reference}
-          excluded={excludedSet}
-          prewarmProgress={state.prewarmProgress}
+          file={selected}
+          entry={selectedEntry}
+          placement={selectedPlacement}
+          minPsr={outcome?.result.parameters.min_psr ?? null}
+          recorded={selected !== null ? (recorded?.get(selected) ?? null) : null}
+          // The same three-layer overlay `SourcesPanel` and `sourceSpans` apply
+          // (D-027/D-028): the operator's override wins, then the engine's placement, then
+          // the scan's own grouping. Post-sync the placement is deliberately NOT rewritten by
+          // an override — that is what makes the result stale — so without the overlay here
+          // the `<select>` would snap back the instant it was used.
+          device={
+            selected !== null
+              ? (state.overrides[selected] ??
+                selectedPlacement?.device ??
+                selectedEntry?.device ??
+                "")
+              : ""
+          }
+          deviceIds={deviceIds}
           busy={phase.name === "syncing"}
-          onRemoveRoot={(path) => dispatch({ type: "inputs/removeRoot", path })}
-          onClearAll={() => dispatch({ type: "inputs/clear" })}
           onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
-          onReference={(file) => dispatch({ type: "reference/set", file })}
-          onExclude={(file) => dispatch({ type: "files/exclude", file })}
-          onRestore={(file) => dispatch({ type: "files/restore", file })}
         />
-      )}
+      </Inspector>
+
+      <BottomSlot transportRef={setSlotEl}>
+        {/* The stale notice is a fact about the result, not an alarm about it — one quiet
+            line at the bottom of the room rather than a banner between the operator and the
+            timeline (D-082). Same words, same warn colour. */}
+        {phase.name === "result" && phase.stale && (
+          <p className="slot__stale">{t.staleResult}</p>
+        )}
+      </BottomSlot>
 
       {showSettings && (
         <SettingsPanel

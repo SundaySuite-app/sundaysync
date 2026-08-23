@@ -3644,3 +3644,210 @@ adding one would have hidden the fact that the invalidation is what makes this w
 The 402-clip, six-device fixture at «Tilpass» zoom (3 px clips, 838 px of viewport across
 9.5 hours), with a progressive front: the first 45 % of each device's clips reported. Grey,
 blue and green are separable at that width by lightness alone; the proof image is on the PR.
+
+## D-074 — V06-R1: the app is ONE ROOM, and the room is the window
+
+The v0.6 redesign starts from one sentence of the owner's: the app should stop feeling like a
+sequence of pages. Five phases — empty, scanning, sources, syncing, result — used to be five
+different vertical stacks in one scrolling column, each with its own height, and moving between
+them moved everything. Drop a folder and the drop zone shrank; press Sync and a progress row
+appeared where the button had been; the result landed and an export bar arrived under a
+timeline that had just changed height. Every one of those is the app answering a question, and
+every one of them moved the material the operator was looking at while they were looking at it.
+
+**The shell is a fixed CSS grid the size of the window**, and every phase happens inside it:
+
+```
+grid-template-columns: minmax(0, 1fr) 300px;
+grid-template-rows:    44px  auto  minmax(0, 1fr)  38px;
+grid-template-areas:   "strip strip" "band inspector" "stage inspector" "slot inspector";
+```
+
+`html, body { overflow: hidden }`. The document does not scroll at all any more; everything
+that scrolls says so for itself — the tracks inside the timeline frame, the inspector column,
+and (for as long as it is there) the bridge panel. `tauri.conf.json`'s window follows: 1280×800
+by default, never smaller than 1024×600, which is the size the layout is asserted at.
+
+### What this buys, beyond the feel
+
+`.timeline__scroll`'s `max-height: 60vh` (V05-W3) is gone, and what replaced it is stronger
+rather than looser. 60vh was a guess at how much of the window the tracks may take, made by an
+element that could not see what was below it — it was measured against the VIEWPORT while the
+things it was protecting (the sync button, the sources panel) sat somewhere else on a page that
+scrolled, so the number had to be conservative and was still only approximately right. In the
+room the frame is given a definite height by the grid, and the tracks take what is inside it.
+The tracks can no longer push anything off screen because there is nothing below them on a page
+to push.
+
+### Refused: `position: fixed` chrome over a scrolling body
+
+The cheaper version of this is to pin the header and a footer with `position: fixed` and leave
+the body scrolling underneath. It was refused because it does not actually make the room fixed:
+the timeline would still be laid out against a document of unbounded height, `.timeline__scroll`
+would still need a `vh` guess, and every `boundingBox` in the e2e would still be a function of
+`window.scrollY`. The grid makes "nothing moves" a property of the layout rather than a habit
+the code has to keep.
+
+### Asserted, not asserted-about
+
+`app/e2e/ett-rom.spec.ts` measures the strip, the slot, the inspector column, the stage and the
+timeline's gutter in pixels, at 1280×800 **and** at 1024×600, across `sources → syncing →
+result`, on selection, and while an error banner is up. Two window sizes because a fixed-pixel
+layout measured only at its design size proves the numbers were typed in twice, not that the
+grid works.
+
+## D-075 — V06-R1: the selection lifts to App, and the transport is portalled into the slot
+
+Two things `TimelineView` owned had to end up somewhere else on screen, and each of them
+answers a different question about ownership.
+
+**The selection is now App's `useState`.** It used to live in `TimelineView` because the panel
+that read it hung directly underneath the timeline. The inspector is a column of the room now —
+a sibling of the stage, not a child of the timeline — and two siblings can only share a fact
+through their parent. What did NOT move is the rule the selection has to obey: only the timeline
+knows which files are actually drawn (virtualization, exclusion, a re-scan, a pulled outcome —
+D-070's four ways a path goes stale), so it keeps the pruning effect and reports a selection
+that has stopped naming a drawn clip back up through `onSelect(null)`.
+
+**The transport is rendered by `TimelineView` and drawn in the slot, via `createPortal`.** The
+tempting move is to lift it to App the way the selection was lifted. It was refused: `Transport`
+is fed by `audioClips`, the memo that also drives `engine.setClips`, and a second component able
+to rebuild the audio schedule is a second place a playing timeline can be yanked out from under
+the operator (the exact class of bug D-055's single-writer design exists to prevent). A portal
+moves the pixels without moving the ownership — the component stays where its data is.
+
+App renders `.slot` in every phase and hands the portal target down as a callback ref in state,
+so the commit that mounts the node re-renders the tree that portals into it.
+
+## D-076 — V06-R1: the preview is a column, and the still frame is twice the size
+
+D-070's panel was a 180 px band under the timeline: a 140×79 px still with the file facts and
+the sync detail beside it in two independently scrolling columns. That shape was forced by
+where it sat — a block in a vertical stack has width to spare and no height to spare, which is
+the opposite of what a picture and two tables of facts need.
+
+In the 300 px inspector column the same content stacks: frame → name → file facts → device
+select → sync detail. The still is **268×151** (the column's inner width at 16:9), and
+`frameStore.FRAME_HEIGHT_PX` doubles from 160 to 320 to match — still 2× the drawn height for a
+retina screen, and still inside `lib.rs`'s `MAX_FRAME_HEIGHT` of 480. `frameStore.test.ts` now
+pins that number as a number: the existing assertion compared the constant with itself and would
+have survived a value the shell refuses outright.
+
+**D-070's rule survives the move and gets cheaper.** The old rule was "the panel is exactly
+180 px tall, always", because a fixed height was the only way a box in the vertical stack could
+promise not to shove the timeline when a clip was clicked. A column cannot shove the timeline at
+all: it is 300 px wide in every phase whether or not a clip is marked, and its content grows
+downwards inside its own scroller. So the panel's own height is free now, and what the e2e
+asserts is what the rule was always about — the timeline's box, the gutter's x, and the
+inspector's width, none of which move when a three-pixel clip is clicked.
+
+The device `<select>` keeps its visible label and gains `aria-label="{moveToDevice}: {name}"`,
+matching the unsynced shelf's own selector: in a column that can only ever describe one clip,
+naming the subject is the difference between a label and a label with a sentence.
+
+## D-081 — V06-R1: one primary action, and it is always in the same place
+
+The strip carries, in this order: the wordmark, «Legg til», one line of summary, the phase's
+single primary action, and the gear. What that costs is written down here, because two things
+left the body of the app to make room.
+
+- **The export bar.** The project-name field, «Eksporter til DaVinci Resolve» and «Vis i
+  Finder» were a row of their own under the timeline. They are the result phase's primary
+  action and the shell has exactly one place for a primary action. Nothing about the controls
+  changed — same names, same `disabled={phase.stale}` gate, same order.
+- **The `resyncHint`.** «bufret analyse gjenbrukes» was a `<small>` under the button label,
+  which is a second line the strip does not have. It is the button's `title` now: same promise,
+  same words, on the same control. `override-stale.spec.ts` asks the button for it rather than
+  the page.
+
+The summary is «N filer · M enheter», plus `fps · duration` once there is a result. It is
+counted exactly the way the sources panel counts its chips — after the exclusion filter, under
+the override overlay — because a strip that disagreed with the panel about how many files are in
+the run would be the loudest possible bug in a 44 px line.
+
+**The language ghost toggle is gone.** It was a text button in the header that flipped nb↔en,
+duplicating the language field Settings already has. No spec ever clicked it; nothing else in
+the suite offers a second way to change a setting.
+
+## D-082 — V06-R1: the band takes space, the banners do not, and the band waits for the hop
+
+Two kinds of thing used to occupy a row between the header and the timeline, and they are not
+the same kind of thing at all.
+
+**Progress is something the app is DOING**, and it is honest for it to take space for as long
+as it is true. So the scan's and the sync's progress bar is a 34 px grid row (`.band`) that
+pushes the timeline down by exactly its own height. The gutter column, the inspector column and
+the bottom slot are laid out by the grid and never learn it was there.
+
+**A banner is something the app has to SAY**, and there is no reason for everything below a
+sentence to move because of it. Banners are a `.toasts` layer over the stage now —
+`pointer-events: none` on the layer, back on for each banner, so the rectangle over the top of
+the timeline cannot eat a click. Classes, roles and copy are unchanged. The stale notice moves
+to the bottom slot as one quiet amber line: it is a fact about the result, not an alarm about
+it, and it needs no border to say so.
+
+### The band is held through the hop
+
+`syncing` → `result` removes the band in the same frame `useHop` starts the clips travelling to
+their solved positions (D-063). Two movements at once, one of them the moment the whole app is
+built around — and a timeline that ALSO jumps 34 px upwards in that frame makes the hop
+unreadable, because the eye cannot separate a clip that moved from a clip the room moved under.
+So the band stays, showing the finished run at 100 %, until `useHop` reports that the sequence
+has come to rest: a new optional `onSettled`, fired from BOTH endings a hop has (its own finish,
+and any gesture that cancels it — a cancelled hop answers "is it still moving?" exactly as much
+as a finished one). A `HOP_SAFETY_MS + 100` timer is the promise that there is an ending.
+Reduced motion skips the hold entirely: there is no hop to wait for, and a hold there would be
+750 ms of a bar that has already finished.
+
+**The hold is a LAYOUT effect, and that detail is the whole of it.** `useEffect` runs after the
+browser has painted, while `useHop`'s layout effect sets `data-hop` during the commit — so an
+ordinary effect paints one frame with the band gone and the hop running, then puts the band
+back. That is a flicker, which is worse than no hold at all, and it is not theoretical:
+`ett-rom.spec.ts` samples every frame of the hop and caught it (one dropped frame at 1280×800,
+ten at 1024×600). Setting the state during render was tried and rejected for a subtler reason —
+React drops a render-phase update when the same commit is re-rendered for another cause, which
+here it is, and the band came back false. A layout effect's update is flushed synchronously
+before paint, and the band never leaves the screen.
+
+## D-086 — V06-R1: «Legg til» is a strip control, and there is only ever one drop zone
+
+The compact `DropZone` becomes the strip's own control: the word «Legg til» and two icon
+buttons whose `aria-label`s are still «Velg mappe» and «Velg filer». Same component, same
+`dropzone--compact` and `dropzone--over` classes, same window-wide drag listener; what goes is
+the dashed card, which inside a 44 px line reads as a second toolbar.
+
+**In the empty phase the strip carries no add control at all**, and that is forced rather than
+chosen. `DropZone`'s drag-drop listener is webview-global — the component's own doc comment
+says exactly one instance may be mounted at a time — so a compact zone in the strip beside the
+full-size one in the empty state would take every OS drop twice and would put two controls
+called «Velg mappe» on the page. The empty phase's whole stage IS the invitation, centred, so
+there is nothing the strip could usefully add. From `scanning` onwards the strip's copy is the
+only one, and `getByRole("button", { name: dropFolder })` resolves in every phase.
+
+## D-087 — V06-R1 is a BRIDGE, and nothing in it ships alone
+
+R1 builds the shell and moves the timeline, the inspector, the transport and the export
+controls into it. It does **not** remove `SourcesPanel`: the panel stays mounted, unchanged,
+under the timeline inside `.stage__legacy` — its own scroller, capped at 40 % of the stage.
+
+That is a deliberate, temporary duplication. The sources panel is what 150 existing Playwright
+tests drive: `region(sourcesTitle)`, the device groups, the reference star, the per-row remove
+and its undo, the prewarm tick. Rebuilding the room and rewriting all of that in one stage would
+mean a change where every failure has two possible causes, and no way to tell a layout mistake
+from a rewritten journey. With the bridge in place the shell is asserted against a suite that
+did not move: 150 existing specs pass with **four** targeted edits, each of which re-expresses a
+rule the shell genuinely changed rather than deleting it (D-085) —
+
+- `preview.spec.ts` — the panel's fixed 180 px height was the mechanism, not the rule. Now the
+  timeline's box, the gutter and the column's width are asserted instead.
+- `presync-timeline.spec.ts` — `max-height ≤ 60vh` was a guess the shell replaced with a
+  definite height. Now: at a cruel 400 px the tracks overflow, scroll, and end above the slot.
+- `timeline.spec.ts` — finding 13's «the page scrolled» is unobservable in a room that does not
+  scroll. What finding 13 was about (`defaultPrevented === false`, and the timeline does not
+  pan) is asserted directly.
+- `override-stale.spec.ts` — the `resyncHint` is the button's `title` (D-081), so the button is
+  asked for it.
+
+R2a is what takes the panel out; R2b relocates the zoom controls and the pre-sync legend, which
+still sit above the frame in R1. **Nothing from R1 ships on its own** — the room is right and
+the room still contains a list nobody needs twice.
