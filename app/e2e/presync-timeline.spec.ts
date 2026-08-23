@@ -352,15 +352,30 @@ test.describe("a drop with one file per rung of the recording-time ladder", () =
     expect(ordered.x).toBeGreaterThanOrEqual(placed.x + placed.width - 1);
   });
 
-  test("the tracks scroll inside the frame instead of growing the page", async ({ page }) => {
+  test("the tracks scroll inside the frame instead of growing the room", async ({ page }) => {
     // Six devices is already more than fits comfortably; twelve is a real drop. The frame
     // had `overflow: hidden` and no height, so the BODY grew and pushed the sync button
     // off a laptop screen.
-    await page.setViewportSize({ width: 1280, height: 620 });
+    //
+    // W3 wrote that rule as `max-height: 60vh` on the scroller and asserted the number, which
+    // was the best a block on a scrolling page could do: 60vh was a GUESS at how much of the
+    // window the tracks may take, made by an element that could not see what was below it.
+    // V06-R1 (D-074) gave the frame a definite height instead — the room's, less the strip,
+    // the band, the slot and the bridge panel — so the property is no longer "the tracks are
+    // capped at some fraction" but the thing the cap was standing in for: on a short window
+    // the tracks OVERFLOW and scroll, and they end above the bottom slot rather than under
+    // it. Asserted at a deliberately cruel 400 px, where the old page would have been three
+    // screens tall.
+    await page.setViewportSize({ width: 1280, height: 400 });
     await reachLadder(page);
-    const box = (await page.locator(".timeline__scroll").boundingBox())!;
-    expect(box.height).toBeLessThanOrEqual(620 * 0.6 + 1);
-    // The sync button is still reachable without scrolling the whole document to it.
+    const scroller = page.locator(".timeline__scroll");
+    const overflows = await scroller.evaluate((el) => el.scrollHeight > el.clientHeight);
+    expect(overflows).toBe(true);
+    const box = (await scroller.boundingBox())!;
+    const slot = (await page.locator(".slot").boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(slot.y + 1);
+    // The sync button is still reachable without scrolling anything to it — it is in the
+    // strip, which is the whole point of the strip.
     await expect(page.getByRole("button", { name: en.syncButton })).toBeVisible();
     // …and the ruler stays put when the tracks are scrolled — it is the only thing on
     // screen that says what the horizontal axis means.

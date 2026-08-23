@@ -57,8 +57,11 @@ const HOP_MS = 450;
 
 /** `transitionend` can be dropped — an interrupted transition, a clip scrolled out of the
  *  virtualization window mid-flight, a backgrounded tab. Nothing may be left wearing an
- *  inline transform because of it, so a timer finishes the job regardless. */
-const HOP_SAFETY_MS = HOP_MS + 250;
+ *  inline transform because of it, so a timer finishes the job regardless.
+ *
+ *  Exported since V06-R1 (D-082): App holds the progress band open across the hop and needs
+ *  the same backstop, sized from the same number rather than from a second guess. */
+export const HOP_SAFETY_MS = HOP_MS + 250;
 
 /** The one smooth view move afterwards. */
 const FIT_MS = 300;
@@ -92,7 +95,7 @@ export const HOP_ATTR = "data-hop";
  * Unknown counts as "reduce": if `matchMedia` is missing there is no way to ask, and the
  * safe answer to "may I animate?" without an answer is no.
  */
-function motionAllowed(): boolean {
+export function motionAllowed(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
   return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -125,6 +128,7 @@ export function useHop({
   ghostRef,
   setView,
   fittedSpan,
+  onSettled,
 }: {
   /** The layout currently drawn — `TimelineView`'s per-device rows. */
   tracks: readonly HopTrack[];
@@ -140,9 +144,23 @@ export function useHop({
   /** `TimelineView`'s "which span have I already fitted?" marker — the hop owns it while
    *  it is running, and hands it back set to the span it finished on. */
   fittedSpan: MutableRefObject<number | null>;
+  /**
+   * The timeline has come to rest (V06-R1, D-082) — fired from BOTH endings the sequence
+   * has: `settle()` (the fit finished on its own) and `cancel()` (the operator took the
+   * view, or the component went away). Whoever is waiting on the hop is waiting on "is it
+   * still moving?", and a cancelled hop answers that question exactly as much as a finished
+   * one does.
+   *
+   * Held in a ref rather than taken as a dependency: `cancel` is a dependency of `start`,
+   * which is a dependency of the layout effect that decides whether to hop at all. A
+   * caller's inline callback would re-identify all three on every render of the app.
+   */
+  onSettled?: () => void;
 }): HopHandle {
   const frozen = useRef(false);
   const run = useRef<HopRun | null>(null);
+  const settledRef = useRef(onSettled);
+  settledRef.current = onSettled;
 
   // The last committed layout + view, and the outcome that produced it. Read on the commit
   // where the outcome arrives; written on every commit, which is what makes it the state
@@ -165,6 +183,7 @@ export function useHop({
     const current = run.current;
     run.current = null;
     frozen.current = false;
+    settledRef.current?.();
     // Whatever the view is now is the view the operator gets to keep: mark this span
     // fitted so the measure effect does not snap it somewhere else on the next render.
     fittedSpan.current = spanRef.current;
@@ -199,6 +218,7 @@ export function useHop({
         frozen.current = false;
         fittedSpan.current = spanRef.current;
         section.removeAttribute(HOP_ATTR);
+        settledRef.current?.();
       };
 
       const startFit = () => {

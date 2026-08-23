@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import type { PlacedClip } from "../../audio/schedulePlan";
 import { getPlaybackEngine } from "../../audio/scheduler";
 import type { Strings } from "../../i18n";
@@ -12,7 +13,7 @@ import {
 import { LANE_HEIGHT_PX } from "../../timeline/hop";
 import { stackClips, type ClipSpan } from "../../timeline/laneLayout";
 import { getPlayheadMs, publishPlayheadMs } from "../../timeline/playhead";
-import { recordingTimes, type TimeSource } from "../../timeline/recordingTime";
+import { type TimeSource } from "../../timeline/recordingTime";
 import { sourceSpans } from "../../timeline/sourceLayout";
 import {
   clampScroll,
@@ -26,7 +27,6 @@ import {
 import type { PrewarmStatus } from "../../state";
 import type { Device, Placement, ScanManifest, SyncOutcome } from "../../types";
 import { PlayheadLine } from "./PlayheadLine";
-import { PreviewPanel } from "./PreviewPanel";
 import { Ruler } from "./Ruler";
 import { Track } from "./Track";
 import { Transport } from "./Transport";
@@ -141,6 +141,10 @@ export function TimelineView({
   outcome,
   stale,
   deviceIds,
+  selected,
+  onSelect,
+  slotEl,
+  onHopSettled,
   onOverride,
   onExclude,
 }: {
@@ -162,19 +166,30 @@ export function TimelineView({
   outcome: SyncOutcome | null;
   stale: boolean;
   deviceIds: string[];
+  /**
+   * The marked clip, as a FILE PATH — owned by App since V06-R1 (D-075).
+   *
+   * It used to live here, which was right while the panel it fed lived here too. The
+   * inspector is a column of the room now, outside this component entirely, and a selection
+   * held below the thing that renders it cannot be read by it. What did NOT move is the rule
+   * the selection has to obey (see the pruning effect below): only this component knows
+   * which files are actually drawn, so only it can say when a selection has stopped naming
+   * one — it reports that upwards rather than fixing it locally.
+   */
+  selected: string | null;
+  onSelect: (file: string | null) => void;
+  /**
+   * Where the transport belongs on screen: the bottom slot's own node (D-075). `Transport`
+   * stays rendered by this component because it needs `audioClips` — the memo that feeds the
+   * audio schedule — and is PORTALLED into the slot, so the component sits where its data is
+   * and the pixels land where the design says. Null before App's callback ref has run.
+   */
+  slotEl: HTMLElement | null;
+  /** The hop has come to rest (D-082) — App holds the progress band open until it has. */
+  onHopSettled?: () => void;
   onOverride: (file: string, device: string) => void;
   onExclude: (file: string) => void;
 }) {
-  /**
-   * The marked clip, as a FILE PATH (V05-W4b, D-070).
-   *
-   * It used to be a `Placement`, which made the selection unrepresentable before a sync —
-   * the domain of the state was "things the engine has placed", so a pre-sync clip had
-   * nothing to become when clicked and its button was `disabled`. The preview panel is
-   * about the file: its picture, its streams, its reconstructed start. A file exists in
-   * every phase; a placement does not. The placement is DERIVED below when there is one.
-   */
-  const [selected, setSelected] = useState<string | null>(null);
   const result = outcome?.result ?? null;
 
   const sectionRef = useRef<HTMLElement>(null);
@@ -367,6 +382,7 @@ export function TimelineView({
     ghostRef,
     setView,
     fittedSpan,
+    onSettled: onHopSettled,
   });
 
   // Measure the lane column and fit the content into it. The fit re-runs whenever
@@ -419,24 +435,13 @@ export function TimelineView({
     return files;
   }, [tracks]);
   useEffect(() => {
-    if (selected !== null && !drawnFiles.has(selected)) setSelected(null);
-  }, [drawnFiles, selected]);
+    if (selected !== null && !drawnFiles.has(selected)) onSelect(null);
+  }, [drawnFiles, selected, onSelect]);
 
-  // ---- What the panel below is looking at ---------------------------------------------
-  //
-  // All derived, none of it stored: one source for the marked clip (the path) and every
-  // other view of it computed from the data already in hand. `recordingTimes` is the same
-  // ladder `sourceLayout` runs (D-067) and is memoised on the manifest alone, so it costs
-  // one pass per scan and nothing per selection — and it answers in the RESULT phase too,
-  // where the pre-sync `timeSource` map is deliberately empty but the file's own clock is
-  // still a fact worth showing beside the engine's answer.
-  const selectedPlacement = selected !== null ? (placements?.get(selected) ?? null) : null;
-  const selectedEntry =
-    selected !== null ? (manifest?.files.find((f) => f.file === selected) ?? null) : null;
-  const recorded = useMemo(
-    () => (manifest ? recordingTimes(manifest.files) : null),
-    [manifest],
-  );
+  // (The derivations the preview panel needs — the placement, the manifest entry and the
+  // recording-time ladder — moved to App with the panel itself in V06-R1 (D-075). They were
+  // never about the timeline: they are three different views of ONE file, and the component
+  // that renders that file's column is the one that should compute them.)
 
   // ---- Playback (v0.3, D-055) ----
   const engine = getPlaybackEngine();
@@ -821,7 +826,7 @@ export function TimelineView({
                 outsideWindow={outsideWindow}
                 prewarm={prewarm}
                 laneHeight={LANE_HEIGHT_PX}
-                onSelect={setSelected}
+                onSelect={onSelect}
                 muted={playback.muted.includes(device.id)}
                 soloed={playback.soloed.includes(device.id)}
                 showSolo={showSolo}
@@ -882,34 +887,14 @@ export function TimelineView({
         </div>
       </div>
 
-      {result && <Transport t={t} clips={audioClips} fps={fps} />}
-
-      {/* The panel (V05-W4b, D-070). Below the timeline, above the export bar, ALWAYS
-          mounted and always the same height — the two properties that keep clicking a
-          three-pixel clip from moving the thing the operator is about to click next. It is
-          deliberately not gated on `result`: the picture and the file facts are there from
-          the moment a folder is dropped, and only the sync half waits for the engine. */}
-      <PreviewPanel
-        t={t}
-        file={selected}
-        entry={selectedEntry}
-        placement={selectedPlacement}
-        minPsr={result?.parameters.min_psr ?? null}
-        recorded={selected !== null ? (recorded?.get(selected) ?? null) : null}
-        // The same three-layer overlay `SourcesPanel` and `sourceSpans` apply (D-027/D-028):
-        // the operator's override wins, then the engine's placement, then the scan's own
-        // grouping. Post-sync the placement is deliberately NOT rewritten by an override —
-        // that is what makes the result stale — so without the overlay here the `<select>`
-        // would snap back the instant it was used.
-        device={
-          selected !== null
-            ? (overrides[selected] ?? selectedPlacement?.device ?? selectedEntry?.device ?? "")
-            : ""
-        }
-        deviceIds={deviceIds}
-        busy={phase === "syncing"}
-        onOverride={onOverride}
-      />
+      {/* The transport is rendered HERE and drawn THERE (V06-R1, D-075): it is built from
+          `audioClips`, the memo that also feeds `engine.setClips`, so lifting the component
+          to App would mean a second place that can rebuild the audio schedule. A portal moves
+          the pixels without moving the ownership. Null `slotEl` only happens for the one
+          commit before App's callback ref has run, which is long before a result exists. */}
+      {result &&
+        slotEl !== null &&
+        createPortal(<Transport t={t} clips={audioClips} fps={fps} />, slotEl)}
 
       {result && shelved.length > 0 && (
         <UnsyncedShelf

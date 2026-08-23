@@ -66,6 +66,17 @@ describe("fetchFrame", () => {
     });
   });
 
+  // …and the height itself, as a number. The assertion above compares the constant with
+  // itself and would survive any value at all — including one the shell refuses. V06-R1
+  // (D-076) moved the still into the 300 px inspector column and doubled it to 320, which is
+  // 2× the 151 px it is drawn at and still inside `lib.rs`'s `MAX_FRAME_HEIGHT` of 480. A
+  // change past that ceiling would make every preview in the app fail with a range error,
+  // which no other test in this file would notice.
+  it("asks for a height the shell will accept", () => {
+    expect(FRAME_HEIGHT_PX).toBe(320);
+    expect(FRAME_HEIGHT_PX).toBeLessThanOrEqual(480);
+  });
+
   it("dedupes concurrent calls for the same file into one ffmpeg spawn", async () => {
     let resolveInvoke!: (v: unknown) => void;
     invokeMock.mockReturnValueOnce(new Promise((r) => (resolveInvoke = r)));

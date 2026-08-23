@@ -18,7 +18,11 @@ export function EmptyState({
   onDropPaths: (paths: string[]) => void;
 }) {
   return (
-    <div>
+    // V06-R1 (D-074): centred in the stage rather than stacked under the header. The empty
+    // phase is the one phase with nothing to put in the room, so the invitation gets the
+    // middle of it — and it carries the app's ONLY `DropZone` while it is on screen (the
+    // strip's compact one is mounted from the scanning phase onwards, never beside this).
+    <div className="empty">
       <DropZone t={t} onFiles={onFiles} onFolder={onFolder} onDropPaths={onDropPaths} />
       <div className="flow-hint" aria-hidden="true">
         <span className="step">1. {t.emptyFlow1}</span>

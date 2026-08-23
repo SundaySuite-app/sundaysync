@@ -117,9 +117,13 @@ export function PreviewPanel({
   );
 }
 
-/** The canvas the frame is drawn into, in CSS pixels. 16:9 at the panel's height. */
-const FRAME_W = 140;
-const FRAME_H = 79;
+/** The canvas the frame is drawn into, in CSS pixels. 16:9 at the inspector column's width
+ *  (V06-R1, D-076): 268 px is the 300 px column less its 16 px padding on each side. The old
+ *  140×79 was what fitted BESIDE two columns of text in a 180 px band under the timeline —
+ *  a thumbnail. Mirrored in `styles.css`'s `.preview__frame`, which is the box this canvas
+ *  sits in; the two are the same numbers on purpose. */
+const FRAME_W = 268;
+const FRAME_H = 151;
 
 /**
  * The still, and the two calm states that stand in for it.
@@ -270,6 +274,13 @@ function FileFacts({
         <select
           value={device}
           disabled={busy}
+          // The visible `<span>` names the control; the `aria-label` names it AND says which
+          // clip it is about (V06-R1, D-076). The shelf's own selector has carried that
+          // longer form since v0.4, and in a column that can show only one clip at a time the
+          // sentence «Flytt til enhet: C0001.MP4» is the whole difference between a label and
+          // a label with a subject. `aria-label` wins over the span for the accessible name,
+          // and a substring lookup for the short form still resolves it.
+          aria-label={`${t.moveToDevice}: ${name}`}
           onChange={(e) => onOverride(entry.file, e.target.value)}
         >
           {deviceIds.map((id) => (

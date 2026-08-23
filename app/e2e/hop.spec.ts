@@ -401,7 +401,11 @@ test.describe("the clips hop into place when the sync lands", () => {
     // A tall drop in a short window, so there is genuinely something to scroll: the three
     // fixture devices plus eight more, which is an ordinary church rig and exactly the
     // shape the safety net exists for.
-    await page.setViewportSize({ width: 1280, height: 560 });
+    // V06-R1 (D-074): the room is fixed and the timeline takes what is left of it, so a
+    // "tall drop in a short window" is 400 px now — at 560 the eleven tracks would still
+    // overflow, but with little enough margin that the test would be measuring the layout's
+    // spare change rather than the ghost's arithmetic.
+    await page.setViewportSize({ width: 1280, height: 400 });
     await boot(page, {
       fixtures: {
         ...BOOT_FIXTURES,

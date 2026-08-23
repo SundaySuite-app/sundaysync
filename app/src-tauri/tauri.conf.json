@@ -14,10 +14,10 @@
       {
         "title": "SundaySync",
         "hiddenTitle": true,
-        "width": 1100,
-        "height": 780,
-        "minWidth": 720,
-        "minHeight": 560,
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 600,
         "dragDropEnabled": true
       }
     ],

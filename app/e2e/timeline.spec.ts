@@ -235,14 +235,19 @@ test.describe("zoom and pan", () => {
     await expect.poll(async () => (await clip.boundingBox())!.x).toBeLessThan(before!.x);
   });
 
-  test("a plain vertical wheel is left to the page, not swallowed (finding 13)", async ({
-    page,
-  }) => {
-    // The timeline is tall, and the export bar and unsynced shelf sit below it, so a plain
-    // wheel over the timeline is how an operator reaches them. It used to `preventDefault()`
-    // every wheel event before even looking at the modifiers, and then pan on `deltaY` —
-    // so the page could not be scrolled from over the timeline at all, and an innocent
-    // scroll silently moved the timeline sideways instead.
+  test("a plain vertical wheel is not swallowed (finding 13)", async ({ page }) => {
+    // The gesture the timeline owns is horizontal; a plain vertical wheel belongs to whatever
+    // scroller is under it. It used to `preventDefault()` every wheel event before even
+    // looking at the modifiers, and then pan on `deltaY` — so an innocent scroll silently
+    // moved the timeline sideways instead of reaching anything.
+    //
+    // V06-R1 (D-074) changed WHERE such a wheel goes without changing whose it is. The app is
+    // one fixed room now: `html, body { overflow: hidden }`, and every scrollable thing says
+    // so for itself — the tracks inside the frame, the inspector column, the sources panel.
+    // There is no document scroll left to observe, so the old "…and the page moved" line is
+    // gone and `ett-rom.spec.ts` asserts the room's stillness directly. What is asserted here
+    // is finding 13 itself, which never needed the page: the app does not claim the event
+    // (`defaultPrevented === false`), and the timeline does not pan on it.
     await reachResult(page);
     await zoomIn(page, 6); // give panning somewhere to go, so a regression would show
 
@@ -269,10 +274,8 @@ test.describe("zoom and pan", () => {
     await page.mouse.wheel(0, 400);
 
     await expect.poll(prevented).toBe(false);
-    // The page moved, which is the whole point — the export bar lives down there.
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-    // …and the timeline did not pan. The page scrolled vertically, so `x` is unaffected —
-    // any change here would be the swallowed wheel turning into a horizontal pan again.
+    // …and the timeline did not pan. Any change here would be the swallowed wheel turning
+    // into a horizontal pan again.
     expect((await clip.boundingBox())!.x).toBeCloseTo(beforeX, 0);
 
     // The gesture the timeline DOES own is still prevented.

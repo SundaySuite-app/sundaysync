@@ -35,11 +35,14 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * How tall a preview frame is asked for, in pixels.
  *
- * The panel's canvas is ~79 px tall, so this is roughly 2× for a retina screen and still far
- * inside the shell's `MAX_FRAME_HEIGHT` of 480. Measured in `lib.rs`: frames at this height
- * come back at 6–11 KB, three orders of magnitude under the 2 MiB ceiling.
+ * The inspector's canvas is 151 px tall since V06-R1 (D-076) — a 300 px column has room for
+ * a still you can actually judge, where the old 180 px band under the timeline had room for
+ * a thumbnail. So this doubles with it: roughly 2× the drawn height for a retina screen, and
+ * still inside the shell's `MAX_FRAME_HEIGHT` of 480. Measured in `lib.rs`: frames at the
+ * old 160 came back at 6–11 KB, three orders of magnitude under the 2 MiB ceiling, and a
+ * 2× linear increase is ~4× the pixels — tens of KB, nowhere near it.
  */
-export const FRAME_HEIGHT_PX = 160;
+export const FRAME_HEIGHT_PX = 320;
 
 /** Where in a clip the frame is grabbed: 10 % in, capped at 5 s. */
 const FRAME_FRACTION = 0.1;

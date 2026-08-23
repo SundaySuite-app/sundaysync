@@ -20,6 +20,9 @@ export const nb = {
   dropAction: "Velg filer",
   dropFolder: "Velg mappe",
   dropMore: "Slipp inn mer, eller",
+  /** V06-R1 (D-086): topplinjas eget navn på de to velgerne. «Slipp inn mer, eller» er en
+   *  setning, og en 44 px stripe har ikke plass til en setning — den har plass til et verb. */
+  addSources: "Legg til",
   emptyFlow1: "Slipp inn opptak",
   emptyFlow2: "Synkroniser",
   emptyFlow3: "Åpne i Resolve",
@@ -32,6 +35,9 @@ export const nb = {
   clearAll: "Tøm alt",
   scanningInputs: "Leser inn kildene …",
   fileCount: (n: number) => (n === 1 ? "1 fil" : `${n} filer`),
+  /** V06-R1 (D-081): topplinjas sammendrag. Enhet, ikke «kamera»/«lydopptaker» — stripa har
+   *  plass til ett tall, og skillet mellom de to står i panelet under. */
+  deviceCount: (n: number) => (n === 1 ? "1 enhet" : `${n} enheter`),
   cameraCount: (n: number) => (n === 1 ? "1 kamera" : `${n} kameraer`),
   recorderCount: (n: number) => (n === 1 ? "1 lydopptaker" : `${n} lydopptakere`),
   problemCount: (n: number) => (n === 1 ? "1 problemfil" : `${n} problemfiler`),
@@ -54,7 +60,7 @@ export const nb = {
 
   // Sync & progress (§9.3)
   syncButton: "Synkroniser",
-  resyncButton: "Synkroniser på nytt",
+  resyncButton: "Synk på nytt",
   resyncHint: "bufret analyse gjenbrukes",
   syncing: "Synkroniserer",
   cancel: "Avbryt",
@@ -407,6 +413,7 @@ export const en: Strings = {
   dropAction: "Choose files",
   dropFolder: "Choose folder",
   dropMore: "Drop in more, or",
+  addSources: "Add",
   emptyFlow1: "Drop in the shoot",
   emptyFlow2: "Sync",
   emptyFlow3: "Open in Resolve",
@@ -418,6 +425,7 @@ export const en: Strings = {
   clearAll: "Clear all",
   scanningInputs: "Reading the sources …",
   fileCount: (n: number) => (n === 1 ? "1 file" : `${n} files`),
+  deviceCount: (n: number) => (n === 1 ? "1 device" : `${n} devices`),
   cameraCount: (n: number) => (n === 1 ? "1 camera" : `${n} cameras`),
   recorderCount: (n: number) => (n === 1 ? "1 audio recorder" : `${n} audio recorders`),
   problemCount: (n: number) => (n === 1 ? "1 problem file" : `${n} problem files`),
