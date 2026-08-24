@@ -1,6 +1,6 @@
 # Changelog
 
-## Ikke utgitt
+## v0.6.0-beta.3
 
 - **Klippene stokker seg, reiser og spretter på plass — og blir grønne i det de lander.** Når
   synken treffer, hopper filene litt rundt på tidslinjen først, som om de finner seg selv;
