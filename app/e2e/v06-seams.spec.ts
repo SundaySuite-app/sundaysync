@@ -209,7 +209,8 @@ test.describe("«Kilder» can open every file it lists", () => {
     await page.locator(".inspector").getByLabel(`${en.removeFile}: C0001.MP4`).click();
 
     await expect(page.locator(`.clip[data-file="${CAM}"]`)).toHaveCount(0);
-    await expect(page.locator(".preview")).toHaveText(en.previewEmpty);
+    // D-092 ⑥ — the empty state is a structure now; the sentence is its own element.
+    await expect(page.locator(".preview__emptyline")).toHaveText(en.previewEmpty);
   });
 });
 
@@ -234,7 +235,8 @@ test.describe("the project name is one name", () => {
     // `<project name="   ">` and the save dialog offered «   .fcpxml».
     await page.getByLabel(en.projectName).fill("   ");
     await page.getByRole("button", { name: en.exportButton }).click();
-    await expect(page.locator(".banner--ok")).toBeVisible();
+    // D-092 ⑤: an export's answer is the strip's receipt, not a toast.
+    await expect(page.locator(".strip__receipt")).toBeVisible();
 
     const calls = await page.evaluate(() => (window as unknown as Record<string, any>).__CALLS__);
     expect(calls.export[0].project).toBe("SundaySync");
@@ -257,7 +259,7 @@ test.describe("the project name is one name", () => {
 
     await page.getByLabel(en.projectName).fill("Gudstjeneste 23. august");
     await page.getByRole("button", { name: en.exportButton }).click();
-    await expect(page.locator(".banner--ok")).toBeVisible();
+    await expect(page.locator(".strip__receipt")).toBeVisible();
 
     const calls = await page.evaluate(() => (window as unknown as Record<string, any>).__CALLS__);
     expect(calls.export[0].project).toBe("Gudstjeneste 23. august");

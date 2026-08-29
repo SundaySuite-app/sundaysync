@@ -413,6 +413,65 @@ for (const size of SIZES) {
       sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
     });
 
+    test("«Kilder» stays openable in every phase, exported included", async ({ page }) => {
+      // V06-G3 (D-092 ⑦). R3 left the strip's narrow-window behaviour deliberately undecided
+      // — «a stated order of what it gives up first … is a design decision, not a number» —
+      // and undecided meant flex resolved it by proportion. At 1024 in the exported phase the
+      // row carries the wordmark, «Legg til», the cluster, the receipt, the project field,
+      // «Vis i Finder», «Synk på nytt», «Eksporter» and the gear, and the summary line — which
+      // is not a label but the CONTROL that opens the whole file list — was squeezed to
+      // nothing. The one affordance on the strip that hides something behind it was the first
+      // thing to disappear.
+      //
+      // The order is decided now, against the name field: the project input shrinks first (to
+      // 90 px, with a placeholder and an `aria-label` so it is still identifiable), and the
+      // summary keeps a floor that always shows «N filer». This asserts the promise, not the
+      // numbers: in every phase the opener is visible, wide enough to hit, and opens.
+      await reachSources(page, size, {
+        scan_inputs: scanManifest({
+          unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
+          skipped: [{ file: "/Users/e2e/shoot/IMG_0001.HEIC", reason: "still_image" }],
+        }),
+        "plugin:dialog|save": "/Users/e2e/out/x.fcpxml",
+        export_timeline: 1,
+      });
+
+      const opener = page.locator(".strip__sources .popover--sources > summary");
+      const panel = page.locator(".strip__sources .popover--sources .popover__panel");
+
+      const openable = async (phase: string) => {
+        await expect(opener, phase).toBeVisible();
+        const box = (await opener.boundingBox())!;
+        // Wide enough to be a target and to still be saying something. `en.fileCount(2)` is
+        // «2 files»; a control narrower than that is a control that has stopped being one.
+        expect(box.width, `${phase}: opener is ${box.width}px wide`).toBeGreaterThan(44);
+        // …and the hit test in the middle of it reaches the summary itself, rather than
+        // whatever has been drawn over it.
+        const hits = await opener.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return at !== null && (el === at || el.contains(at));
+        });
+        expect(hits, `${phase}: something else is on top of the opener`).toBe(true);
+        await opener.click();
+        await expect(panel, phase).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(panel, phase).toBeHidden();
+      };
+
+      await openable("sources");
+
+      await page.getByRole("button", { name: en.syncButton }).click();
+      await waitForPending(page, "run_sync");
+      await resolveControlled(page, "run_sync", syncOutcome());
+      await waitForResult(page);
+      await openable("result");
+
+      await page.getByRole("button", { name: en.exportButton }).click();
+      await expect(page.getByRole("button", { name: en.revealInFinder })).toBeVisible();
+      await openable("exported");
+    });
+
     test("every popover overlays the room — opening one moves nothing", async ({ page }) => {
       // V06-R2a (D-078). The sources panel used to take 40 % of the stage under the timeline;
       // what replaced it is four disclosures whose panels are LAYERS. That is the whole reason
@@ -525,7 +584,10 @@ for (const size of SIZES) {
       await waitForResult(page);
       await page.getByRole("button", { name: en.exportButton }).click();
       await expect(page.getByRole("button", { name: en.revealInFinder })).toBeVisible();
-      await page.locator(".banner__dismiss").click();
+      // The export's answer is a line ON this row now (D-092 ⑤) rather than a toast to
+      // dismiss — which makes the strip one item busier here than it was, and is exactly why
+      // this measurement is worth having.
+      await expect(page.locator(".strip__receipt")).toBeVisible();
       // …and make the result stale, which is what puts a fourth thing in the slot.
       await page.locator(`.clip[data-file="${CAM_A}"]`).click();
       await page.locator(".inspector__actions select").selectOption("rec");

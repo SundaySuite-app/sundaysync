@@ -40,9 +40,15 @@ async function reachResult(page: import("@playwright/test").Page, extra: Record<
 }
 
 test.describe("export", () => {
-  test("a successful export announces the clip count and offers Reveal in Finder", async ({
+  test("a successful export leaves its receipt in the strip, not over the room", async ({
     page,
   }) => {
+    // V06-G3 (D-092 ⑤). The receipt used to be a three-line toast — «Exported 1 clip.» plus
+    // the whole Resolve import instruction — floating over the top of the timeline. It is the
+    // longest sentence the app ever says, it arrives at the exact moment the operator turns
+    // back to the clips to check the run, and it covered them. A receipt is one line: the
+    // thing happened, and here is what it is called. The instruction is a `title` on it and
+    // lives in full in `docs/KNOWN_LIMITATIONS.md` («The import order, in full»), which is where an instruction belongs.
     await reachResult(page, {
       "plugin:dialog|save": "/Users/e2e/out/SundaySync.fcpxml",
       export_timeline: 1,
@@ -50,30 +56,84 @@ test.describe("export", () => {
 
     await page.getByRole("button", { name: en.exportButton }).click();
 
-    const banner = page.locator(".banner");
-    await expect(banner).toHaveClass(/banner--ok/);
-    await expect(banner.locator("span").first()).toHaveText(`${en.exported(1)}. ${en.exportHint}`);
-    await expect(page.getByRole("button", { name: en.revealInFinder })).toBeVisible();
+    const receipt = page.locator(".app__header .strip__receipt");
+    await expect(receipt).toBeVisible();
+    await expect(receipt).toContainText("SundaySync.fcpxml");
+    await expect(receipt).toContainText(en.exportedShort);
+    // Both things the strip cannot always finish saying survive in full, one hover away, on
+    // the element that could not finish saying them: the file's whole name (it ellipsises at a
+    // narrow window) and the Resolve import instruction (it never fitted a 44 px row at all).
+    const title = await receipt.getAttribute("title");
+    expect(title).toContain(en.exportHint);
+    expect(title).toContain("SundaySync.fcpxml");
+
+    // …and the receipt IS the control that opens the file: at 1024 the exported strip could
+    // not hold both it and a separate «Vis i Finder», and the two were always one object.
+    await expect(page.getByRole("button", { name: en.revealInFinder })).toHaveCount(1);
+    await expect(receipt).toHaveAttribute(
+      "aria-label",
+      new RegExp(`${en.revealInFinder}$`),
+    );
+
+    // No toast at all on the happy path — the layer is for errors and notices now.
+    await expect(page.locator(".toasts .banner")).toHaveCount(0);
   });
 
-  test("the receipt is opaque and does not eat the timeline underneath it", async ({ page }) => {
-    // V06-R3 pixel pass, two findings in one place — and one place is right, because they are
-    // the same fact about the same rectangle.
-    //
-    // 1. It floats over the room (D-082), and `--green-bg` is a 10 %-alpha wash: correct for a
-    //    banner in a page's flow, unreadable here, because what is behind a toast is not the
-    //    page background but a timeline full of clips showing through the sentence. The export
-    //    receipt is the longest thing this app ever says, so it is where this shows first.
-    // 2. D-082 turned pointer events off on the LAYER so a transparent rectangle could not eat
-    //    a click. The banner itself kept them — and it is three lines tall over the top device
-    //    rows, so after an export the operator could not mark a clip there at all until they
-    //    dismissed it. Its ✕ turns them back on for itself.
+  test("the timeline's first row is not covered by anything the export said", async ({ page }) => {
+    // The finding, expressed as the thing it broke: after an export, the top of the timeline
+    // — the ruler and the first device's lane — must be exactly as reachable as before it.
     await reachResult(page, {
       "plugin:dialog|save": "/Users/e2e/out/SundaySync.fcpxml",
       export_timeline: 1,
     });
+    const rulerBefore = (await page.locator(".timeline__ruler").boundingBox())!;
+
     await page.getByRole("button", { name: en.exportButton }).click();
-    const banner = page.locator(".banner--ok");
+    await expect(page.locator(".strip__receipt")).toBeVisible();
+
+    // Nothing in the toast layer overlaps the ruler, because there is nothing in it.
+    const overlaps = await page.evaluate(() => {
+      const ruler = document.querySelector(".timeline__ruler")!.getBoundingClientRect();
+      return Array.from(document.querySelectorAll(".toasts .banner"))
+        .map((el) => el.getBoundingClientRect())
+        .filter(
+          (r) =>
+            r.width > 0 &&
+            r.height > 0 &&
+            r.left < ruler.right &&
+            r.right > ruler.left &&
+            r.top < ruler.bottom &&
+            r.bottom > ruler.top,
+        ).length;
+    });
+    expect(overlaps).toBe(0);
+
+    // The ruler has not moved either: a receipt on the strip is a receipt that costs the room
+    // nothing.
+    const rulerAfter = (await page.locator(".timeline__ruler").boundingBox())!;
+    expect(rulerAfter.y).toBeCloseTo(rulerBefore.y, 0);
+    expect(rulerAfter.height).toBeCloseTo(rulerBefore.height, 0);
+
+    // And the journey the finding was found by: mark a clip right after exporting.
+    await page.locator(".clip").first().click();
+    await expect(page.locator(".preview__name")).toBeVisible();
+  });
+
+  test("an error toast is still opaque and still inert (D-082, V06-R3)", async ({ page }) => {
+    // The toast layer did not go away — it carries what the app has to SAY when something
+    // failed, and both of R3's findings about it are still claims about that layer:
+    //
+    // 1. it floats over the room, and a 10 %-alpha wash lets a timeline full of clips show
+    //    through the sentence;
+    // 2. D-082 turned pointer events off on the LAYER so a transparent rectangle could not eat
+    //    a click, and the banner itself kept them — three lines of it over the top device rows
+    //    meant a clip there could not be marked at all. Its ✕ turns them back on for itself.
+    await reachResult(page, {
+      "plugin:dialog|save": "/Users/e2e/out/SundaySync.fcpxml",
+      export_timeline: fn(`() => { throw ${JSON.stringify(STALE_EXPORT_MSG)}; }`),
+    });
+    await page.getByRole("button", { name: en.exportButton }).click();
+    const banner = page.locator(".banner--error");
     await expect(banner).toBeVisible();
 
     // Opaque: no alpha channel left in the painted background.
@@ -100,7 +160,6 @@ test.describe("export", () => {
     });
     expect(overDismiss).toBe(true);
 
-    // The journey the finding was found by: mark a clip with the receipt still on screen.
     await page.locator(".clip").first().click();
     await expect(page.locator(".preview__name")).toBeVisible();
 

@@ -22,6 +22,13 @@ import { GearIcon } from "../icons";
  * and everything inside it ellipsises or hangs off a popover. App passes an empty
  * `.strip__summary` in the phases that have nothing to say, so the slot is never missing and
  * the primary action never shifts sideways under the operator's hand.
+ *
+ * `receipt` is the newest of these (V06-G3, D-092 ⑤), and it arrives by the same argument the
+ * summary did: an export's answer is one line, it is about the run the strip is already
+ * describing, and a three-line toast over the timeline was the app covering the material at
+ * the exact moment the operator turned back to check it. It sits between the cluster and the
+ * actions — after what the run IS, before what can be done to it, and immediately left of the
+ * «Vis i Finder» that appears with it.
  */
 export function TopStrip({
   t,
@@ -30,12 +37,15 @@ export function TopStrip({
    *  listener is webview-global (see `DropZone.tsx`), so two would take every drop twice. */
   add,
   sources,
+  receipt,
   actions,
   onSettings,
 }: {
   t: Strings;
   add: ReactNode;
   sources: ReactNode;
+  /** The last export's one-line receipt, or `null`. */
+  receipt?: ReactNode;
   actions: ReactNode;
   onSettings: () => void;
 }) {
@@ -46,10 +56,11 @@ export function TopStrip({
       </h1>
       {add}
       {sources}
+      {receipt}
       {actions}
       <button
         type="button"
-        className="iconbtn"
+        className="iconbtn iconbtn--tile"
         onClick={onSettings}
         aria-label={t.settings}
       >

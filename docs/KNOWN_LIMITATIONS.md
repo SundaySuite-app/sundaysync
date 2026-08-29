@@ -307,6 +307,20 @@ why the scripted gate fails identically.
 (drag them in), then File → Import Timeline — the matcher then binds against the
 already-imported pool clips instead of trying to resolve paths itself. Alternatively,
 when the "clip was not found" dialog appears, choose Yes and point it at the folder
-containing the media to relink manually. The in-app export hint now instructs the
-media-pool-first order. The scripted gate remains authoritative for the synthetic
-accuracy suites, whose media is small.
+containing the media to relink manually. The scripted gate remains authoritative for the
+synthetic accuracy suites, whose media is small.
+
+**The import order, in full (V06-G3, D-092 ⑤).** This is the canonical copy of the
+instruction. Until v0.6 the app said all of it on screen, as a three-line toast over the
+timeline, every single time an export succeeded — the longest sentence SundaySync ever says,
+arriving at the exact moment the operator turns back to the clips to check the run, and
+covering them. It is now a `title` on the strip's one-line receipt and it lives here:
+
+> Drag the media files into Resolve's Media Pool **first**. Then use File → Import → Timeline
+> to bring in the `.fcpxml` — Resolve then matches against the already-imported clips, which
+> is what large files require.
+
+(Norwegian: «Dra mediefilene inn i Resolves mediemappe (Media Pool) FØRST. Bruk deretter Fil →
+Importer → Tidslinje for å hente fila — da matcher Resolve mot de allerede importerte
+klippene, noe som er nødvendig for store filer.» — `i18n/index.ts`'s `exportHint`, which is
+the string the receipt carries.)

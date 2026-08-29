@@ -207,7 +207,9 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     });
 
     const preview = page.locator(".preview");
-    await expect(preview).toHaveText(en.previewEmpty);
+    // D-092 ⑥: nothing marked is now a structured empty state, so the claim ("no clip is
+    // selected") is the sentence's own element rather than the panel's whole text.
+    await expect(preview.locator(".preview__emptyline")).toHaveText(en.previewEmpty);
 
     await clipBox(page).getByRole("button", { name: en.waveformRegenerate }).click();
 
@@ -215,8 +217,12 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     await expect
       .poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_REGENERATE__))
       .toEqual([FILE]);
-    await expect(preview).toHaveText(en.previewEmpty);
-    await expect(preview.locator(".preview__frame")).toHaveCount(0);
+    await expect(preview.locator(".preview__emptyline")).toHaveText(en.previewEmpty);
+    // Still nothing selected: the frame that is there is the empty state's dashed
+    // placeholder (D-092 ⑥), never the still of a clip this click did not mark.
+    await expect(preview.locator(".preview__frame--empty")).toHaveCount(1);
+    await expect(preview.locator(".preview__canvas")).toHaveCount(0);
+    await expect(preview.locator(".preview__name")).toHaveCount(0);
   });
 
   test("a D-046 busy refusal surfaces inline, retryable, distinct from the cache-miss copy", async ({

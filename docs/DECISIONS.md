@@ -4687,3 +4687,206 @@ darker smudge at the bottom edge. After: an outline, a wash and a legible wavefo
 box; at fit the dense rows are a countable comb of evenly-spaced ticks instead of a smear of
 overlapping boxes; mid-hop the clips travel with their pictures on them rather than acquiring
 one on landing.
+
+## D-092 — V06-G3: the strip receipt, a calmer slot, rulers that read, and the files you can reach
+
+An owner-ordered self-critical review of v0.6.0-beta.3 — the room built, then looked at with
+fresh eyes. Seven findings, one root cause among them serious enough that the app was lying to
+its operator about what it contained. Everything below is measured; every one of the four with
+an `e2e` proof had that proof written first and watched fail on `main`.
+
+### ① «Kilder» could not reach fifty of sixty files, and never said so
+
+The worst finding in the room, and one declaration of CSS.
+
+`.popover__panel` is a flex COLUMN with `overflow: auto`. Its `<section class="device-group">`
+children took the flex default — `flex-shrink: 1` — while carrying `overflow: hidden` of their
+own, which sets their automatic minimum size to **zero**. So when the content exceeded
+`max-height: 60vh`, the browser did what a flex column does *before* it scrolls anything: it
+squeezed the children. Each section crushed itself and clipped its own rows away.
+
+Measured on a 60-file drop: **26 rows reachable, 34 not** — and because the content had been
+squeezed to exactly the box's height, `scrollHeight === clientHeight` (430 px = 430 px), so no
+scrollbar ever appeared to say that anything was missing. A silent five-sixths. «Kilder» exists
+for one errand — on a 386-clip card dump a clip is three pixels wide and finding one file *by
+name* is the one thing the timeline cannot do — and it was failing that errand invisibly.
+
+`.popover__panel > * { flex: 0 0 auto; }`. The sections are their content's height; the
+overflow belongs to the panel. Same fix, same reason, for the problems popover and the slot's
+removed/skipped lists — D-078 made them all one shape, which is why one line reaches all four.
+
+Two further things followed from looking at it:
+
+- **The panel says it scrolls.** macOS draws overlay scrollbars — present while scrolling,
+  invisible at rest — so a panel of sixty files looked exactly like one of fourteen. Both
+  standard routes were measured and neither reserves anything (`scrollbar-width: thin` +
+  `scrollbar-color` leaves the overlay behaviour intact and, where both are specified,
+  suppresses the `::-webkit-` rules entirely; the panel's `clientWidth` was unchanged by
+  either). The affordance is drawn by the panel itself instead: the four-layer scroll shadow,
+  two `local` covers over two `scroll` shadows, so each edge's shadow is hidden exactly when
+  that edge is at the end of the content. No script, no measurement, and it cannot disagree
+  with the scroll position because it *is* the scroll position.
+- **A chip summary ignored the width it was given.** `.chip` is an `inline-flex`, which
+  shrink-to-fits its own text — so at 1024 the problem and warning `<details>` were 32 px wide
+  and the chips inside them were drawn 107 px and 83 px, straight across each other and across
+  the receipt beside them. Every box in its place and the ink all over the row, which is why
+  `ett-rom.spec`'s box-overlap measurement passed while the strip looked broken. `display:
+  flex` (block-level) makes a summary take the width it is given; `overflow: hidden` makes
+  `.chip__text`'s ellipsis the thing that happens at the edge.
+
+### ④ The ruler smeared at the zoom a whole day is looked at
+
+`tickIntervalMs` climbed a ladder that stopped at one hour, and asked one flat question of
+every rung: is the step at least 80 px? On «Tilpass» over an 18-hour wedding day in the lane
+the app actually has (736 px at 1280×800) an hour is 41 px, no rung answered yes, and the
+function fell off the end of its list and returned the hour regardless. **Sixteen of the
+eighteen labels were drawn on top of the one before them** — a ruler that is a smear, at
+exactly the zoom where knowing the time is the reason to be looking.
+
+Two changes, and both are needed. The ladder gains `2 h · 3 h · 6 h · 12 h` (12 h is the top
+because `MIN_PX_PER_MS` caps the view at ~20 hours, where a 12-hour step is 432 px and there is
+no crowding left to solve). And the question becomes the real one: **`step_px ≥ label_width +
+16`**, with the width estimated from the label's character count × `TICK_CHAR_PX` — the same
+constant `Ruler.tsx` already sized its right-edge clipping from, now exported from
+`geometry.ts` rather than restated, because two estimates of one width is the seam where a
+label is admitted by one rule and clipped by the other. The 80 px floor stays underneath, for
+the fine end of the ladder where a millisecond timecode is narrow enough that spacing rather
+than width is what keeps a ruler readable. Swept in vitest across every rung from
+`MIN_PX_PER_MS` to `MAX_PX_PER_MS`.
+
+### ⑤ The export receipt covered the timeline
+
+«Eksporterte 12 klipp.» plus the whole Resolve import instruction, as a three-line toast
+floating over the top of the room. It is the longest sentence this app ever says, it arrives at
+the exact moment the operator turns back to the clips to check the run, and it covered them.
+
+A receipt is one line: *the thing happened, and here is what it is called.* `✓ Eksportert ·
+<navn>.fcpxml`, in the strip, in the green the app already uses for «placed». The instruction
+is a `title` on it and lives in full in `docs/KNOWN_LIMITATIONS.md` («The import order, in
+full»), which is where an instruction you need on every run belongs. The toast layer is
+untouched and still carries what the app has to SAY when something failed — D-088's opacity and
+inertness rules are re-expressed against an error banner rather than deleted.
+
+**The receipt IS «Vis i Finder».** This is the one place this stage went past the review's
+letter, and it was measured, not preferred. At 1024 — the smallest window `tauri.conf.json`
+allows — the exported strip carries the wordmark, «Legg til», the sources cluster, the receipt,
+the project field, «Vis i Finder», «Synk på nytt», «Eksporter» and the gear. Add up what each
+of those cannot go below and the row needs ~1080 px of a 1000 px line. The honest choice was
+never which of them shrinks; it was which of them goes. Keeping all nine produced a receipt
+four pixels wide, which is not a receipt. The one that goes is the separate button, because it
+and the receipt were always one object: the receipt names the file that was written, and
+opening it is the only thing anybody does with that name. Pressing the sentence goes to the
+file. Its accessible name still *ends* in «Vis i Finder», so the control is findable by that
+name — by a screen-reader user, and by the specs that click it — and the visible text is part
+of it (WCAG 2.5.3 Label in Name).
+
+The receipt's own text is two spans, and which of them may shrink is the whole of it: the word
+is rigid and the NAME ellipsises, from the left, so what survives is the end of the filename
+rather than the start of a folder. One span for both produced «…rted · Gudstjeneste
+2026-08-23.fcpxml» at a busy 1280 — a receipt that has eaten its own verb. The left-truncation
+is an RTL paragraph direction around one LTR run; `unicode-bidi: plaintext` undoes it entirely
+(it resolves direction from the first strong character, which is Latin), and any neutral
+character at the run's edge is reordered to the far end of the line, which is why the «·»
+separator belongs to the word span.
+
+### ⑥ The inspector's pre-sync void
+
+D-070 ruled that "nothing is marked" is a state the panel RENDERS rather than one it disappears
+in, and it was right; what it rendered was one grey sentence floating in the middle of a 300 px
+column that is the full height of the room. The biggest single area on screen said almost
+nothing — and said it in a shape with no relationship to the shape it takes the moment a clip
+*is* marked, so the whole column re-laid itself out when one was.
+
+The empty state is now the filled state with the facts taken out: an `INSPEKTØR` section label
+at the top (there in both states, so the top of the column is the same line either way), the
+same 268×151 box the still lands in (dashed `--border2` — a solid frame filled with the page
+background reads as a picture that failed to load, and nothing has failed), the sentence
+beneath it, and one line saying what will be there. Top-aligned, not centred. `preview.spec`
+measures the frame's box and the label's y before and after a selection and requires both
+unchanged: D-074's promise, applied inside the one column that had not kept it.
+
+### ⑦ What the strip gives up first, decided against the name field
+
+D-088 stated the order INSIDE the sources cluster and left the row's own order to flex, which
+resolved it by proportion — and at 1024 in the exported phase the summary line, which is not a
+label but the CONTROL that opens the whole file list, was squeezed to **zero**. The one
+affordance on the row with something hidden behind it was the first thing to disappear.
+`ett-rom.spec` at 1024 could not find it at all.
+
+Decided, most-shrinkable first:
+
+1. **the project name field** — factor 1000, floor 90 px. It is the only item on the row whose
+   content is the operator's own and therefore already known to them, and it is not a
+   disclosure. It gains a `placeholder` so that at 90 px it still says what it is instead of
+   being an anonymous box. (The rule also had to move: it was stated on the `<input>`, and the
+   flex item is the `<label>`, so it did nothing at all — the label took the default, was
+   handed 30 px, and clipped the field it was supposed to be flooring.)
+2. **the sources cluster** — factor 200, floor 9.5rem (`4.5rem` summary + 2 × (gap + 2rem
+   chip)), which always leaves «N filer» legible and both chips' counts visible.
+3. **the export receipt** — factor 20, i.e. the last to give way, because the cluster's
+   contents are standing facts the operator has already read and the receipt is the one piece
+   of NEWS on the row. Its floor is its own automatic minimum, «✓ Eksportert».
+4. **nothing else.** The buttons and the gear are rigid: a control whose label is clipped is a
+   control the operator has to guess at, and these are the app's whole verb set.
+
+`min-width: min-content` was tried for the cluster's floor and is wrong here — a `<summary>`'s
+min-content is its whole nowrap sentence (`min-width` floors it, it does not cap it), so the
+cluster reserved the chips' full natural widths and pushed the row 180 px past the window.
+
+### Four sentences in a 38 px slot, ranked
+
+The legend's four counts, the off-session warning, the «what the positions ARE» explainer and
+the auto-reference promise, all in the same voice, in one line of 38 px — so the one that names
+a date the operator may want to act on had no more weight than the one explaining the axis.
+
+The legend is untouched (D-083: the four numbers ARE the claim). The **off-session warning is
+the one that must stay readable**, and it is also the only line here that may shrink — so it is
+the only line that could be cut off, and it was the last claim in the room still ellipsising
+without its whole self a hover away. It gets the `title` D-083 gives everything else.
+
+The other two are demoted to a `title`-carried short form: an ⓘ glyph and «Foreløpig» /
+«Referanse: auto», with the full sentence on the element. Both are then short enough to be
+**rigid**, which is the point of demoting them — left shrinkable, the explainer ellipsised to
+«Provi…» while taking room from the warning beside it. After a sync the meta line is untouched:
+«25/1 · 1 t 42 min» is a fact about what the export will write, it is the only thing in the
+slot's middle at that point, and there is nothing to demote it beneath.
+
+### Small adopts from the approved canvas
+
+- **The ruler is the day's own clock before a sync.** The pre-sync layout positions clips by
+  their own recording timestamps, so t=0 is not an arbitrary zero at all: it is the earliest
+  moment anything in the drop was recorded, and `sourceSpans` knows the epoch of it. It returns
+  it now (`SourceLayout.originMs`) rather than letting a reader re-derive it — the ruler's
+  labels and the boxes' positions are the same claim, and two derivations of it are two things
+  that can disagree about what t=0 IS. Given that epoch the ruler says «14:30», which is a
+  thing the operator recognises about the day they filmed, instead of «6:30:00» counted from a
+  zero the app chose. `HH:MM`, or `HH:MM:SS` when a minute is too coarse to tell two ticks
+  apart. **Elapsed everywhere else**: after a sync the origin is the engine's earliest
+  placement rather than a clock, and before one whenever the ladder timed nothing (D-068's
+  filename order — zero is an order, not a moment). A wall time the app is not sure of would be
+  a worse answer than an honest count.
+- **The two verbs are drawn.** A refresh-arrows glyph on «Synkroniser» and «Synk på nytt» (the
+  same glyph for both, because re-syncing is the same act done again) and an arrow rising out
+  of a tray on «Eksporter» — up and OUT, which is what an export is; a download's arrow points
+  the other way and would say the opposite. Only those two: an icon on every control is
+  decoration, an icon on the one you are heading for is a landmark.
+- **The gear is a tile.** A bare glyph at the end of a row of bordered controls reads as
+  decoration; it is the one thing on the strip that opens a whole other surface and had the
+  least drawn affordance of anything there. 28×28, matching the 30 px controls without
+  competing with them.
+- **The wordmark is 20 px again.** R1 shrank it to 16 to buy room on the strip, which is the
+  wrong thing to sell: it is the product's name, it is the leftmost thing on the screen, and at
+  1rem beside a 0.875rem button label it read as a caption. The 1024 case it was shrunk for is
+  answered properly by ⑦.
+- **`accent-color: var(--gold)` on the root.** Every checkbox and radio in the app — settings,
+  the consent card — was drawn in Chrome's own #0b57d0, the one hue on screen that reads as a
+  browser widget somebody forgot to style. One inherited declaration reaches inside a native
+  control's shadow tree, which no amount of hand-drawn chrome can.
+
+### What was looked at
+
+1280×800 and 1024×600, in the states that produce the most at once: the ladder drop pre-sync
+(wall-clock ruler, cleaned slot), a result exported with a problem chip AND a warning chip AND
+a skipped file AND stale sources, «Kilder» open on a 60-file drop, the inspector's empty state,
+and the settings dialog. The 1024 exported strip was rebuilt three times against those
+measurements before it read as a row of controls rather than as ink on top of ink.

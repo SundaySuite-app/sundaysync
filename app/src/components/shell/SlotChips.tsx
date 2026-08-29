@@ -3,6 +3,7 @@ import type { Strings } from "../../i18n";
 import { formatDuration } from "../../i18n";
 import { basename } from "../../types";
 import type { ScanManifest, UnsyncedReason } from "../../types";
+import { InfoIcon } from "../icons";
 import { removedFiles, skippedFiles } from "./sourcesModel";
 import { usePopoverDismiss } from "./usePopoverDismiss";
 
@@ -45,7 +46,18 @@ export function SlotChips({
       )}
       {skipped.files.length > 0 && <SkippedChip t={t} skipped={skipped} />}
       {showAutoReference && reference === null && (
-        <span className="slot__auto subtle">{t.autoReference}</span>
+        // V06-G3 (D-092, slot demotions). Four sentences competed for a 38 px row — the
+        // legend's counts, the off-session warning, the «what the positions ARE» explainer and
+        // this promise — and read as four equally urgent announcements when only one of them
+        // (the warning) is about something the operator might want to act on. This is the
+        // least urgent of the four: it is a promise the app is keeping, not news. So it is a
+        // glyph and two words, with the whole sentence one hover away on the element that
+        // stopped saying it — D-083's rule, applied to a claim that was shortened rather than
+        // clipped.
+        <span className="slot__auto subtle" title={t.autoReference}>
+          <InfoIcon />
+          <span className="slot__auto-text">{t.autoReferenceShort}</span>
+        </span>
       )}
     </div>
   );

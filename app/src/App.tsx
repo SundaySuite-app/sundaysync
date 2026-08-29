@@ -22,6 +22,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { BannerRegion } from "./components/Banner";
+import { CheckIcon, ExportIcon, SyncIcon } from "./components/icons";
 import { ConsentCard } from "./components/ConsentCard";
 import { DropZone } from "./components/DropZone";
 import { EmptyState } from "./components/EmptyState";
@@ -56,6 +57,7 @@ import { recordingTimes } from "./timeline/recordingTime";
 import { getTelemetryStatus, reportFrontendError } from "./telemetry";
 import { checkForUpdate } from "./update";
 import { gateErrorReport, initialErrorGateState, shapeErrorPayload } from "./telemetryErrors";
+import { basename } from "./types";
 import type { ProgressEvent, ScanManifest, SidecarStatus, SyncOutcome } from "./types";
 
 /** `prewarm:file` (lib.rs `PrewarmFileEvent`) — one file finished pre-analysing. */
@@ -465,11 +467,23 @@ export function App() {
         // write a timeline containing the clip the operator had just taken out.
         excludeFiles: state.excluded.length > 0 ? state.excluded : null,
       });
+      // V06-G3 (D-092 ⑤): the receipt is a LINE IN THE STRIP now, not a toast over the room.
+      // `exportedPath` is the whole of its state — the same fact «Vis i Finder» has always
+      // been drawn from — so a successful export sets one thing and says nothing in the
+      // banner layer. What is lost from screen is `t.exportHint`, the three-line Resolve
+      // import instruction; it is on the receipt's `title` and in `docs/KNOWN_LIMITATIONS.md` («The import order, in full»), and
+      // an instruction that is read once and needed on the next run belongs in both of those
+      // places rather than painted across the timeline every time.
+      //
+      // `clips` is deliberately still read: `export_timeline` returns it, and a run that
+      // wrote nothing is not a success. Zero clips is an outcome worth a word, and it is the
+      // one export answer that still uses the toast layer.
       setExportedPath(path);
-      dispatch({
-        type: "banner/set",
-        banner: { kind: "ok", text: `${t.exported(clips)}. ${t.exportHint}` },
-      });
+      if (clips === 0) {
+        dispatch({ type: "banner/set", banner: { kind: "warn", text: t.exported(0) } });
+      } else {
+        dispatch({ type: "banner/clear" });
+      }
     } catch (e) {
       dispatch({
         type: "banner/set",
@@ -659,6 +673,54 @@ export function App() {
       <span className="strip__summary" />
     );
 
+  // ---- The export's receipt, on the strip (V06-G3, D-092 ⑤) -------------------------------
+  //
+  // One line: it worked, and this is what it is called. `basename` rather than the path,
+  // because the path is 60 characters of a folder the operator chose two seconds ago and the
+  // name is the thing they will look for in Resolve — and «Vis i Finder», three controls to
+  // the right, is the answer to "where did it go".
+  //
+  // The Resolve import instruction rides on `title`. That is D-083's rule («the claim survives
+  // in full, one hover away, on the element that could not finish saying it») applied to a
+  // claim that never fitted a strip at all, and it is the *second* place it lives: the first
+  // is `docs/KNOWN_LIMITATIONS.md` («The import order, in full»), which is where an instruction you need on every run belongs.
+  //
+  // ## The receipt IS «Vis i Finder»
+  //
+  // Measured, not preferred. At 1024 — the smallest window `tauri.conf.json` allows — the
+  // exported strip carries the wordmark, «Legg til», the sources cluster, the receipt, the
+  // project field, «Vis i Finder», «Synk på nytt», «Eksporter» and the gear. Add up what each
+  // of those cannot go below and the row needs ~1080 px of a 1000 px line, so the honest
+  // choice was never which of them shrinks: it was which of them GOES. Keeping all nine
+  // meant a receipt four pixels wide, which is not a receipt.
+  //
+  // The one that goes is the separate button, because it and the receipt are one object: the
+  // receipt names the file that was written and «Vis i Finder» is the only thing anybody does
+  // with that name. Pressing the sentence goes to the file. Its accessible name still ENDS in
+  // «Vis i Finder», so the control is still findable by that name — by a screen-reader user,
+  // and by the eight specs that click it — and the visible text is part of it (WCAG 2.5.3).
+  const stripReceipt =
+    phase.name === "result" && exportedPath !== null ? (
+      <button
+        type="button"
+        className="strip__receipt"
+        // Both halves of what the strip cannot finish saying: the file's whole name, which
+        // ellipsises at a narrow window, and the Resolve import instruction, which never fitted
+        // a 44 px row at all and lives in full in `docs/KNOWN_LIMITATIONS.md` («The import order, in full»).
+        title={`${t.exportedShort} · ${basename(exportedPath)} — ${t.exportHint}`}
+        aria-label={`${t.exportedShort} · ${basename(exportedPath)} — ${t.revealInFinder}`}
+        onClick={() => revealItemInDir(exportedPath)}
+      >
+        <CheckIcon />
+        {/* Two spans, and which of them may shrink is the whole of it: the word is rigid, the
+            NAME ellipsises — from the left, so what survives is the end of the filename rather
+            than the start of a folder. One span for both produced «…rted · Gudstjeneste
+            2026-08-23.fcpxml» at a busy 1280, which is a receipt that has eaten its own verb. */}
+        <span className="strip__receipt-word">{t.exportedShort} ·</span>
+        <span className="strip__receipt-text">{basename(exportedPath)}</span>
+      </button>
+    ) : null;
+
   // ---- The strip's single primary action, per phase --------------------------------------
   const stripActions =
     phase.name === "sources" ? (
@@ -671,11 +733,17 @@ export function App() {
         // is about.
         title={overridesDirty ? t.resyncHint : undefined}
       >
+        <SyncIcon />
         {t.syncButton}
       </button>
     ) : phase.name === "result" ? (
       <>
-        {/* The project name travels with the export, so it sits beside it. */}
+        {/* The project name travels with the export, so it sits beside it.
+            V06-G3 (D-092 ⑦): it is also the strip's designated absorber at a narrow window —
+            it shrinks first and furthest, to 90 px — which is only fair if it can still say
+            what it is at that width. A `placeholder` does what the visually-hidden label
+            cannot: it names the field on screen, for the sighted operator, in the one state
+            where the field is too narrow to hold a name the user typed. */}
         <label>
           <span className="visually-hidden">{t.projectName}</span>
           <input
@@ -683,29 +751,25 @@ export function App() {
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
             aria-label={t.projectName}
+            placeholder={t.projectName}
+            title={t.projectName}
           />
         </label>
-        {/* V06-R3: the secondaries come BEFORE the gold one, which is the order the approved
-            canvas draws and — more to the point — the only order in which D-081's promise
-            holds. «Vis i Finder» appears the instant an export succeeds; with it after the
-            primary, the primary slid 110 px to the left in that same instant, i.e. the one
-            control the operator's hand has learned moved under it exactly when they were
-            about to reach for it again. Last before the gear, its right edge is pinned by
-            the strip's own padding and its width never changes, so nothing that comes and
-            goes to its left can move it. */}
-        {exportedPath && (
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => revealItemInDir(exportedPath)}
-          >
-            {t.revealInFinder}
-          </button>
-        )}
+        {/* V06-R3 put «Vis i Finder» here, between the project field and «Synk på nytt», for
+            a reason that still stands and is now served by something else: a control that
+            APPEARS when an export succeeds must not push the primary sideways in the same
+            instant, because the primary's x is the one position the operator's hand has
+            learned. V06-G3 (D-092 ⑤) merges the button into the receipt — see `stripReceipt`
+            above — which keeps that promise the same way and is one fewer thing on a row that
+            measurably could not hold nine. */}
+        {/* The same glyph as «Synkroniser» above, because it is the same act done again
+            (V06-G3, D-092). */}
         <button type="button" className="secondary" onClick={runSync} title={t.resyncHint}>
+          <SyncIcon />
           {t.resyncButton}
         </button>
         <button type="button" className="primary" onClick={exportTimeline} disabled={phase.stale}>
+          <ExportIcon />
           {t.exportButton}
         </button>
       </>
@@ -730,6 +794,7 @@ export function App() {
           )
         }
         sources={stripSources}
+        receipt={stripReceipt}
         actions={stripActions}
         onSettings={() => setShowSettings(true)}
       />

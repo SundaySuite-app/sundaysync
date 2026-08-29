@@ -74,7 +74,34 @@ test.describe("the preview panel", () => {
   test("is on screen before anything is selected, and says what to do", async ({ page }) => {
     await reachSources(page);
     await expect(preview(page)).toBeVisible();
-    await expect(preview(page)).toHaveText(en.previewEmpty);
+    // V06-G3 (D-092 ⑥): the empty state is the filled state with the facts taken out — the
+    // column's own label, the same 268×151 frame the still uses (dashed), the sentence, and
+    // one line about what will be there. Asserted as its parts rather than as the panel's
+    // whole text, which is now four elements rather than one.
+    await expect(preview(page).locator(".preview__label")).toHaveText(en.previewSection);
+    await expect(preview(page).locator(".preview__emptyline")).toHaveText(en.previewEmpty);
+    await expect(preview(page).locator(".preview__emptyhint")).toHaveText(en.previewEmptyHint);
+    await expect(preview(page).locator(".preview__frame--empty")).toBeVisible();
+  });
+
+  test("the empty frame is the same box the still lands in", async ({ page }) => {
+    // The whole point of giving the empty state a frame (D-092 ⑥): marking a clip must change
+    // what is IN the boxes, never where they are. A column that re-laid itself out on
+    // selection is D-074's promise broken in the one place it was never measured.
+    await reachSources(page);
+    const empty = (await preview(page).locator(".preview__frame").boundingBox())!;
+    const labelBefore = (await preview(page).locator(".preview__label").boundingBox())!;
+
+    await page.locator(`.clip[data-file="${CAM_A}"]`).click();
+    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+
+    const filled = (await preview(page).locator(".preview__frame").boundingBox())!;
+    expect(filled.x).toBeCloseTo(empty.x, 0);
+    expect(filled.y).toBeCloseTo(empty.y, 0);
+    expect(filled.width).toBeCloseTo(empty.width, 0);
+    expect(filled.height).toBeCloseTo(empty.height, 0);
+    const labelAfter = (await preview(page).locator(".preview__label").boundingBox())!;
+    expect(labelAfter.y).toBeCloseTo(labelBefore.y, 0);
   });
 
   test("selecting a clip BEFORE a sync shows its picture and its file facts, and no sync detail", async ({
@@ -275,7 +302,8 @@ test.describe("the preview panel", () => {
     await page.locator(".inspector").getByLabel(`${en.removeFile}: C0002.MP4`).click();
 
     await expect(page.locator(`.clip[data-file="${CAM_B}"]`)).toHaveCount(0);
-    await expect(preview(page)).toHaveText(en.previewEmpty);
+    await expect(preview(page).locator(".preview__emptyline")).toHaveText(en.previewEmpty);
+    await expect(preview(page).locator(".preview__name")).toHaveCount(0);
   });
   // ── V05-W5 sweep: the shapes adjacent to the StrictMode bug W4b fixed ────────────────
   //

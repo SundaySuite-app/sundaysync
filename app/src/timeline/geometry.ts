@@ -119,23 +119,84 @@ export function visibleClips<T extends Spanned>(
   return out;
 }
 
+/**
+ * The tick ladder — every spacing the ruler is allowed to choose, ascending.
+ *
+ * Sub-minute rungs are for the zoom a single offset is inspected at; from a minute upwards
+ * it is `1/2/5/10/15/30 min · 1/2/3/6/12 h`, which are the divisions a person already thinks
+ * a shooting day in. **The four rungs above the hour are V06-G3 (D-092 ④).** The ladder used
+ * to stop at 3 600 000, and a ladder that stops is a ladder that gets fallen off: past that
+ * zoom `tickIntervalMs` ran out of candidates and returned the hour regardless of whether an
+ * hour still fitted. On the owner's own «Tilpass» over an 18-hour day in a 736 px lane it did
+ * not — one hour is 41 px there — and sixteen of the eighteen labels were drawn on top of the
+ * one before them.
+ *
+ * 12 h is the top because it is enough: `MIN_PX_PER_MS` caps the view at ~20 hours, where a
+ * 12-hour step is 432 px and there is no crowding left to solve.
+ */
 const NICE_INTERVALS_MS = [
   100, 250, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 30_000, 60_000, 120_000,
-  300_000, 600_000, 900_000, 1_800_000, 3_600_000,
+  300_000, 600_000, 900_000, 1_800_000, 3_600_000, 7_200_000, 10_800_000,
+  21_600_000, 43_200_000,
 ];
 
-/** Pick the smallest "nice" tick interval whose on-screen spacing is at least
- *  `minPxBetween`, so ruler labels never crowd. */
-export function tickIntervalMs(view: TimelineView, minPxBetween = 80): number {
+/**
+ * A generous advance for one character of a tick's 0.625rem tabular-numeric label, and the
+ * clear space that must remain between one label and the next line.
+ *
+ * Estimated from the character count rather than measured, and deliberately so: a layout read
+ * inside the ruler would run on every pan frame, and tabular numerals are the one typeface
+ * setting where a character count IS the width. `Ruler.tsx` sizes its own right-edge clipping
+ * from the same constant, which is why it lives here rather than there — two estimates of one
+ * width is exactly the seam that lets a label be admitted by one rule and clipped by the other.
+ */
+export const TICK_CHAR_PX = 7;
+const TICK_GAP_PX = 16;
+
+/**
+ * The width of the widest label a given spacing will draw across `view`.
+ *
+ * The widest is the LAST one: `formatTimecode` grows a leading hours field, and a wall clock's
+ * labels are all the same width anyway. Asking about the end of the visible range therefore
+ * costs one `Date` and answers for the whole ruler.
+ */
+function widestLabelPx(view: TimelineView, intervalMs: number, originEpochMs: number | null): number {
+  const [, end] = visibleRange(view);
+  return tickLabel(Math.max(0, end), intervalMs, originEpochMs).length * TICK_CHAR_PX;
+}
+
+/**
+ * Pick the smallest ladder rung whose on-screen spacing is at least `minPxBetween` **and
+ * leaves `TICK_GAP_PX` of clear space beside the label it will draw** (V06-G3, D-092 ④).
+ *
+ * The second half is the fix. The first was the whole rule until now, and a flat 80 px is a
+ * proxy for the real question in exactly the range where the proxy is wrong: at one tick per
+ * hour the label is «17:00:00», 56 px of it, so 80 px of step is 24 px of clearance — and at a
+ * zoom where the step is not even 80 px wide, nothing was checked at all. What collides is
+ * labels, so what is measured is labels.
+ *
+ * `minPxBetween` stays as a floor for the fine end of the ladder, where a millisecond timecode
+ * is narrow enough that spacing rather than width is what keeps a ruler readable.
+ */
+export function tickIntervalMs(
+  view: TimelineView,
+  minPxBetween = 80,
+  originEpochMs: number | null = null,
+): number {
   for (const interval of NICE_INTERVALS_MS) {
-    if (interval * view.pxPerMs >= minPxBetween) return interval;
+    const need = Math.max(minPxBetween, widestLabelPx(view, interval, originEpochMs) + TICK_GAP_PX);
+    if (interval * view.pxPerMs >= need) return interval;
   }
   return NICE_INTERVALS_MS[NICE_INTERVALS_MS.length - 1];
 }
 
 /** Ruler tick times across the visible range at the chosen nice interval. */
-export function rulerTicks(view: TimelineView, minPxBetween = 80): number[] {
-  const interval = tickIntervalMs(view, minPxBetween);
+export function rulerTicks(
+  view: TimelineView,
+  minPxBetween = 80,
+  originEpochMs: number | null = null,
+): number[] {
+  const interval = tickIntervalMs(view, minPxBetween, originEpochMs);
   const [start, end] = visibleRange(view);
   const first = Math.ceil(start / interval) * interval;
   const ticks: number[] = [];
@@ -145,7 +206,7 @@ export function rulerTicks(view: TimelineView, minPxBetween = 80): number[] {
 
 /**
  * A ruler tick's label: the timecode, minus the part the chosen tick spacing cannot
- * resolve (V06-R3).
+ * resolve (V06-R3) — or, when the timeline's zero is a known moment, the clock (V06-G3).
  *
  * `formatTimecode` always prints milliseconds, and it is right to: it is the transport's
  * clock, and the offsets this app measures are sub-frame (see the note below). A RULER is a
@@ -156,10 +217,43 @@ export function rulerTicks(view: TimelineView, minPxBetween = 80): number[] {
  *
  * The rule is the interval, not the zoom: milliseconds are dropped exactly when a tick is a
  * whole second or more apart, because that is when no two ticks could differ in them.
+ *
+ * ## `originEpochMs` — the wall clock (D-092 ⑧)
+ *
+ * Before a sync, the clips are positioned by their own recording timestamps and t=0 is not an
+ * arbitrary zero at all: it is the earliest moment anything in the drop was recorded, and
+ * `sourceSpans` knows the epoch of it. Given that epoch the ruler says «14:30», which is a
+ * thing the operator recognises about the day they filmed, instead of «6:30:00» counted from
+ * a zero the app chose and they have to do arithmetic against.
+ *
+ * `null` — after a sync, where the origin is the engine's earliest placement rather than a
+ * clock, and before one whenever no file in the drop offered a usable timestamp — keeps the
+ * elapsed form. A wall time the app is not sure of would be a worse answer than an honest
+ * count.
  */
-export function tickLabel(ms: number, intervalMs: number): string {
+export function tickLabel(
+  ms: number,
+  intervalMs: number,
+  originEpochMs: number | null = null,
+): string {
+  if (originEpochMs !== null) return wallClockLabel(originEpochMs + ms, intervalMs);
   const full = formatTimecode(ms);
   return intervalMs >= 1000 ? full.slice(0, -4) : full;
+}
+
+/**
+ * `HH:MM` local wall time, and `HH:MM:SS` when a minute is too coarse to tell two ticks apart.
+ *
+ * Local because that is the calendar the person reading the screen is holding — the same
+ * reason `sourceLayout`'s `localMidnight` and the dictionary's `presyncDay` are local. Hand
+ * -built rather than `Intl`, for the same reason every other clock in this app is: one
+ * predictable width, in every locale, on a row where width decides what can be drawn.
+ */
+function wallClockLabel(epochMs: number, intervalMs: number): string {
+  const at = new Date(epochMs);
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const hm = `${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+  return intervalMs >= 60_000 ? hm : `${hm}:${pad2(at.getSeconds())}`;
 }
 
 /**

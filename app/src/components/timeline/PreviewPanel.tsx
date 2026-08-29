@@ -87,8 +87,9 @@ export function PreviewPanel({
 }) {
   return (
     <section className="preview" aria-label={t.previewAria}>
+      <p className="preview__label">{t.previewSection}</p>
       {file === null || entry === null ? (
-        <p className="preview__empty subtle">{t.previewEmpty}</p>
+        <EmptyInspector t={t} />
       ) : (
         <>
           <PreviewFrame t={t} entry={entry} />
@@ -100,6 +101,33 @@ export function PreviewPanel({
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * Nothing is marked (V06-G3, D-092 ⑥).
+ *
+ * D-070 already ruled that this state is a state the panel RENDERS rather than one it
+ * disappears in, and it was right; what it rendered was one grey sentence floating in the
+ * middle of a 300 px column that is the full height of the room. Two thirds of the way through
+ * a wedding's worth of clips, the biggest single area on screen was saying almost nothing, and
+ * — worse — saying it in a shape with no relationship to the shape it takes the moment a clip
+ * IS marked, so the whole column jumped when one was.
+ *
+ * So the empty state is the filled state with the facts taken out: the same section label at
+ * the top, the same 268×151 box where the still goes (dashed rather than solid, because an
+ * empty frame is a placeholder and a solid one would read as a picture that failed to load),
+ * the sentence beneath it, and one line saying what will be there. Nothing moves when a clip
+ * is marked except the contents of boxes that were already the right size and in the right
+ * place — which is D-074's promise applied inside the one column that had not kept it.
+ */
+function EmptyInspector({ t }: { t: Strings }) {
+  return (
+    <div className="preview__empty">
+      <div className="preview__frame preview__frame--empty" aria-hidden="true" />
+      <p className="preview__emptyline">{t.previewEmpty}</p>
+      <p className="preview__emptyhint subtle">{t.previewEmptyHint}</p>
+    </div>
   );
 }
 

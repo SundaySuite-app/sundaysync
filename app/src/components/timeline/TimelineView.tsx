@@ -26,6 +26,7 @@ import {
 } from "../../timeline/viewport";
 import type { PrewarmStatus } from "../../state";
 import type { Device, Placement, ScanManifest, SyncOutcome, Warning } from "../../types";
+import { InfoIcon } from "../icons";
 import { usePopoverDismiss } from "../shell/usePopoverDismiss";
 import { PlayheadLine } from "./PlayheadLine";
 import { Ruler } from "./Ruler";
@@ -114,6 +115,13 @@ interface TimelineContent {
   outsideWindowDays: readonly number[];
   /** Device carrying the reference badge — the engine's pick, or the operator's. */
   referenceDevice: string | null;
+  /**
+   * Pre-sync only (V06-G3, D-092 ⑧): the absolute moment the timeline's t=0 IS, in ms since
+   * the Unix epoch — so the ruler can print the day's own clock instead of an elapsed count
+   * from a zero the app chose. Null after a sync, where the origin is the engine's earliest
+   * placement and not a clock, and null before one whenever the ladder timed nothing.
+   */
+  originEpochMs: number | null;
 }
 
 /** Nothing to draw — no manifest yet. Frozen so it is never a fresh identity per render. */
@@ -128,6 +136,7 @@ const EMPTY_CONTENT: TimelineContent = {
   outsideWindow: NO_FILES,
   outsideWindowDays: NO_DAYS,
   referenceDevice: null,
+  originEpochMs: null,
 };
 
 export function TimelineView({
@@ -288,6 +297,9 @@ export function TimelineView({
       outsideWindow: NO_FILES,
       outsideWindowDays: NO_DAYS,
       referenceDevice: result.reference?.device ?? null,
+      // The result's zero is the earliest PLACEMENT, which is a position the engine worked
+      // out and not a moment on anybody's clock. Elapsed time is the honest ruler here.
+      originEpochMs: null,
     };
   }, [outcome, excluded]);
 
@@ -329,6 +341,11 @@ export function TimelineView({
       outsideWindow: layout.outsideWindow,
       outsideWindowDays: layout.outsideWindowDays,
       referenceDevice,
+      // `layout.originMs` is the epoch of the layout's own zero; `originMs` is what
+      // `contentBounds` then shifted the spans by on top of it (0 in practice, since
+      // `sourceSpans` already puts the earliest placed clip at zero — added rather than
+      // assumed, because the ruler and the boxes must share a zero by construction).
+      originEpochMs: layout.originMs === null ? null : layout.originMs + originMs,
     };
   }, [outcome, manifest, overrides, reference, excluded]);
 
@@ -343,6 +360,7 @@ export function TimelineView({
     outsideWindow,
     outsideWindowDays,
     referenceDevice,
+    originEpochMs,
   }: TimelineContent = outcomeContent ?? sourceContent ?? EMPTY_CONTENT;
 
   // ---- What the legend above the frame says (D-067/D-068/D-071) ----------------------
@@ -554,6 +572,25 @@ export function TimelineView({
     : clipCount > 0 && legend.placed + legend.estimated === 0
       ? t.presyncMetaNoClock
       : t.presyncMeta;
+  /**
+   * …and what the slot actually PRINTS of it before a sync (V06-G3, D-092, slot demotions).
+   *
+   * The sentence above is true and worth keeping, and it is a FOOTNOTE: it says what the
+   * numbers on screen are, not that anything has happened. In the slot it sat at full length
+   * beside the legend's four counts, the off-session warning and the auto-reference promise —
+   * four claims in 38 px, all in the same voice, so the one that names a date the operator may
+   * want to act on had no more weight than the one explaining the axis. Demoted here to a
+   * glyph and one word; `metaSentence` stays the `title`, unchanged and complete.
+   *
+   * After a sync this is untouched. «25/1 · 1 t 42 min» is a fact about what the export will
+   * write, it is the only thing in the slot's middle at that point, and there is nothing to
+   * demote it beneath.
+   */
+  const metaShort = result
+    ? metaSentence
+    : clipCount > 0 && legend.placed + legend.estimated === 0
+      ? t.presyncMetaNoClockShort
+      : t.presyncMetaShort;
 
   /** What the engine wants to say about the run as a whole — the strip's chip (D-083). */
   const warnings: readonly Warning[] = result?.warnings ?? [];
@@ -894,7 +931,12 @@ export function TimelineView({
                 </div>
               </div>
               <div className="track__lanes" id={VIEWPORT_ID} ref={viewportRef}>
-                <Ruler view={view} label={t.rulerAria} onSeek={seek} />
+                <Ruler
+                  view={view}
+                  label={t.rulerAria}
+                  originEpochMs={originEpochMs}
+                  onSeek={seek}
+                />
               </div>
             </div>
 
@@ -1013,14 +1055,25 @@ export function TimelineView({
                     being shortened. Nothing is removed: D-062's per-file removal is the
                     operator's, not the app's (D-071). */}
                 {outsideWindowDays.length > 0 && (
-                  <p className="timeline__note timeline__note--offsession">
+                  // The `title` is V06-G3 (D-092): this is the one line in the slot that may
+                  // shrink, so it is the one line in the slot that could be cut off — and it
+                  // was the only claim in the room still ellipsising without its whole self a
+                  // hover away. D-083's rule, applied where it had been missed.
+                  <p
+                    className="timeline__note timeline__note--offsession"
+                    title={t.presyncOffSession(
+                      outsideWindow.size,
+                      outsideWindowDays.map(t.presyncDay),
+                    )}
+                  >
                     {t.presyncOffSession(outsideWindow.size, outsideWindowDays.map(t.presyncDay))}
                   </p>
                 )}
               </>
             )}
-            <div className="result__meta">
-              <span title={metaSentence}>{metaSentence}</span>
+            <div className={`result__meta${result ? "" : " result__meta--short"}`}>
+              {!result && <InfoIcon />}
+              <span title={metaSentence}>{metaShort}</span>
             </div>
           </>,
           slotEl,
