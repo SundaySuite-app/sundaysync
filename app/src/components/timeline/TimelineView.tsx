@@ -431,14 +431,34 @@ export function TimelineView({
   // re-scan came back without it, or the outcome it was placed by was pulled — and all four
   // are one question: is the marked file still drawn? A panel describing a clip that is no
   // longer anywhere on the timeline is the same lie the dialog would have been.
-  const drawnFiles = useMemo(() => {
+  //
+  // **"Still drawn" was too narrow, and the V06 review found where** (D-077 #8). It is the
+  // right question for three of those four ways — a removal, a re-scan without the file, a
+  // pulled outcome all mean the file is out of the ROOM — but not for the fourth thing it
+  // also caught: a file the ENGINE refused to place. That file has no x on the timeline and
+  // never will, and it is still in the drop, still a row in «Kilder», still counted by the
+  // problem chip. Marking it un-marked it in the same commit, so clicking the row of exactly
+  // the file the operator opened the list to ask about did nothing at all.
+  //
+  // The honest predicate is therefore "is the marked file still one this room knows about?":
+  // drawn, or listed by the scan and not taken out. What the inspector then shows is what it
+  // shows for any file before a sync — the picture, the facts, and the three decisions,
+  // including the «move to device» that is D-027's own advice for a clip that would not
+  // place — and an empty sync half, because there is no placement to describe.
+  //
+  // Still computed HERE, and still reported upwards rather than fixed locally: the drawn set
+  // is only knowable here, and one predicate in one place is the whole point of D-070.
+  const selectableFiles = useMemo(() => {
     const files = new Set<string>();
     for (const { rows } of tracks) for (const row of rows) for (const span of row) files.add(span.file);
+    if (manifest) {
+      for (const entry of manifest.files) if (!excluded.has(entry.file)) files.add(entry.file);
+    }
     return files;
-  }, [tracks]);
+  }, [tracks, manifest, excluded]);
   useEffect(() => {
-    if (selected !== null && !drawnFiles.has(selected)) onSelect(null);
-  }, [drawnFiles, selected, onSelect]);
+    if (selected !== null && !selectableFiles.has(selected)) onSelect(null);
+  }, [selectableFiles, selected, onSelect]);
 
   // (The derivations the preview panel needs — the placement, the manifest entry and the
   // recording-time ladder — moved to App with the panel itself in V06-R1 (D-075). They were
@@ -707,6 +727,29 @@ export function TimelineView({
   // ---- Keyboard ----
   function onKeyDown(e: React.KeyboardEvent<HTMLElement>) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    /**
+     * These shortcuts belong to the FRAME, and only to the frame (V06 review).
+     *
+     * A portal moves the pixels and not the React tree: `Transport` and the warnings chip are
+     * rendered here (D-075/D-083) and drawn in the slot and on the strip, and a React event
+     * fired inside a portal still propagates to this handler. So every key pressed on a
+     * control the operator sees as part of the strip or the slot arrived here — and this
+     * handler claims Space, the four arrows, Home, End, `+`, `-`, `0` and `f`, and
+     * `preventDefault()`s each one, which is exactly what suppresses a `<button>`'s or a
+     * `<summary>`'s own Space activation.
+     *
+     * Measured, on main: Space on ⏹ started playback instead of stopping it (`engine.stop`
+     * never ran), Space on the warnings chip started playback instead of opening the chip —
+     * the one key its two neighbours on the strip already answer to — and ArrowRight on
+     * either scrubbed the playhead a second. The `tag` guard below could not catch any of
+     * it: these are `<button>`s and a `<summary>`, not fields.
+     *
+     * `contains` rather than a list of exceptions, because the question is not "which
+     * controls are portalled" — that changes — but "did this key happen inside the thing the
+     * shortcuts are about?". `currentTarget` IS the section, and `contains` counts itself, so
+     * every key pressed on the frame, a clip, the zoom buttons or the scrollbar is unchanged.
+     */
+    if (!e.currentTarget.contains(e.target as Node)) return;
     // Anything the user is typing into, or dragging with the arrow keys, owns its own
     // keys: the project-name field (outside this section), the volume slider and the
     // device `<select>`s inside it. Without this, adjusting the volume with the arrow keys
