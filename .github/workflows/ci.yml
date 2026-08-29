@@ -232,9 +232,23 @@ jobs:
       - name: Install Playwright browser
         working-directory: app
         run: npx playwright install --with-deps chromium
+      # The three gates every stage of this app has run locally since v0.3 and CI never did:
+      # `vitest` covers the pure timeline/audio math (450+ cases — hop arithmetic, the
+      # recording-time ladder, schedule planning), `typecheck` covers src (only e2e was
+      # checked), and `build` is the one that proves the app still compiles for release.
+      # Without them the whole unit suite could go red on a push that CI called green.
+      - name: Typecheck src
+        working-directory: app
+        run: npm run typecheck
       - name: Typecheck e2e
         working-directory: app
         run: npm run typecheck:e2e
+      - name: Unit tests
+        working-directory: app
+        run: npm test
+      - name: Production build
+        working-directory: app
+        run: npm run build
       - name: Run Playwright specs
         working-directory: app
         run: npm run e2e
