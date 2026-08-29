@@ -1,6 +1,6 @@
 # Changelog
 
-## Ikke sluppet ennå
+## v0.6.0-beta.4
 
 - **Et klipp er en tegning nå, ikke en farget kloss.** Hver eneste boks på tidslinja er en tynn
   ramme i fargen sin, en svak tone av den samme fargen bak, og bølgeformen tegnet oppå — grønn
