@@ -10,7 +10,7 @@ import {
   zoomAround,
   type TimelineView as View,
 } from "../../timeline/geometry";
-import { LANE_HEIGHT_PX } from "../../timeline/hop";
+import { laneHeightFor } from "../../timeline/hop";
 import { stackClips, type ClipSpan } from "../../timeline/laneLayout";
 import { getPlayheadMs, publishPlayheadMs } from "../../timeline/playhead";
 import { type TimeSource } from "../../timeline/recordingTime";
@@ -198,6 +198,14 @@ export function TimelineView({
   const bodyRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
+  /** The scrolling stage the tracks live in — measured for its HEIGHT (D-091), where
+   *  `viewportRef` is measured for its width. Two questions, two boxes: the width the
+   *  timeline fits time into is the lane COLUMN's, and the height the lanes may grow into
+   *  is the whole stage's, gutter included. */
+  const stageRef = useRef<HTMLDivElement>(null);
+  /** How many px of stage the lanes have, ruler excluded. Zero until the observer below has
+   *  run once — `laneHeightFor` reads that as "unmeasured" and answers with the floor. */
+  const [stagePx, setStagePx] = useState(0);
 
   // ---- Content: seconds → ms, grouped per device, stacked into sub-tracks ----
   //
@@ -371,12 +379,32 @@ export function TimelineView({
 
   const fittedSpan = useRef<number | null>(null);
 
+  // ---- The pitch, decided once per render (V06-G2, D-091) ------------------------------
+  //
+  // «Lanene skal vokse inn i rommet»: at 40 px a three-device drop left 45–79 % of the
+  // stage as empty dark, and the answer is not a bigger constant (twenty rows still have to
+  // fit) but a number that knows how many rows there are and how much room they have.
+  //
+  // Computed HERE and passed to both consumers — `Track` (which writes it into the track's
+  // and each lane's height) and `useHop` (which sums it in `clipBoxes`). That is the D-083
+  // invariant restated for a value: the pitch has exactly ONE producer, and the two places
+  // that need it are handed the same number rather than each asking for it. A `useMemo`
+  // rather than a bare call so the identity is stable for `useHop`'s dependency list.
+  const rowCount = useMemo(
+    // A device with nothing on it still occupies one lane — §7.5, and the same `max(1, …)`
+    // `Track` and `clipBoxes` apply.
+    () => tracks.reduce((n, { rows }) => n + Math.max(1, rows.length), 0),
+    [tracks],
+  );
+  const laneHeight = useMemo(() => laneHeightFor(rowCount, stagePx), [rowCount, stagePx]);
+
   // The hop (v0.4, D-063). Declared ABOVE the measure effect on purpose: React runs a
   // component's layout effects in declaration order, and `hop.frozen` has to be set on the
   // outcome's own commit before the fit below reads it.
   const hop = useHop({
     tracks,
     view,
+    laneHeight,
     outcome,
     contentSpanMs,
     bodyRef,
@@ -415,6 +443,39 @@ export function TimelineView({
     ro.observe(el);
     return () => ro.disconnect();
   }, [contentSpanMs, clampS, hop.frozen]);
+
+  // Measure the stage's HEIGHT, so the lanes can grow into it (D-091).
+  //
+  // Its own effect rather than a second job inside the one above, because the two measure
+  // different boxes for different reasons and have completely different re-run rules: the
+  // fit above is deliberately NOT re-run on an incidental resize (it would throw away the
+  // operator's zoom), while this one must follow every resize there is — a window drag is
+  // exactly when the room changes.
+  //
+  // The ruler is inside this box and is not a lane, so its height comes off the total. Read
+  // from `--tl-ruler-h` rather than measured off the ruler element: the ruler row is sticky
+  // and lives inside `.timeline__body`, and reaching through two boxes to measure a third
+  // would be one more thing to keep in step. The custom property is the same declaration
+  // the ruler's own `height` resolves.
+  //
+  // No feedback loop to worry about, and it is worth writing down why: `laneHeightFor`
+  // never returns more than `floor(available / rows)`, so growing the lanes cannot make the
+  // content taller than the stage and cannot summon the vertical scrollbar that would
+  // change what is being measured. Past `LANE_MAX_PX` it stops growing; at `LANE_MIN_PX`
+  // the stage already scrolls and one more row does not change the answer.
+  useLayoutEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => {
+      const ruler = parseFloat(getComputedStyle(el).getPropertyValue("--tl-ruler-h"));
+      const available = el.clientHeight - (Number.isFinite(ruler) ? ruler : 0);
+      setStagePx(available > 0 ? available : 0);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // A fresh result is a fresh clock: the old playhead pointed into a timeline
   // that no longer exists.
@@ -803,7 +864,7 @@ export function TimelineView({
             times stay readable at any scroll offset, and the horizontal scrollbar row left
             outside it (it is a sibling already, and a scrollbar that scrolled away would be
             a control the operator has to hunt for). */}
-        <div className="timeline__scroll">
+        <div className="timeline__scroll" ref={stageRef}>
           <div
             className="timeline__body"
             ref={bodyRef}
@@ -852,7 +913,7 @@ export function TimelineView({
                 timeSource={timeSource}
                 outsideWindow={outsideWindow}
                 prewarm={prewarm}
-                laneHeight={LANE_HEIGHT_PX}
+                laneHeight={laneHeight}
                 onSelect={onSelect}
                 muted={playback.muted.includes(device.id)}
                 soloed={playback.soloed.includes(device.id)}

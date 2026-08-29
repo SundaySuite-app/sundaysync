@@ -714,6 +714,35 @@ export function syncOutcome(over: Partial<Record<string, unknown>> = {}): Record
         { id: "cam-a", label: "Camera A", kind: "video", files: ["/Users/e2e/shoot/CamA/C0001.MP4"] },
       ],
       placements: [
+        // The REFERENCE, placed at zero — which is what the engine actually does
+        // (`crates/core/src/place.rs`: "The reference defines the origin, so it is placed at
+        // zero by construction", pushed before pass 1 even starts).
+        //
+        // It was missing from this fixture from the day it was written, and the V06-G2
+        // review is what noticed: no browser spec had ever rendered the reference row. Every
+        // outcome the suite has ever exercised drew ONE clip on a two-device timeline, so
+        // the recorder's lane was permanently the §7.5 "no clips placed" case, and anything
+        // that only goes wrong on a row that HAS clips — a lane's height, two clips
+        // overlapping, a hop that has to cross a track boundary — was untestable here by
+        // construction. Adding it shifts every placement/clip count in the suite by one, and
+        // each of those counts has been re-expressed rather than relaxed (D-085).
+        //
+        // `psr: null` rather than a number: the engine writes `f64::INFINITY` and
+        // `serde_json` has no spelling for that, so what actually reaches the UI is `null` —
+        // which is precisely why `PreviewPanel` guards the field with `Number.isFinite`.
+        // A fixture that handed it a finite number would be testing a wire format the app
+        // never receives.
+        {
+          file: "/Users/e2e/shoot/ZOOM0001.WAV",
+          device: "rec",
+          offset_seconds: 0,
+          confidence: 1,
+          psr: null,
+          drift_ppm: null,
+          projected_end_error_ms: null,
+          chain: [],
+          warnings: [],
+        },
         {
           file: "/Users/e2e/shoot/CamA/C0001.MP4",
           device: "cam-a",

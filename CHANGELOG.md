@@ -1,5 +1,29 @@
 # Changelog
 
+## Ikke sluppet ennå
+
+- **Et klipp er en tegning nå, ikke en farget kloss.** Hver eneste boks på tidslinja er en tynn
+  ramme i fargen sin, en svak tone av den samme fargen bak, og bølgeformen tegnet oppå — grønn
+  når motoren har plassert fila, blå mens analysen er ferdig men synken ikke, amber når det er
+  noe å si, dempet grå mens den venter. Før var boksen fylt helt: en rad med klipp leste som én
+  sammenhengende grønn stripe med filnavn utover, og bildet av lyden — det eneste på skjermen du
+  faktisk kan bedømme en synk med øyet på — var en litt mørkere grønn flekk inni en litt lysere
+  grønn boks. Banene er mørke nå, og klippene er tegnet på dem. Underveis fant vi at bølgeformen
+  aldri hadde ligget der den skulle: `<canvas>` er et erstattet element, så høyden kom fra
+  bufferet (150 px) og ikke fra boksen, og det du så var toppen av søylene klemt mot underkanten
+  av klippet. I hvert eneste klipp, hele tiden. Nå fyller bølgeformen boksen (D-091).
+- **Ingen klipp tegnes lenger oppå naboen sin.** På et bryllup med fire hundre filer var hvert
+  klipp tre piksler bredt — men `.clip` hadde 12,8 piksler polstring og arket regner
+  `border-box`, så boksen ble lagt ut fire ganger for bred. På en tett kortstokk lå **476 av 476
+  naboer oppå hverandre**, og et klikk midt på det klippet du siktet på traff *det neste*.
+  Appen ga deg feil fil. Polstringa er flyttet inn i klippet, boksen klippes mot der neste klipp
+  begynner — starten er hellig, bredden viker — og under seks piksler tegnes klippet som et
+  tydelig to-pikslers merke i statusfargen sin i stedet. 476 av 476 → **0** (D-091).
+- **Banene vokser inn i rommet.** Radhøyden var fast 40 piksler, så tre kameraer i et helt vindu
+  etterlot 81 % av tidslinja som tom, mørk plass. Nå deler radene høyden mellom seg — 40 piksler
+  som gulv når det er mange av dem, opp til 90 når det er få. Tre enheter: 81 % tomt → 58 %.
+  Seks enheter: 62 % → 15 %. Et bryllup med seksten enheter fyller flata som før (D-091).
+
 ## v0.6.0-beta.3
 
 - **Klippene stokker seg, reiser og spretter på plass — og blir grønne i det de lander.** Når

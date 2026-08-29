@@ -315,7 +315,8 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     // only because the stylesheet remembers to be.
     expect(nameBox.x).toBeGreaterThanOrEqual(clip.x - 0.5);
     expect(controlBox.x + controlBox.width).toBeLessThanOrEqual(clip.x + clip.width + 0.5);
-    // And one line, not two: `CLIP_HEIGHT_PX` is 27 and the row must never wrap.
+    // And one line, not two: the clip is `clipHeightFor(lane)` tall — 33 px at the tightest
+    // pitch there is — and the row must never wrap.
     expect(nameBox.height).toBeLessThan(clip.height);
     expect(nameBox.y).toBeGreaterThanOrEqual(clip.y - 0.5);
   });

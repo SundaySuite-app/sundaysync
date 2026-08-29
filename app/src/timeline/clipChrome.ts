@@ -90,9 +90,10 @@ export const NAME_AND_ICON_MIN_PX =
 /**
  * Given a clip's drawn width and what it has to say, what goes in the box.
  *
- * `MIN_CLIP_WIDTH_PX` (3 px, `hop.ts`) is untouched by any of this: a sliver stays a
- * coloured tick, which is a true and useful thing for a clip to be. It simply carries no
- * text, because 3 px of text is not text.
+ * The hairline rule (`CLIP_DRAWING_MIN_PX`, `hop.ts`) is untouched by any of this and sits
+ * strictly below it: under 6 px `Clip.tsx` renders no chrome layer at all, so this function
+ * is never consulted there. A sliver stays a coloured tick, which is a true and useful thing
+ * for a clip to be. It simply carries no text, because 2 px of text is not text.
  */
 export function clipChrome(widthPx: number, status: ClipStatusKind): ClipChrome {
   // A NaN width (a clip whose geometry has not settled) must not smuggle a `true` through

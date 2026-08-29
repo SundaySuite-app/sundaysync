@@ -3,7 +3,7 @@ import type { Strings } from "../../i18n";
 import type { PrewarmStatus } from "../../state";
 import { clipChrome } from "../../timeline/clipChrome";
 import { formatTimecode, msToX, type TimelineView } from "../../timeline/geometry";
-import { MIN_CLIP_WIDTH_PX } from "../../timeline/hop";
+import { clipDrawing } from "../../timeline/hop";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import { usePlayheadInsideSpan } from "../../timeline/playhead";
 import type { TimeSource } from "../../timeline/recordingTime";
@@ -59,6 +59,7 @@ const LABEL_KEEP_PX = 36;
 export const Clip = memo(function Clip({
   t,
   span,
+  roomPx,
   placement,
   view,
   durationUnknown = false,
@@ -69,6 +70,11 @@ export const Clip = memo(function Clip({
 }: {
   t: Strings;
   span: ClipSpan;
+  /** How many pixels there are between this clip's start and the NEXT clip's start in the
+   *  same lane — `Infinity` for the last clip in a row (D-091). A NUMBER rather than the
+   *  neighbouring span, because this component is `memo`ised and a span object would be a
+   *  fresh prop identity on every pan. The width yields to it; the start never does. */
+  roomPx: number;
   /** Null before a sync has placed this file — see the note above. */
   placement: Placement | null;
   view: TimelineView;
@@ -92,9 +98,12 @@ export const Clip = memo(function Clip({
   onSelect: (file: string) => void;
 }) {
   const left = msToX(span.startMs, view);
-  // The floor lives in `timeline/hop.ts` alongside the rest of a clip box's geometry, so a
-  // fade ghost drawn from that module can never disagree with the clip it stands in for.
-  const width = Math.max(MIN_CLIP_WIDTH_PX, (span.endMs - span.startMs) * view.pxPerMs);
+  // Both the width and the "is there room to draw at all" question live in
+  // `timeline/hop.ts` alongside the rest of a clip box's geometry, so a fade ghost drawn
+  // from that module can never disagree with the clip it stands in for. The width is
+  // clamped to `roomPx` there: a clip may be drawn shorter than its duration, never across
+  // the next clip's start (D-091).
+  const { width, hairline } = clipDrawing((span.endMs - span.startMs) * view.pxPerMs, roomPx);
   const name = basename(span.file);
   const hasWarnings = placement !== null && placement.warnings.length > 0;
   // Subscribed to the DERIVED boolean, so this re-renders when the playhead crosses this
@@ -158,6 +167,12 @@ export const Clip = memo(function Clip({
   const analysed = placement === null && analysisStatus === "ready";
   const className = [
     "clip",
+    // Too narrow to be a drawing (D-091). The class is what takes the padding, the label,
+    // the waveform and the rounded corners off the box, so the 2 px tick the geometry asked
+    // for is the 2 px tick the browser lays out. It is stated FIRST because it is a claim
+    // about the box's form, not about its state: every state class below still applies, and
+    // a hairline keeps wearing its state's colour — that is the whole reason it is visible.
+    hairline ? "clip--hairline" : "",
     placement === null ? "clip--pre" : "",
     analysed ? "clip--analysed" : "",
     hasWarnings ? "clip--warn" : "",
@@ -220,14 +235,28 @@ export const Clip = memo(function Clip({
       {/* Two layers, not two independently-placed children (D-065). The canvas draws
           itself in absolute pixels and cannot be a flex item; the name and the status must
           be flex items or they overlap — as they did, in a 3 px box, on all 386 clips of a
-          wedding. */}
-      <WaveformCanvas waveform={waveform} title={slotTitle} />
-      {chrome.name !== "none" || chrome.status !== "none" ? (
-        <span className="clip__chrome" style={{ paddingLeft: `${labelShift}px` }}>
-          {chrome.name !== "none" ? <span className="clip__name">{name}</span> : null}
-          <ClipStatus status={status} mode={chrome.status} />
-        </span>
-      ) : null}
+          wedding.
+
+          A hairline renders NEITHER (D-091). Not as an optimisation: the padding that made
+          a 3 px clip lay out at 12.8 px lives on `.clip__chrome` now, so the way a tick gets
+          to be exactly two pixels wide is by not having a chrome row at all. The whole
+          sentence is still on the button — `aria-label`, `title` — where a two-pixel box
+          could never have carried it anyway. */}
+      {hairline ? null : (
+        <>
+          <WaveformCanvas waveform={waveform} title={slotTitle} />
+          {chrome.name !== "none" || chrome.status !== "none" ? (
+            // `calc`, not a bare px: the base padding belongs to the stylesheet (it is the
+            // chrome's inset from the box's edge) and the slide is added to it. An inline
+            // `padding-left` in px would silently drop the base padding whenever the slide
+            // was zero, which is most of the time.
+            <span className="clip__chrome" style={{ paddingLeft: `calc(var(--clip-pad) + ${labelShift}px)` }}>
+              {chrome.name !== "none" ? <span className="clip__name">{name}</span> : null}
+              <ClipStatus status={status} mode={chrome.status} />
+            </span>
+          ) : null}
+        </>
+      )}
     </button>
   );
 });
