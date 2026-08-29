@@ -302,7 +302,36 @@ export function getEpoch(): number {
  * pass is already running.
  */
 export function regenerateAnalysis(file: string): Promise<void> {
-  return invoke<void>("regenerate_analysis", { file, cacheDir: cacheDir() });
+  return invoke<void>("regenerate_analysis", { file, cacheDir: cacheDir() }).then(() => {
+    for (const listener of regeneratedListeners) listener(file);
+  });
+}
+
+/* ── "…and this file has an analysis again" (V06 review) ────────────────────────────────
+ *
+ * Two layers hold an opinion about whether a file has been analysed, and until this wire
+ * existed only one of them ever heard about a hand-rebuild: THIS module, which then has the
+ * bytes and draws them, and `state.prewarm`, which is what paints the clip blue and what the
+ * gutter's dot is counted from (D-080/D-083). So a card the pass could not read, rebuilt one
+ * clip at a time through the clip's own control, drew its waveform inside a grey box, over a
+ * dot that went on saying «Lyden er ikke analysert» — the app disagreeing with itself inside
+ * one 40 px row.
+ *
+ * A listener rather than a return value because the two ends are not in the same tree:
+ * `regenerateAnalysis` is called from deep inside a `memo`ised clip, and the map lives in
+ * App's reducer. Same shape as `subscribeEpoch` above, and for the same reason — the module
+ * that knows the fact is not the component that has to act on it.
+ *
+ * Only SUCCESS notifies. A refused rebuild (D-046's `busy:`, or a file that will not decode)
+ * has written nothing, and the clip's own control already says so.
+ */
+const regeneratedListeners = new Set<(file: string) => void>();
+
+export function subscribeRegenerated(listener: (file: string) => void): () => void {
+  regeneratedListeners.add(listener);
+  return () => {
+    regeneratedListeners.delete(listener);
+  };
 }
 
 export type WaveformErrorKind = "cacheMissing" | "busy" | "other";

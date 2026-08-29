@@ -595,3 +595,64 @@ describe("a second run inherits nothing from the first (V05-W5)", () => {
     expect(Object.keys(s.prewarm)).toEqual(["/x/Z.WAV"]);
   });
 });
+
+/**
+ * A hand-rebuild is an analysis (V06 review).
+ *
+ * The seam: `waveformStore` makes the `regenerate_analysis` call and holds the bytes
+ * afterwards; `state.prewarm` is what the clip's blue (D-080) and the gutter's dot (D-083)
+ * are drawn from. Only the first of the two used to hear that a rebuild had worked, so a
+ * card the pass could not read drew its new waveforms inside grey boxes, under a dot still
+ * reading «Lyden er ikke analysert».
+ */
+describe("a rebuilt analysis (V06 review)", () => {
+  it("moves a failed file to ready", () => {
+    let s = toSources();
+    s = reducer(s, { type: "prewarm/file", file: "/x/C0001.MP4", ok: false });
+    expect(s.prewarm["/x/C0001.MP4"]).toBe("failed");
+    s = reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" });
+    expect(s.prewarm["/x/C0001.MP4"]).toBe("ready");
+    // Nobody else's status moved.
+    expect(s.prewarm["/x/Z.WAV"]).toBe("pending");
+  });
+
+  it("gives an opinion to a file that has none — the case `prewarm/file` cannot", () => {
+    // A cancelled pass DELETES its pending entries (D-064), and those are exactly the clips
+    // that then offer the rebuild control. `prewarm/file`'s "must already be in the map"
+    // guard is about late events from a superseded pass; this is the operator's own click.
+    let s = toSources();
+    s = reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason: "cancelled" });
+    expect(s.prewarm).toEqual({});
+    s = reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" });
+    expect(s.prewarm).toEqual({ "/x/C0001.MP4": "ready" });
+  });
+
+  it("invents nothing for a path this drop does not contain", () => {
+    const s = toSources();
+    expect(reducer(s, { type: "analysis/regenerated", file: "/gone/ghost.mp4" })).toBe(s);
+  });
+
+  it("says nothing about a file the operator has taken out of the run", () => {
+    // A removal drops the file's prewarm entry on purpose (D-062: a clip that is not drawn
+    // cannot be waiting for anything), and a rebuild that happened to land afterwards must
+    // not put it back — the map would then hold a verdict about a file that is not in the run.
+    let s = toSources();
+    s = reducer(s, { type: "files/exclude", file: "/x/C0001.MP4" });
+    expect(reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" })).toBe(s);
+  });
+
+  it("is inert outside the sources phase, where the map is not read", () => {
+    // While a sync runs the map describes the RUN's own extraction (D-064), and after one
+    // every drawn clip is placed and the dot says so — neither is a place for a per-file
+    // pre-analysis verdict to appear.
+    for (const s of [reducer(toSources(), { type: "sync/start" }), toResult()]) {
+      expect(reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" })).toBe(s);
+    }
+  });
+
+  it("is idempotent", () => {
+    let s = toSources();
+    s = reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" });
+    expect(reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" })).toBe(s);
+  });
+});

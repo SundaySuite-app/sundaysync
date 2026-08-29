@@ -50,6 +50,7 @@ import {
   BUSY_PREFIX,
   invalidate as invalidateWaveform,
   invalidateAll as invalidateAllWaveforms,
+  subscribeRegenerated,
 } from "./timeline/waveformStore";
 import { recordingTimes } from "./timeline/recordingTime";
 import { getTelemetryStatus, reportFrontendError } from "./telemetry";
@@ -248,6 +249,16 @@ export function App() {
     };
   }, []);
 
+  // A hand-rebuild from a clip's own control succeeded (V06 review). `waveformStore` is where
+  // that fact lands — it is the module that made the call — and `state.prewarm` is what the
+  // clip's blue and the gutter's dot are drawn from, so without this wire the two disagreed:
+  // a rebuilt clip drew its waveform inside a grey box, over a dot still saying the row's
+  // audio was not analysed. Not an event from the backend; a fact one module already had.
+  useEffect(
+    () => subscribeRegenerated((file) => dispatch({ type: "analysis/regenerated", file })),
+    [],
+  );
+
   // The aggregate tick. Its own channel, its own state, and (in the panel) its own element
   // — never the ProgressBar: a prewarm is not something the operator is waiting for, and
   // dressing it as the scan's or the sync's progress would say it is.
@@ -425,8 +436,17 @@ export function App() {
   }, []);
 
   const exportTimeline = useCallback(async () => {
+    // One name, read once (V06 review). The field is editable and can be emptied, and the
+    // two readers of it disagreed about what an empty one meant: the FILENAME fell back
+    // («sundaysync.fcpxml»), while the name written INTO the FCPXML did not — the backend's
+    // `project.as_deref().unwrap_or("SundaySync")` only catches an ABSENT argument, never an
+    // empty or blank one, so a cleared field wrote `<project name="">` and a field holding
+    // three spaces wrote `<project name="   ">` and offered «   .fcpxml» to save it under.
+    // Trimmed, because whitespace is not a name; the default is the same word the field
+    // starts life holding, so a cleared field exports as it did before anyone touched it.
+    const project = projectName.trim() || "SundaySync";
     const path = await save({
-      defaultPath: `${projectName.replace(/[/\\:]/g, "-") || "sundaysync"}.fcpxml`,
+      defaultPath: `${project.replace(/[/\\:]/g, "-")}.fcpxml`,
       filters: [{ name: "FCPXML", extensions: ["fcpxml"] }],
     });
     if (!path) return;
@@ -435,7 +455,7 @@ export function App() {
       // stored run — defense in depth behind the `disabled={phase.stale}` UI gate.
       const clips = await invoke<number>("export_timeline", {
         path,
-        project: projectName,
+        project,
         inputs: state.phase.name === "result" ? state.phase.inputs : [],
         reference: state.reference,
         deviceOverrides:

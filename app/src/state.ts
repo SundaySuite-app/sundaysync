@@ -136,6 +136,7 @@ export type Action =
   | { type: "prewarm/file"; file: string; ok: boolean }
   | { type: "prewarm/progress"; completed: number; total: number }
   | { type: "prewarm/settled"; seq: number; reason: PrewarmEndReason }
+  | { type: "analysis/regenerated"; file: string }
   | { type: "sync/start" }
   | { type: "sync/progress"; progress: ProgressEvent }
   | { type: "sync/done"; outcome: SyncOutcome }
@@ -376,6 +377,30 @@ export function reducer(state: AppState, action: Action): AppState {
       }
       if (!changed && state.prewarmProgress === null) return state;
       return { ...state, prewarm: settled, prewarmProgress: null };
+    }
+
+    case "analysis/regenerated": {
+      // The operator rebuilt ONE file's analysis by hand, through the clip's own control,
+      // and the shell said it worked (V06 review). The bytes exist, which is the whole of
+      // what `ready` claims (D-080) — and until this action existed only `waveformStore`
+      // ever heard about it, so the clip drew its new waveform inside a grey box and its
+      // device's dot went on saying the row was not analysed.
+      //
+      // Deliberately NOT `prewarm/file`'s rule ("only files already in the map"). That guard
+      // exists to stop a LATE event from a superseded pass inventing entries for a drop that
+      // is no longer on screen; this is the operator's own click, on a clip they are looking
+      // at, and the files that most need it are precisely the ones with no entry — a
+      // cancelled pass DELETES its pending entries (D-064) and a restored file never gets one
+      // back, and both of those show the rebuild control.
+      //
+      // `sources` only, like `prewarm/progress` and `prewarm/settled` above: it is the one
+      // phase where this map is read for anything (after a sync every drawn clip is placed
+      // and the dot says so), and the one phase where a rebuild is not refused outright.
+      if (state.phase.name !== "sources") return state;
+      if (state.excluded.includes(action.file)) return state;
+      if (!state.phase.manifest.files.some((f) => f.file === action.file)) return state;
+      if (state.prewarm[action.file] === "ready") return state;
+      return { ...state, prewarm: { ...state.prewarm, [action.file]: "ready" } };
     }
 
     case "sync/start": {
