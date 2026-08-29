@@ -60,6 +60,13 @@
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 
   color-scheme: dark;
+  /* V06-G3 (D-092): every checkbox and radio in the app — the settings panel's, the consent
+     card's — was drawn in Chrome's own #0b57d0 blue, which is not a colour this product
+     owns and is the one hue on screen that reads as "a browser widget somebody forgot to
+     style". `accent-color` inherits, so one declaration on the root re-paints all of them in
+     the suite's gold. It is not a substitute for `--accent` in hand-drawn chrome; it is the
+     one property that reaches inside a native control's shadow tree. */
+  accent-color: var(--gold);
 }
 
 /* V06-R1 (D-074): the app is ONE ROOM, exactly the size of the window. The document does
@@ -147,7 +154,12 @@ body {
   min-width: 0;
 }
 .app__header h1 {
-  font-size: 1rem;
+  /* 20 px (V06-G3, D-092). R1 shrank the wordmark to 16 px to buy room on the strip, which
+     is the wrong thing to sell: it is the product's name, it is the leftmost thing on the
+     screen, and at 1rem beside a 0.875rem button label it reads as a caption rather than as
+     the app. The 1024 case it was shrunk for is answered properly by D-092 ⑦ — a stated
+     order of what the row gives up first — so the name can be a name again. */
+  font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -173,7 +185,14 @@ body {
    off a disclosure: the strip is 44 px in every phase and this is the part of it whose
    contents change the most. */
 .strip__sources {
-  flex: 1 1 auto;
+  /* Grows into the middle of the strip, and is the row's absorber once the project field has
+     hit its floor (V06-G3, D-092 ⑦). A shrink factor of 200 against the receipt's 20 says
+     which of the two gives way: the cluster's contents are standing facts about the run that
+     the operator has already read, and the receipt is the one piece of NEWS on the row —
+     news the operator is looking at because they pressed the button that made it, one second
+     ago. It gives way down to its own floor (below) and no further; the receipt then absorbs
+     the rest and ellipsises with its whole self on a `title`. */
+  flex: 1 200 auto;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -207,6 +226,17 @@ body {
    under the project-name field. Shrinking last is the same priority that also has an
    answer for the case where there is genuinely not enough room for anybody. */
 .strip__sources .popover--sources { flex: 0 200 auto; }
+/* …down to a floor, since V06-G3 (D-092 ⑦). R3 argued against one here — «a floor does not
+   create room, it makes the cluster overflow» — and that was true while the ROW had no stated
+   order and the cluster was the only thing giving way. It is not true any more: the project
+   field now absorbs first and furthest (`flex: 0 1000 auto`, floor 90 px), so there is room to
+   floor. And the thing being floored is not a label. This `<summary>` is the control that
+   opens «Kilder», the app's only index of a card dump by name, and at 1024 in the exported
+   phase it was squeezed to zero — the one affordance on the strip with something hidden behind
+   it, and the first to vanish. 4.5rem is «60 filer» with a
+   character to spare: the count survives, which is the half of the sentence that is a number
+   rather than a word. */
+.strip__sources .popover--sources { min-width: 4.5rem; }
 /* The floor is the chip's own padding, not zero: `.chip` is `4px 12px` and a border, so a
    `<summary>` cannot draw itself narrower than 26 px however hard it is squeezed — and a
    `<details>` allowed to shrink to 8 px around a 26 px child is a chip hanging out of its
@@ -265,6 +295,62 @@ body {
   white-space: normal;
   cursor: default;
 }
+/* …and everything IN the panel keeps its own height, so the PANEL is what scrolls (V06-G3,
+   D-092 ①).
+   This one declaration is the whole of the worst finding in the room. The panel is a flex
+   COLUMN with `overflow: auto`, and a flex item's default is `flex-shrink: 1` — so when the
+   content exceeded `max-height: 60vh`, the browser did the thing a flex column does before it
+   scrolls anything: it squeezed the children. `.device-group` carries `overflow: hidden` of
+   its own, which sets its automatic minimum size to zero, so there was nothing to stop it:
+   each section crushed itself and clipped its own rows away. On a 60-file drop ten rows were
+   reachable and fifty were not — and because the content had been squeezed to exactly the
+   box's height, `scrollHeight === clientHeight`, so no scrollbar ever appeared to say that
+   fifty files were missing. A list that silently omits five sixths of what it is a list OF is
+   worse than no list, and «Kilder» is the app's only index of a card dump by name.
+   `flex: 0 0 auto` says the thing that was always meant: these sections are their content's
+   height, and the overflow belongs to the panel. Same fix, same reason, for the problems
+   popover's shelf and the slot's removed/skipped lists — they are all one shape (D-078). */
+.popover__panel > * { flex: 0 0 auto; }
+/* …and the panel SAYS it scrolls. macOS draws overlay scrollbars, which appear while a scroll
+   is in progress and are invisible at rest — so a panel holding sixty files looked exactly
+   like a panel holding fourteen, right up until the operator happened to try. Styling the
+   scrollbar at all opts this element out of the overlay behaviour; it is drawn in the same
+   two tokens the room's other quiet chrome uses, and it is the affordance that says "there
+   is more of this". */
+/* …and the panel says so at its own edge, whatever the platform does about scrollbars.
+   macOS draws OVERLAY scrollbars: present while a scroll is in progress, invisible at rest, so
+   a panel holding sixty files looked exactly like one holding fourteen right up until the
+   operator happened to try. Both standard routes were measured and neither reserves anything
+   here — `scrollbar-width: thin` + `scrollbar-color` leaves the overlay behaviour intact (and,
+   where both are specified, suppresses the `::-webkit-` rules below entirely), and the panel's
+   `clientWidth` was unchanged by either.
+   So the affordance is drawn by the panel itself: the classic four-layer scroll shadow. Two
+   `local` cover layers scroll WITH the content and two `scroll` shadow layers stay pinned to
+   the box, so each shadow is hidden exactly when that edge is at the end of the content — a
+   soft dark line under the last visible row appears when, and only when, there is another row
+   under it. No script, no measurement, and it cannot disagree with the scroll position because
+   it IS the scroll position. `--surface` is repeated as a literal in the covers because a
+   gradient stop cannot be `transparent` without going through black on the way. */
+.popover__panel {
+  background-image:
+    linear-gradient(var(--surface), rgba(17, 24, 39, 0)),
+    linear-gradient(rgba(17, 24, 39, 0), var(--surface)),
+    linear-gradient(rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0)),
+    linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.85));
+  background-position: 0 0, 0 100%, 0 0, 0 100%;
+  background-size: 100% 18px, 100% 18px, 100% 12px, 100% 12px;
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+.popover__panel::-webkit-scrollbar { width: 11px; }
+.popover__panel::-webkit-scrollbar-track { background: transparent; }
+.popover__panel::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+.popover__panel::-webkit-scrollbar-thumb:hover { background: var(--text3); background-clip: content-box; }
 /* Anchored to the bottom slot, so it grows upwards into the room instead of off-screen. */
 .popover--up .popover__panel { top: auto; bottom: calc(100% + 6px); }
 /* Anchored to the right edge, so a panel on a control near the window edge stays inside it. */
@@ -273,6 +359,14 @@ body {
 /* The summary line is a `<summary>` now, and a `<summary>` is `display: list-item` by
    default — which ignores the ellipsis rules the line has always had. */
 .popover--sources > summary.strip__summary { display: block; }
+/* …and a CHIP summary is an `inline-flex`, which shrink-to-fits its own text and therefore
+   ignored the width its `<details>` had been squeezed to entirely (V06-G3, D-092 ⑦). At 1024
+   the `<details>` were 32 px and the chips inside them were drawn 107 px and 83 px wide,
+   straight across each other and across the export receipt beside them — every box in its
+   place and the ink all over the row. `flex` (block-level) makes the summary take the width
+   it is given, and `overflow: hidden` makes `.chip__text`'s ellipsis the thing that happens
+   at the edge rather than paint. */
+.popover > summary.chip { display: flex; max-width: 100%; overflow: hidden; }
 .popover--sources > summary:hover { color: var(--text); }
 
 /* Strip-sized controls. The page's own `.primary` is a 1rem call-to-action with 0.8rem of
@@ -288,12 +382,106 @@ body {
   padding: 0 12px;
   white-space: nowrap;
 }
-.app__header input[type="text"] {
-  width: 150px;
-  height: 30px;
-  min-width: 110px;
+/* Both strip verbs carry a glyph now (V06-G3, D-092), so both are rows rather than lines of
+   text. The gap is 6 px: enough that the mark and the word are two things, tight enough that
+   they are one control. */
+.app__header .primary,
+.app__header .secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
 }
-.app__header label { display: inline-flex; align-items: center; }
+.btnicon { flex-shrink: 0; }
+/* ── Who gives up room first, on the strip itself (V06-G3, D-092 ⑦) ──────────────────────
+   R3 stated the order INSIDE the sources cluster and left the row's own order to flex, which
+   resolved it by proportion — and at 1024 in the exported phase (wordmark, «Legg til»,
+   cluster, receipt, project field, «Vis i Finder», «Synk på nytt», «Eksporter», gear) that
+   meant the summary line, which is not a label but the CONTROL that opens the whole file
+   list, was squeezed to nothing. The one affordance on the row that hides something behind
+   it was the first to disappear.
+   Decided, against the name field, most-shrinkable first:
+     1. the PROJECT NAME field — factor 1000, floor 90 px. It is the only item on the row
+        whose content is the operator's own and therefore already known to them, it is not a
+        disclosure, and it gains a `placeholder` (App.tsx) so that at 90 px it still says what
+        it is instead of being an anonymous box.
+     2. the EXPORT RECEIPT — factor 400. A statement, ellipsising, whole self on `title`.
+     3. the SOURCES CLUSTER — factor 1, and a floor (below) that keeps «N filer» legible.
+     4. nothing else. The buttons and the gear are fixed: a control whose label is clipped is
+        a control the operator has to guess at, and these three are the app's whole verb set.
+   Inside the cluster, R3's own order still holds: the sentence absorbs before the chips do. */
+.app__header input[type="text"] { width: 100%; height: 30px; }
+/* The `<label>` is the flex item, not the `<input>` — the shrink rule has to be on the box
+   the row is sizing. Stated on the input, it did nothing at all: the label took the flex
+   default, was handed 30 px at 1024, and clipped the field it was supposed to be floored to. */
+.app__header label {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1000 auto;
+  width: 150px;
+  min-width: 90px;
+}
+/* The floor that makes the opener an opener. `.chip`-sized padding plus «60 filer» is about
+   5.5rem; below that the summary stops being a sentence AND stops being a target, and the
+   list behind it becomes unreachable — which on a card dump is the app's only index by name.
+   Given to the `<details>` rather than to the `<summary>`, so the box the strip is sizing is
+   the one that is floored. */
+/* …and the cluster reserves room for that floor plus the two chips beside it, so the summary
+   and the chips never have to fight each other for the same pixels: 4.5rem + 2 × (0.5rem gap +
+   2rem chip) = 9.5rem, which is the busiest the cluster ever gets (summary, problem chip,
+   warnings chip). NOT `min-content`, which was tried and is wrong here: a `<summary>`'s
+   min-content is its whole nowrap sentence — `min-width` floors it, it does not cap it — so
+   the cluster reserved the chips' full natural widths and pushed the row 180 px past the
+   window at 1024. */
+.strip__sources { min-width: 9.5rem; }
+
+/* ── The export receipt (V06-G3, D-092 ⑤) ────────────────────────────────────────────────
+   It worked, and this is what it is called. Green like the placed-clip vocabulary, quiet like
+   everything else on a 44 px line, and — unlike the three-line toast it replaces — costing the
+   timeline nothing at all. `title` carries the Resolve import instruction; `docs/KNOWN_LIMITATIONS.md`
+   carries it in full. */
+.strip__receipt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* Shrink 20, i.e. far more resistant than the cluster's 200 — see `.strip__sources`. There is
+     no explicit floor: the tick and the word are rigid, so the flex item's own automatic
+     minimum IS «✓ Eksportert», which is the shortest thing this element can say and still be
+     saying something. Everything past that is the filename, which ellipsises. */
+  flex: 0 20 auto;
+  min-width: 0;
+  height: 30px;
+  overflow: hidden;
+  padding: 0 8px;
+  background: var(--green-bg);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: var(--green);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s;
+}
+/* It is also the control that opens the file — see App.tsx. A receipt you can press is one
+   object; a receipt beside a button that names the same file twice is two, and at 1024 the
+   row measurably had room for one. */
+.strip__receipt:hover { background: rgba(34, 197, 94, 0.18); border-color: var(--green); }
+.strip__receipt .glyph,
+.strip__receipt-word { flex: 0 0 auto; }
+.strip__receipt-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* The ellipsis eats from the LEFT, because the end of a filename is the half worth keeping:
+     «…este 2026-08-23.fcpxml» is the answer to "what did I just make", and «Gudst…» is not.
+     An RTL paragraph direction around one left-to-right run keeps the characters in order and
+     moves the overflow to the start. Two things it costs, both handled: `unicode-bidi:
+     plaintext` undoes it entirely (it resolves the direction from the first strong character,
+     which is Latin), and any NEUTRAL character at the edges of the run — the «·» separator
+     lived here first — is reordered to the far end of the line. The separator therefore
+     belongs to the word span, which is plain LTR. */
+  direction: rtl;
+  text-align: left;
+}
 
 /* ── The stage: everything between the band and the slot ─────────────────────────────── */
 
@@ -472,18 +660,26 @@ body {
    that has given way is a chip drawn OVER whatever is next to it — at 1024 with a stale
    notice also in the row, «1 stillbilde ble hoppet over» covered the first four words of
    «Kildene er endret siden forrige synkronisering». */
-.slot__chips > .popover,
-.slot__chips > .slot__auto { flex: 0 1 auto; min-width: 2rem; }
+.slot__chips > .popover { flex: 0 1 auto; min-width: 2rem; }
+/* The auto-reference promise is two words since D-092, so it is rigid for the same reason the
+   demoted meta line is: there is nothing left in it to ellipsise away. */
+.slot__chips > .slot__auto { flex: 0 0 auto; }
 .slot__chips .popover > summary.chip { min-width: 0; }
 .slot__chips .popover > summary:hover .chip,
 .slot__chips .popover > summary.chip:hover { border-color: var(--accent-border); color: var(--text); }
-/* The promise, not a chip: it is a sentence the app is keeping, not a thing to open. */
+/* The promise, not a chip: it is a sentence the app is keeping, not a thing to open — and
+   since V06-G3 (D-092) a glyph and two words rather than the whole sentence, which is on its
+   `title`. */
 .slot__auto {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   white-space: nowrap;
 }
+.slot__auto .glyph,
+.result__meta .glyph { flex-shrink: 0; opacity: 0.8; }
+.slot__auto-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 .muted  { color: var(--text2); font-size: 0.875rem; }
 .subtle { color: var(--text3); font-size: 0.8125rem; }
@@ -545,6 +741,21 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border-radius: var(--rxs);
 }
 .iconbtn:hover:not(:disabled) { color: var(--text); background: var(--surface2); }
+/* The gear, as a tile (V06-G3, D-092). A bare glyph at the end of a row of bordered controls
+   reads as a decoration rather than as a button — it is the one thing on the strip that opens
+   a whole other surface, and it had the least drawn affordance of anything there. 28×28 is a
+   square that matches the 30 px controls beside it without competing with them. */
+.iconbtn--tile {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+}
+.iconbtn--tile:hover:not(:disabled) { background: var(--surface3); border-color: var(--accent-border); }
 
 /* ── Drop zone ──────────────────────────────────────────────────── */
 
@@ -844,6 +1055,14 @@ select:hover, input:hover { border-color: var(--accent-border); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* …and the demoted pre-sync form (V06-G3, D-092, slot demotions): a glyph and one word, which
+   is short enough to be RIGID. That is the whole point of demoting it. Left shrinkable it
+   ellipsised to «Provi…», which is a footnote that has lost the only word it had — and it did
+   so while taking room from the off-session warning beside it, the one line in this row a
+   person may actually want to act on. The gap is the glyph's own, not the row's 1rem: a mark
+   and the word it marks are one thing. */
+.result__meta--short { flex: 0 0 auto; gap: 5px; }
+.result__meta--short > span { overflow: visible; }
 
 /* Every timeline row is the same two-column grid, so the gutter, the ruler and
    the playhead overlay all line up on one shared edge without measuring anything. */
@@ -1630,7 +1849,33 @@ select:hover, input:hover { border-color: var(--accent-border); }
   background: none;
 }
 
-.preview__empty { margin: auto; text-align: center; }
+/* ── The column's own name, and the state where nothing is marked (V06-G3, D-092 ⑥) ──────
+   A section label rather than a heading: it names the column the operator is looking at, in
+   the app's quietest text colour, and it is there whether or not there is a clip in it — so
+   the top of the column is the same line in both states.
+   `letter-spacing` and the uppercase are the only place in this app that treats a word as a
+   label rather than as a sentence, which is exactly what makes it read as chrome. */
+.preview__label {
+  flex: 0 0 auto;
+  color: var(--text3);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+/* The empty state is the filled one with the facts taken out: same label above it, same frame
+   box, then the sentence and one line about what will be there. Top-aligned, not centred —
+   `margin: auto` put the sentence in the middle of 700 px of nothing AND meant the column
+   re-laid itself out the instant a clip was marked, in a room whose whole promise is that it
+   does not. */
+.preview__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+.preview__emptyline { color: var(--text2); font-size: 0.875rem; }
+.preview__emptyhint { line-height: 1.45; }
 
 /* The still. A fixed box so the two columns beside it never shift sideways between a
    letterboxed 4:3 frame, a 16:9 one and «ingen bilde». */
@@ -1647,6 +1892,13 @@ select:hover, input:hover { border-color: var(--accent-border); }
   border: 1px solid var(--border);
   border-radius: var(--rsm);
   overflow: hidden;
+}
+/* …and the same box with nothing in it yet. Dashed, because a solid frame filled with the
+   page background reads as a picture that failed to load, and nothing has failed here. */
+.preview__frame--empty {
+  border-style: dashed;
+  border-color: var(--border2);
+  background: none;
 }
 .preview__canvas { display: block; }
 /* Loading and "no picture" are the same calm weight: neither is a failure, and one of them

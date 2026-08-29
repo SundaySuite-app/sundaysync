@@ -24,6 +24,43 @@
   som gulv når det er mange av dem, opp til 90 når det er få. Tre enheter: 81 % tomt → 58 %.
   Seks enheter: 62 % → 15 %. Et bryllup med seksten enheter fyller flata som før (D-091).
 
+## Uutgitt
+
+Etter en selvkritisk gjennomgang av «Ett rom» med friske øyne (D-092):
+
+- **«Kilder» viser alle filene igjen.** Med mer enn en skjermhøyde i lista klemte panelet
+  seksjonene sine sammen i stedet for å la seg rulle — på en mappe med 60 filer var 26 rader
+  nåbare og 34 var det ikke, uten så mye som en rullefelt-strek som sa fra. Lista er appens
+  eneste alfabetiske register over et kortdump, og på fire hundre klipp er det den eneste
+  måten å finne én fil på navn. Nå ruller panelet, og en myk skygge langs nedre kant sier at
+  det er mer under.
+- **Kvitteringa etter en eksport dekker ikke lenger tidslinja.** Den lå som en tre linjers
+  boble over klippene i det sekundet du snudde deg for å se på dem. Nå står det én linje i
+  topplinja — «✓ Eksportert · navn.fcpxml» — og du trykker på den for å finne fila i Finder.
+  Resolve-instruksjonen ligger på hover, og i sin helhet i `docs/KNOWN_LIMITATIONS.md`.
+- **Tidslinjalen er lesbar på en hel opptaksdag.** Over 18 timer lå seksten av atten
+  klokkeslett oppå hverandre. Trinnene går nå opp til tolv timer, og hvert trinn velges etter
+  hvor bredt tallet faktisk er — ikke etter en fast pikselavstand.
+- **…og før synken viser den klokka fra dagen du filmet.** Klippene ligger etter filenes egne
+  tidsstempler, så nullpunktet er et virkelig øyeblikk: linjalen sier «14:30» i stedet for
+  «6:30:00» talt fra et nullpunkt appen fant på. Etter synken, og når ingen filer har brukbar
+  tid, er den forløpt tid som før.
+- **Inspektørkolonna er ikke lenger tom.** Den sa én grå setning midt i sju hundre piksler
+  ingenting. Nå har den samme form som når et klipp er markert — etikett, den samme bilderamma
+  (stiplet), setninga, og én linje om hva som kommer — så ingenting flytter seg når du markerer.
+- **Topplinja har en bestemt rekkefølge på hva den gir slipp på først.** Ved 1024 px etter en
+  eksport ble «Kilder»-åpneren klemt til null: den ene knappen på rada som skjuler noe bak seg
+  forsvant først. Nå krymper prosjektnavn-feltet først (og har fått en ledetekst så det ikke
+  blir en anonym boks), så kildesammendraget — som alltid beholder «N filer» — og kvitteringa
+  sist.
+- **Sporet nederst roper ikke fire ting samtidig.** Advarselen om filer tidsstemplet utenfor
+  økta er den ene som er verdt å reagere på, og den er den som får plassen; forklaringa av
+  hva posisjonene er, og løftet om automatisk referanse, er nå et ⓘ og ett–to ord med hele
+  setninga på hover.
+- **Småting fra det godkjente lerretet:** ikoner på «Synkroniser» og «Eksporter», tannhjulet
+  som en egen flate, ordmerket tilbake på 20 px, og avkrysningsbokser i suitens gull i stedet
+  for Chromes blå.
+
 ## v0.6.0-beta.3
 
 - **Klippene stokker seg, reiser og spretter på plass — og blir grønne i det de lander.** Når

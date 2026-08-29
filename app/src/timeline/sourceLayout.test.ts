@@ -553,3 +553,76 @@ describe("a device with EVERYTHING unplaced and a long total (R2)", () => {
     expect(contentBounds(layout.tracks.flatMap((t) => t.spans)).spanMs).toBe(4500_000);
   });
 });
+
+// ── The origin, as an absolute moment (V06-G3, D-092 ⑧) ───────────────────────────────────
+//
+// `sourceSpans` has always subtracted the earliest placed recording time from every span; what
+// is new is that it SAYS what that number was, so the ruler can print the day's own clock over
+// the boxes instead of an elapsed count from a zero the app chose. Returned rather than
+// recomputed upstream, because the ruler's labels and the boxes' positions are the same claim
+// and two derivations of it are two things that can disagree.
+describe("the layout's origin epoch", () => {
+  it("is the earliest placed recording time, and is where span zero sits", () => {
+    const layout = sourceSpans(
+      manifest(
+        [device("fuji")],
+        [
+          file({
+            file: "/FUJI/B.MOV",
+            device: "fuji",
+            creation_time: "2026-07-25T11:00:00Z",
+            duration_seconds: 600,
+          }),
+          file({
+            file: "/FUJI/A.MOV",
+            device: "fuji",
+            creation_time: "2026-07-25T10:00:00Z",
+            duration_seconds: 600,
+          }),
+        ],
+      ),
+      {},
+    );
+    expect(layout.originMs).toBe(Date.parse("2026-07-25T10:00:00Z"));
+    // …and it really is t=0: the file that supplied it starts there.
+    expect(spansOf(layout).get("/FUJI/A.MOV")?.startMs).toBe(0);
+  });
+
+  it("is null when the ladder timed nothing — zero is an order, not a moment", () => {
+    const layout = sourceSpans(
+      manifest(
+        [device("johnny")],
+        [
+          file({ file: "/JOHNNY/MUSIC_01.WAV", device: "johnny", duration_seconds: 300 }),
+          file({ file: "/JOHNNY/MUSIC_02.WAV", device: "johnny", duration_seconds: 300 }),
+        ],
+      ),
+      {},
+    );
+    expect(layout.originMs).toBeNull();
+  });
+
+  it("moves when the file that anchored it is taken out of the drop", () => {
+    // D-062's removal is applied by the caller (it filters the manifest), and the origin has
+    // to follow — a lens-cap take with the earliest stamp anchoring a drop it is no longer
+    // part of is the same bug in the ruler that it was in the boxes.
+    const early = file({
+      file: "/FUJI/A.MOV",
+      device: "fuji",
+      creation_time: "2026-07-25T10:00:00Z",
+      duration_seconds: 600,
+    });
+    const late = file({
+      file: "/FUJI/B.MOV",
+      device: "fuji",
+      creation_time: "2026-07-25T11:00:00Z",
+      duration_seconds: 600,
+    });
+    expect(sourceSpans(manifest([device("fuji")], [early, late]), {}).originMs).toBe(
+      Date.parse("2026-07-25T10:00:00Z"),
+    );
+    expect(sourceSpans(manifest([device("fuji")], [late]), {}).originMs).toBe(
+      Date.parse("2026-07-25T11:00:00Z"),
+    );
+  });
+});

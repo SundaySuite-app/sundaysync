@@ -71,6 +71,18 @@ export interface SourceLayout {
   outsideWindowDays: number[];
   /** Which rung of the ladder placed each file (D-067) — what the clip marking reads. */
   timeSource: Map<string, TimeSource>;
+  /**
+   * The absolute epoch of span 0 — the earliest *placed* recording time in the drop, in ms
+   * since the Unix epoch. `null` when the ladder timed nothing, which is the case where the
+   * spans are a filename ORDER and zero is not a moment at all (D-068).
+   *
+   * Returned rather than recomputed by the reader (V06-G3, D-092 ⑧): it is the number this
+   * function already subtracts from every span, and the ruler's wall-clock labels are the same
+   * claim as the boxes' positions. A second derivation of it upstream would be a second place
+   * that can disagree about what t=0 IS — the seam that puts a clip at one time and the number
+   * above it at another.
+   */
+  originMs: number | null;
 }
 
 /**
@@ -164,6 +176,7 @@ export function sourceSpans(
     outsideWindow,
     outsideWindowDays: [...outsideDays].sort((a, b) => a - b),
     timeSource,
+    originMs: haveOrigin ? origin : null,
   };
 }
 

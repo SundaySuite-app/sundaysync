@@ -50,6 +50,10 @@ export const nb = {
   makeReference: "Bruk som referanse",
   isReference: "Referanse",
   autoReference: "Referanse velges automatisk (lengste opptak)",
+  /** V06-G3 (D-092, nedtoning av sporet): fire setninger kjempet om 38 px, og denne var den
+   *  minst hastende av dem — et løfte appen holder, ikke noe operatøren skal gjøre. Den korte
+   *  formen står i sporet med et ⓘ-glyf foran; hele setningen over ligger på `title`. */
+  autoReferenceShort: "Referanse: auto",
 
   // Fjerne enkeltfiler fra kjøringen (v0.4, D-062). En bortvalgt fil er ikke en feil —
   // den er bare ikke med, og veien tilbake står rett under lista.
@@ -123,6 +127,13 @@ export const nb = {
   // ligger på null (V04-U5).
   presyncMetaNoClock:
     "Ingen brukbare tidsstempler — klippene ligger i filnavn-rekkefølge til synken plasserer dem",
+  /** …og de to korte formene sporet faktisk viser (V06-G3, D-092). Forklaringen er sann og
+   *  verdt å ha, men den er en FOTNOTE: den sier hva tallene på skjermen er, ikke at noe har
+   *  skjedd. Ved siden av en advarsel om filer utenfor økta, en legende med fire tall og et
+   *  referanseløfte leste den som en fjerde like høylytt beskjed. Nå er den to ord bak et
+   *  ⓘ-glyf, med hele setningen på `title`. */
+  presyncMetaShort: "Foreløpig",
+  presyncMetaNoClockShort: "Filnavn-rekkefølge",
   presyncStart: "starter",
 
   // Opptakstidspunktet er en stige, ikke et ja/nei (V05-W3, D-067). Klippet sier hvilket
@@ -196,6 +207,12 @@ export const nb = {
   // 3 px klipp, og neste klikk hadde landet et helt annet sted.
   previewAria: "Forhåndsvisning av klipp",
   previewEmpty: "Velg et klipp for å se det.",
+  /** V06-G3 (D-092 ⑥): kolonnen er 300 px bred og full høyde, og før et klipp er markert sa
+   *  den én setning midt i tomrommet. Nå har den samme form som når den er full — en liten
+   *  seksjonsetikett, den samme bilderamma (stiplet), setninga, og én linje som sier hva som
+   *  kommer. Etiketten er navnet på kolonnen, ikke en overskrift over noe. */
+  previewSection: "Inspektør",
+  previewEmptyHint: "Bilde, filfakta og synkedetaljer for klippet du markerer.",
   previewLoading: "Henter bilde …",
   // D-069: .WAV og .HEIC gir null byte tilbake, og det gjelder ~32 av eierens 386 filer.
   // Det er en helt vanlig tilstand, ikke en feil, og teksten er rolig deretter.
@@ -278,6 +295,10 @@ export const nb = {
   exportHint:
     "Dra mediefilene inn i Resolves mediemappe (Media Pool) FØRST. Bruk deretter Fil → Importer → Tidslinje for å hente fila — da matcher Resolve mot de allerede importerte klippene, noe som er nødvendig for store filer.",
   exported: (n: number) => (n === 1 ? "Eksporterte 1 klipp" : `Eksporterte ${n} klipp`),
+  /** Kvitteringa på stripa (V06-G3, D-092 ⑤). Ett ord, fordi det som er verdt å lese er
+   *  FILNAVNET ved siden av det: «hva heter det du nettopp lagde». Resolve-instruksjonen som
+   *  lå i samme boble ligger på `title` og i `docs/KNOWN_LIMITATIONS.md`. */
+  exportedShort: "Eksportert",
   projectName: "Prosjektnavn",
   revealInFinder: "Vis i Finder",
 
@@ -467,6 +488,7 @@ export const en: Strings = {
   makeReference: "Use as reference",
   isReference: "Reference",
   autoReference: "Reference is chosen automatically (longest recording)",
+  autoReferenceShort: "Reference: auto",
 
   // Per-file removal (v0.4, D-062) — see the nb comment above.
   removeFile: "Remove file",
@@ -524,6 +546,9 @@ export const en: Strings = {
   presyncMeta: "Provisional positions from the files' own timestamps",
   presyncMetaNoClock:
     "No usable timestamps — the clips lie in filename order until the sync places them",
+  // V06-G3 (D-092) — see the nb comment above.
+  presyncMetaShort: "Provisional",
+  presyncMetaNoClockShort: "Filename order",
   presyncStart: "starts at",
 
   // V05-W3 (D-067/D-068/D-071) — see the nb comments above.
@@ -581,6 +606,9 @@ export const en: Strings = {
   // The preview panel (V05-W4b, D-070) — see the nb comments above.
   previewAria: "Clip preview",
   previewEmpty: "Select a clip to see it.",
+  // V06-G3 (D-092 ⑥) — see the nb comment above.
+  previewSection: "Inspector",
+  previewEmptyHint: "Picture, file facts and sync detail for whichever clip you mark.",
   previewLoading: "Fetching picture …",
   previewNoImage: "No picture",
   previewFrameAlt: (name: string) => `Still frame from ${name}`,
@@ -649,6 +677,8 @@ export const en: Strings = {
   exportHint:
     "Drag the media files into Resolve's Media Pool FIRST. Then use File → Import → Timeline to bring in the file — Resolve then matches against the already-imported clips, which is required for large files.",
   exported: (n: number) => (n === 1 ? "Exported 1 clip" : `Exported ${n} clips`),
+  // V06-G3 (D-092 ⑤) — see the nb comment above.
+  exportedShort: "Exported",
   projectName: "Project name",
   revealInFinder: "Reveal in Finder",
 

@@ -174,7 +174,8 @@ test.describe("the reference star", () => {
     page,
   }) => {
     await reachSources(page);
-    const auto = page.locator(".slot").getByText(en.autoReference);
+    // D-092: the slot carries the short form; the full sentence is its `title`.
+    const auto = page.locator(".slot").getByText(en.autoReferenceShort);
     await expect(auto).toBeVisible();
 
     await mark(page, WAV, "ZOOM0001.WAV");
@@ -198,13 +199,13 @@ test.describe("the reference star", () => {
 
     await mark(page, WAV, "ZOOM0001.WAV");
     await inspector(page).getByLabel(`${en.makeReference}: ZOOM0001.WAV`).click();
-    await expect(page.locator(".slot").getByText(en.autoReference)).toBeHidden();
+    await expect(page.locator(".slot").getByText(en.autoReferenceShort)).toBeHidden();
 
     await inspector(page).getByLabel(`${en.removeFile}: ZOOM0001.WAV`).click();
 
     // The star went with the file. Anything else would have the run naming a reference the
     // engine was told to skip — and the engine picking its own instead, silently.
-    await expect(page.locator(".slot").getByText(en.autoReference)).toBeVisible();
+    await expect(page.locator(".slot").getByText(en.autoReferenceShort)).toBeVisible();
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForResult(page);
     const args = await recorded(page, "__E2E_SYNC_ARGS__");

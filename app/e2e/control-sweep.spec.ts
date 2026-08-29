@@ -910,8 +910,12 @@ test.describe("sources: the inspector's three decisions", () => {
     page,
   }) => {
     await reachSources(page);
+    // V06-G3 (D-092): the promise is a glyph and two words in the slot now, with the whole
+    // sentence on its `title`. Both halves are asserted — a short form whose long form had
+    // quietly gone would be a claim the app stopped making.
     const auto = page.locator(".slot__auto");
-    await expect(auto).toHaveText(en.autoReference);
+    await expect(auto).toHaveText(en.autoReferenceShort);
+    await expect(auto).toHaveAttribute("title", en.autoReference);
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
     const star = inspector(page).getByLabel(`${en.makeReference}: C0001.MP4`);
@@ -926,7 +930,7 @@ test.describe("sources: the inspector's three decisions", () => {
     await star.click();
     await expect(star).toHaveAttribute("aria-pressed", "false");
     await expect(page.locator(".badge--ref")).toHaveCount(0);
-    await expect(auto).toHaveText(en.autoReference);
+    await expect(auto).toHaveText(en.autoReferenceShort);
   });
 
   test("the device select regroups the clip onto the other device's track", async ({ page }) => {
@@ -1095,9 +1099,17 @@ test.describe("result: the strip", () => {
     expect(args.inputs).toEqual([SHOOT]);
     expect(args.excludeFiles).toBeNull();
 
-    const banner = page.locator(".banner");
-    await expect(banner).toHaveClass(/banner--ok/);
-    await expect(banner).toContainText(en.exported(3));
+    // V06-G3 (D-092 ⑤): the receipt is a line in the strip, not a toast over the timeline.
+    // It names the FILE, which is what the operator will look for in Resolve; the count and
+    // the Resolve import instruction are the `title` and `docs/KNOWN_LIMITATIONS.md` respectively.
+    const receipt = page.locator(".app__header .strip__receipt");
+    await expect(receipt).toContainText(en.exportedShort);
+    // The name of the file that was actually WRITTEN — i.e. the path the save dialog came
+    // back with, not the project name that seeded its default. The two are the same on the
+    // happy path and are not the same when the operator renames the file in the dialog, and
+    // it is the written one the operator will go looking for in Resolve.
+    await expect(receipt).toContainText("SundaySync.fcpxml");
+    await expect(page.locator(".toasts .banner")).toHaveCount(0);
 
     await page.getByRole("button", { name: en.revealInFinder }).click();
     expect((await onlyCall(page, "plugin:opener|reveal_item_in_dir")).paths).toEqual([FCPXML]);
@@ -1686,14 +1698,18 @@ test.describe("banners and popovers", () => {
   test("a banner floats over the stage — the timeline does not move under it", async ({
     page,
   }) => {
+    // Driven by a FAILED export since V06-G3 (D-092 ⑤): a successful one no longer says
+    // anything in the toast layer at all — its receipt is a line in the strip. What the layer
+    // still carries is what the app has to SAY when something went wrong, and the claim being
+    // measured here is about the layer, not about which message is in it.
     await reachResult(page, {
       ...spy("plugin:dialog|save", JSON.stringify(FCPXML)),
-      export_timeline: 1,
+      export_timeline: fn(`() => { throw "io error: /Users/e2e/out is read-only"; }`),
     });
     const before = (await page.locator(".timeline__frame").boundingBox())!;
 
     await page.getByRole("button", { name: en.exportButton }).click();
-    await expect(page.locator(".banner--ok")).toBeVisible();
+    await expect(page.locator(".banner--error")).toBeVisible();
 
     const during = (await page.locator(".timeline__frame").boundingBox())!;
     expect(during.y).toBeCloseTo(before.y, 0);

@@ -61,8 +61,10 @@ test.describe("drop, scan, sources", () => {
     // would blow up loudly (harness.ts's "no Tauri backend" rejection) if the app synced on
     // its own.
     await expect(page.getByRole("button", { name: en.syncButton })).toBeVisible();
-    // D-077 #7: the auto-reference promise is a quiet line in the bottom slot now.
-    await expect(page.locator(".slot").getByText(en.autoReference)).toBeVisible();
+    // D-077 #7: the auto-reference promise is a quiet line in the bottom slot now — and since
+    // D-092 a glyph and two words, with the sentence itself on the `title`.
+    await expect(page.locator(".slot__auto")).toHaveText(en.autoReferenceShort);
+    await expect(page.locator(".slot__auto")).toHaveAttribute("title", en.autoReference);
 
     await openSources(page);
 
@@ -277,6 +279,159 @@ test.describe("drop, scan, sources", () => {
     ).toHaveCount(0);
     // No result exists yet, so there is nothing to mark stale — no such notice appears.
     await expect(page.getByText(en.staleResult)).toBeHidden();
+  });
+});
+
+// ── Reaching the files (V06-G3, D-092 ①) ───────────────────────────────────────────────
+//
+// The «Kilder» panel is the app's only alphabetical index of a drop, and on the owner's card
+// dumps that index is the whole reason the popover survived R2a at all. It was unusable.
+//
+// `.popover__panel` is a flex COLUMN with `overflow: auto`, and its `<section
+// class="device-group">` children took the flex default — `flex-shrink: 1` — while carrying
+// `overflow: hidden` of their own, which sets their automatic minimum size to zero. So a panel
+// with more content than its `max-height: 60vh` did not scroll: every section CRUSHED itself to
+// fit instead, clipping its own rows away. On a 60-file drop ten rows were reachable and fifty
+// were not, and because the content had been squeezed to exactly the panel's height,
+// `scrollHeight === clientHeight` — so no scrollbar appeared to say anything was missing.
+//
+// Per-spec fixture rather than a harness one: a 60-file manifest is this file's business.
+const BIG_DEVICES = ["cam-a", "cam-b", "cam-c", "rec"] as const;
+
+/** A drop with more rows than any popover can show at once — six devices' worth of card. */
+function bigScanManifest(perDevice = 15): Record<string, unknown> {
+  const files: Record<string, unknown>[] = [];
+  for (const device of BIG_DEVICES) {
+    for (let i = 1; i <= perDevice; i++) {
+      files.push({
+        file: `/Users/e2e/shoot/${device}/CLIP_${String(i).padStart(4, "0")}.MP4`,
+        device,
+        duration_seconds: 120 + i,
+        format_name: "mov,mp4",
+        audio: { codec: "aac", sample_rate: 48000, channels: 2 },
+        video: { codec: "h264", width: 1920, height: 1080, fps: "25/1" },
+        creation_time: null,
+      });
+    }
+  }
+  return {
+    schema: 1,
+    devices: BIG_DEVICES.map((id) => ({
+      id,
+      label: `Device ${id}`,
+      kind: id === "rec" ? "audio" : "video",
+      files: files.filter((f) => f.device === id).map((f) => f.file as string),
+    })),
+    files,
+    unsynced: [],
+  };
+}
+
+test.describe("«Kilder» reaches every file", () => {
+  async function reachBigDrop(page: Page) {
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: bigScanManifest(),
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    await expect(sources(page)).toBeVisible();
+    await openSources(page);
+  }
+
+  test("the panel scrolls instead of crushing its sections", async ({ page }) => {
+    await reachBigDrop(page);
+    const panel = sources(page).locator(".popover--sources .popover__panel");
+
+    // The content is genuinely taller than the box, and the box says so. This is the
+    // assertion that fails on main: the sections shrank until the two were equal.
+    const metrics = await panel.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }));
+    expect(
+      metrics.scrollHeight,
+      `panel scrollHeight ${metrics.scrollHeight} vs clientHeight ${metrics.clientHeight}`,
+    ).toBeGreaterThan(metrics.clientHeight);
+
+    // …and no section is drawn shorter than the rows it contains, which is the mechanism.
+    const crushed = await panel.evaluate((el) =>
+      Array.from(el.querySelectorAll<HTMLElement>(".device-group"))
+        .map((g) => ({ cls: g.className, clientHeight: g.clientHeight, scrollHeight: g.scrollHeight }))
+        .filter((g) => g.scrollHeight > g.clientHeight + 1),
+    );
+    expect(crushed, `crushed sections: ${JSON.stringify(crushed)}`).toEqual([]);
+  });
+
+  test("every one of 60 rows can be scrolled to", async ({ page }) => {
+    await reachBigDrop(page);
+    const panel = sources(page).locator(".popover--sources .popover__panel");
+    await expect(panel.locator(".filerow--pick")).toHaveCount(60);
+
+    // Walk the panel from top to bottom and record which rows ever had their box inside the
+    // panel's own visible box. A row the panel refuses to scroll to is a file the operator
+    // cannot find by name, which is the one errand this list exists for.
+    const reached = await panel.evaluate(async (el) => {
+      const seen = new Set<string>();
+      const rows = Array.from(el.querySelectorAll<HTMLElement>(".filerow--pick"));
+      const frame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
+      for (let top = 0; top <= el.scrollHeight; top += Math.max(1, el.clientHeight - 40)) {
+        el.scrollTop = top;
+        await frame();
+        const box = el.getBoundingClientRect();
+        for (const row of rows) {
+          const r = row.getBoundingClientRect();
+          // Keyed on the row's `title`, which is the file's full PATH: four devices carry
+          // the same fifteen basenames, so a set of visible text would top out at fifteen
+          // however well the panel scrolled.
+          if (r.top >= box.top - 1 && r.bottom <= box.bottom + 1 && r.height > 0) {
+            seen.add(row.getAttribute("title") ?? "");
+          }
+        }
+      }
+      return seen.size;
+    });
+    expect(reached).toBe(60);
+  });
+
+  test("the problems popover is scrollable rather than crushed too", async ({ page }) => {
+    // Same root cause, second surface (D-092 ①). Nothing in this panel may be squeezed out
+    // of existence: every refusal is a file the operator has to decide about.
+    const many = bigScanManifest(4);
+    await boot(page, {
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: {
+          ...many,
+          unsynced: Array.from({ length: 24 }, (_, i) => ({
+            file: `/Users/e2e/shoot/broken/BAD_${String(i).padStart(3, "0")}.MP4`,
+            reason: "decode_error",
+          })),
+        },
+      },
+      settings: SETTLED_SETTINGS,
+    });
+    await page.getByRole("button", { name: en.dropFolder }).click();
+    const problems = sources(page).locator(".popover--problems");
+    await problems.locator("> summary").click();
+    const panel = problems.locator(".popover__panel");
+    await expect(panel).toBeVisible();
+
+    const metrics = await panel.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      rows: el.querySelectorAll(".filerow--problem").length,
+      clipped: Array.from(el.querySelectorAll<HTMLElement>(".filerow--problem")).filter(
+        (r) => r.getBoundingClientRect().height < 8,
+      ).length,
+    }));
+    expect(metrics.rows).toBe(24);
+    expect(metrics.clipped).toBe(0);
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
   });
 });
 
