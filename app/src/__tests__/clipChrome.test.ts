@@ -32,7 +32,8 @@ describe("a clip with nothing to say", () => {
   });
 
   it("a 3 px sliver is a coloured tick, not a smear of text", () => {
-    // `MIN_CLIP_WIDTH_PX` (hop.ts) is deliberately untouched by any of this: the box stays,
+    // The hairline rule (`CLIP_DRAWING_MIN_PX`, hop.ts) is deliberately untouched by any of
+    // this and sits strictly below it — under 6 px there is no chrome row to ration. The box stays,
     // it just carries nothing.
     expect(clipChrome(3, "none")).toEqual({ name: "none", status: "none" });
   });

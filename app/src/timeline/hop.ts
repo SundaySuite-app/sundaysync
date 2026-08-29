@@ -16,19 +16,24 @@
  *     inline `left`. Same function, same view, so the number this module computes and the
  *     number the browser lays out at are the same number by construction, not by luck.
  *   - **y** is a sum of track heights above the clip plus its row inside its own track.
- *     `Track.tsx` sets each track's height to `max(1, rows.length) * LANE_HEIGHT_PX` and
- *     each lane's to `LANE_HEIGHT_PX`, so the stack is exactly determined by the row counts.
+ *     `Track.tsx` sets each track's height to `max(1, rows.length) * laneHeight` and each
+ *     lane's to `laneHeight`, so the stack is exactly determined by the row counts and the
+ *     one pitch — which since D-091 is a per-render VALUE (`laneHeightFor`) threaded from
+ *     `TimelineView` into `Track` and into `clipBoxes` alike, rather than a constant both
+ *     of them import.
  *
  * Measuring would also be *wrong* here, not merely slower: the whole sequence depends on
  * reading the OLD positions after React has already committed the NEW ones. A DOM read at
  * that point returns the new layout. The old one only exists as the previous render's data,
  * which is what this module takes.
  *
- * The pixel constants below are the single source of truth for the vertical geometry:
- * `TimelineView` imports `LANE_HEIGHT_PX` for the height it hands `Track`, and `Clip`
- * imports `MIN_CLIP_WIDTH_PX`. They are duplicated in `styles.css` — that is unavoidable,
- * a stylesheet cannot import — and the two are kept honest by the ghost boxes, which are
- * positioned from these numbers and sit right next to real clips positioned by the CSS.
+ * The pixel rules below are the single source of truth for a clip box's geometry, vertical
+ * and horizontal both: `TimelineView` calls `laneHeightFor` for the pitch it hands `Track`,
+ * and `Clip` calls `clipDrawing` for the width it writes into its style. Nothing is
+ * duplicated in `styles.css` any more — the padding that used to be there and that used to
+ * silently floor a 3 px clip at 12.8 px now lives on `.clip__chrome`, inside the box rather
+ * than around it (D-091) — and the numbers are kept honest by the ghost boxes, which are
+ * positioned from here and sit right next to real clips positioned by the component.
  *
  * React-free and DOM-free like its neighbours (`geometry.ts`, `laneLayout.ts`,
  * `viewport.ts`, `sourceLayout.ts`), so the arithmetic that is easy to get quietly wrong is
@@ -39,22 +44,56 @@ import { msToX, type TimelineView } from "./geometry";
 import type { ClipSpan } from "./laneLayout";
 
 /**
- * Height of one sub-track lane — the px `.track__lane` is drawn at.
+ * The floor for one sub-track lane — the px `.track__lane` is drawn at when the room is
+ * full.
  *
  * **40 since V06-R2b (D-083)**, up from 34. The gutter carries two lines now (identity, and
  * `count · length ·` the analysis dot), and two lines of 11–13 px type do not fit in 34.
  *
- * This constant is the ONLY place the row pitch is stated. `Track.tsx` sets both the track's
- * height (`max(1, rows) * laneHeight`) and each lane's height from it, `TimelineView` hands
- * it down, `clipBoxes` below sums the same number, and `useHop`'s ghosts are drawn from
- * `CLIP_HEIGHT_PX`, which derives from it. Nothing anywhere may state the pitch a second
- * time — in particular no `min-height` on the gutter or the lane: a lane the browser grew to
- * fit a taller gutter would still be summed here at this value, and every clip below the
- * first track would hop to a row it is not in. The stylesheet's own two mirrors
- * (`.lane__empty`'s `line-height`, and nothing else) are the unavoidable exceptions, and
- * they are cosmetic rather than load-bearing.
+ * **No longer THE pitch, since V06-G2 (D-091).** The review measured 45–79 % of the stage
+ * sitting empty below the last row on every drop it looked at, the 386-clip wedding
+ * included: 40 px is the right number for twenty rows in a laptop-sized frame and a waste of
+ * a room for three. The pitch is a per-render VALUE now — {@link laneHeightFor} — and this
+ * is its lower bound.
  */
-export const LANE_HEIGHT_PX = 40;
+export const LANE_MIN_PX = 40;
+
+/**
+ * …and its upper bound. A lane taller than this stops reading as a row of a timeline and
+ * starts reading as a panel: the clip's own label is one line of 11 px type wherever it sits
+ * in the box, so past ~90 px the extra pixels go entirely into empty wash above and below
+ * the waveform. Three devices in a tall window hit this and stop growing, which is correct —
+ * the answer to "too much room" is a lane that has taken all it can use, not a lane that
+ * takes all there is.
+ */
+export const LANE_MAX_PX = 90;
+
+/**
+ * The pitch for THIS render: as tall as the rows can be made without the stage having to
+ * scroll, inside {@link LANE_MIN_PX}…{@link LANE_MAX_PX}.
+ *
+ * **This function is the ONLY place the row pitch is decided (D-083, restated for D-091).**
+ * Its result is threaded, as one number, from `TimelineView` into BOTH consumers: `Track`
+ * writes it into the track's height (`max(1, rows) * lane`) and each lane's, and
+ * {@link clipBoxes} sums the same value for the hop's y-arithmetic. Nothing anywhere may
+ * state the pitch a second time — in particular no `min-height` on the gutter or the lane: a
+ * lane the browser grew to fit a taller gutter would still be summed here at the threaded
+ * value, and every clip below the first track would hop to a row it is not in. That is the
+ * failure D-083 wrote the constant for, and turning the constant into a value does not make
+ * it any less silent; it makes it *easier* to reach for a second opinion, which is why the
+ * number has exactly one producer and is passed rather than recomputed.
+ *
+ * `availablePx` is the lane column's own height (the scrolling stage, ruler excluded).
+ * Non-finite or non-positive — the frame has not been measured yet, which is the state of
+ * the very first commit — falls back to the floor, so an unmeasured room draws exactly what
+ * v0.6.0-beta.3 drew and then grows once the observer fires.
+ */
+export function laneHeightFor(rows: number, availablePx: number): number {
+  if (!Number.isFinite(availablePx) || availablePx <= 0) return LANE_MIN_PX;
+  if (!Number.isFinite(rows) || rows <= 0) return LANE_MIN_PX;
+  const fair = Math.floor(availablePx / rows);
+  return Math.min(LANE_MAX_PX, Math.max(LANE_MIN_PX, fair));
+}
 
 /** `.track`'s hairline (`.track + .track { border-top }`). Inside the box, since the sheet
  *  is `border-box` throughout — so it does not add to a track's height, it only pushes the
@@ -63,19 +102,38 @@ export const LANE_HEIGHT_PX = 40;
  *  ghosts are placed at. */
 const TRACK_BORDER_PX = 1;
 
-/** `.track__lane`'s own top hairline, inside its 40 px for the same reason. */
+/** `.track__lane`'s own top hairline, inside the lane's height for the same reason. */
 const LANE_BORDER_PX = 1;
 
 /** `.clip`'s `top`/`bottom` inset inside its lane. */
 const CLIP_INSET_PX = 3;
 
-/** What `.clip` therefore measures vertically — used to draw a fade ghost the same size as
- *  the clip it stands in for. */
-export const CLIP_HEIGHT_PX = LANE_HEIGHT_PX - LANE_BORDER_PX - 2 * CLIP_INSET_PX;
+/** What `.clip` therefore measures vertically, at a given pitch — used to draw a fade ghost
+ *  the same size as the clip it stands in for. Derived, exactly as `CLIP_HEIGHT_PX` was
+ *  before D-091 made the pitch a value: lane − 7. */
+export function clipHeightFor(laneHeightPx: number): number {
+  return laneHeightPx - LANE_BORDER_PX - 2 * CLIP_INSET_PX;
+}
 
-/** Narrower than this and the box is a tick mark, not a clip — but still there. `Clip.tsx`
- *  imports this so a ghost and its clip can never disagree about a sliver's width. */
-export const MIN_CLIP_WIDTH_PX = 3;
+/**
+ * Narrower than this, a clip has no room to be a DRAWING — no border and wash and waveform
+ * and label, just three or four pixels of chrome fighting each other — so it is drawn as a
+ * {@link HAIRLINE_WIDTH_PX} tick in the full state colour instead (D-091).
+ *
+ * The old rule floored every clip at 3 px and let the box keep its padding, which is what
+ * the V06 review measured going wrong: `.clip`'s `0 0.4rem` is 12.8 px on a `border-box`
+ * sheet, so a clip DECLARED 3 px wide was LAID OUT 12.8 px wide, and at fit zoom on the
+ * wedding 309 of 340 adjacent pairs overlapped — Playwright could aim at clip #3 and click
+ * clip #2. The padding moved to `.clip__chrome`, which a hairline does not render, so a
+ * hairline's box is exactly its declared width.
+ */
+export const CLIP_DRAWING_MIN_PX = 6;
+
+/** What a hairline measures. Two device-independent pixels: one is a rounding error away
+ *  from invisible on a fractional-DPR display, three is wide enough to start looking like a
+ *  clip that lost its label. `Clip.tsx` and `clipBoxes` both go through
+ *  {@link clipDrawing}, so a ghost and its clip can never disagree about a sliver. */
+export const HAIRLINE_WIDTH_PX = 2;
 
 /**
  * One device's drawn row, as far as this module is concerned: its clips, already packed
@@ -89,6 +147,64 @@ export interface HopTrack {
   rows: readonly (readonly ClipSpan[])[];
 }
 
+/** How one clip's box is drawn horizontally — the answer {@link clipDrawing} gives, and the
+ *  answer `Clip.tsx` renders. */
+export interface ClipDrawing {
+  /** Drawn width in CSS px. Never wider than the room before the next clip in the same
+   *  lane; never narrower than a hairline unless the room itself is. */
+  width: number;
+  /** There is no room for a drawing: no padding, no label, no waveform — a tick. */
+  hairline: boolean;
+}
+
+/**
+ * A clip's drawn width, and whether it is wide enough to be a drawing at all (D-091).
+ *
+ * Two inputs, and the second is the whole point. `spanPx` is what the clip's own duration
+ * asks for; `roomPx` is the distance from this clip's start to the NEXT clip's start in the
+ * same lane (`Infinity` for the last clip in a row). **The declared start is sacred and the
+ * width yields**: a clip is positioned by `msToX(startMs)` and that number is the app's
+ * claim about when the camera rolled, so the box may be clipped short of the truth but may
+ * never be moved off it, and may never be drawn across its neighbour's claim either.
+ *
+ * `stackClips` already guarantees `endMs <= next.startMs` inside a row, so in exact
+ * arithmetic `spanPx <= roomPx` and the clamp does nothing. What it is for is the two FLOORS
+ * that used to break that guarantee: the old 3 px minimum width, and — much worse, because
+ * nothing in the code said it — `.clip`'s 12.8 px of `border-box` padding, which laid a box
+ * out four times wider than the width written into its style attribute. At fit zoom on the
+ * wedding the two of them put 309 of 340 adjacent pairs on top of one another.
+ *
+ * A clip whose neighbour starts at the same pixel gets a width of 0. That is not a clip
+ * disappearing so much as it is two clips having asked for the same pixel: the box is still
+ * in the DOM, still named, still reachable by keyboard and still counted, and one notch of
+ * zoom gives it its pixel back. Drawing it anyway would put it on top of the neighbour,
+ * which is the bug.
+ */
+export function clipDrawing(spanPx: number, roomPx: number): ClipDrawing {
+  const room = Number.isFinite(roomPx) ? Math.max(0, roomPx) : Number.POSITIVE_INFINITY;
+  // A NaN span (geometry that has not settled) must not smuggle a width through a `Math.min`.
+  const natural = Number.isFinite(spanPx) && spanPx > 0 ? spanPx : 0;
+  const drawn = Math.min(natural, room);
+  // Below the threshold the box stops being a picture of a duration and becomes a MARK, so
+  // it is drawn at the mark's width rather than at four or five pixels of nothing. The snap
+  // from 6 px to 2 px on the way out is deliberate and is the honest reading: at five pixels
+  // a clip's width no longer tells the operator anything about how long it is, and a row of
+  // even ticks is countable where a row of ragged five-pixel stubs is not.
+  if (drawn < CLIP_DRAWING_MIN_PX) return { width: Math.min(HAIRLINE_WIDTH_PX, room), hairline: true };
+  return { width: drawn, hairline: false };
+}
+
+/** The room a clip has before the next one in its lane starts, in px — `Infinity` for the
+ *  last clip in a row. Exported so `Track`/`Clip` and `clipBoxes` compute it the one way. */
+export function roomBeforeNext(
+  span: ClipSpan,
+  next: ClipSpan | undefined,
+  pxPerMs: number,
+): number {
+  if (next === undefined) return Number.POSITIVE_INFINITY;
+  return (next.startMs - span.startMs) * pxPerMs;
+}
+
 /** Where one clip's box sits, in the same pixels `Clip.tsx` writes into `left`/`width`. */
 export interface ClipBox {
   /** Left edge, from `msToX` — may be negative or past the viewport; the caller clips. */
@@ -98,8 +214,10 @@ export interface ClipBox {
    *  layouts, so leaving it out costs nothing in a delta and spares this module a constant
    *  it would have to keep in step with `--tl-ruler-h`. */
   y: number;
-  /** Drawn width, floored at `MIN_CLIP_WIDTH_PX` exactly as the component floors it. */
+  /** Drawn width, from {@link clipDrawing} exactly as the component draws it. */
   width: number;
+  /** Drawn as a tick rather than as a drawing — see {@link clipDrawing}. */
+  hairline: boolean;
 }
 
 /** How far a clip has to be pushed back to start the hop where it used to be. */
@@ -121,24 +239,30 @@ export interface HopDelta {
 export function clipBoxes(
   tracks: readonly HopTrack[],
   view: TimelineView,
+  laneHeightPx: number,
 ): Map<string, ClipBox> {
   const boxes = new Map<string, ClipBox>();
   let trackTop = 0;
   for (const track of tracks) {
     for (let row = 0; row < track.rows.length; row++) {
       const y =
-        trackTop + TRACK_BORDER_PX + row * LANE_HEIGHT_PX + LANE_BORDER_PX + CLIP_INSET_PX;
-      for (const span of track.rows[row]) {
-        boxes.set(span.file, {
-          x: msToX(span.startMs, view),
-          y,
-          width: Math.max(MIN_CLIP_WIDTH_PX, (span.endMs - span.startMs) * view.pxPerMs),
-        });
+        trackTop + TRACK_BORDER_PX + row * laneHeightPx + LANE_BORDER_PX + CLIP_INSET_PX;
+      const spans = track.rows[row];
+      for (let i = 0; i < spans.length; i++) {
+        const span = spans[i];
+        // `stackClips` sorted the row by `startMs`, so the next entry IS the next clip in
+        // time — the same neighbour `Track` hands `Clip`, so the ghost drawn from here and
+        // the box drawn by the component are one number.
+        const draw = clipDrawing(
+          (span.endMs - span.startMs) * view.pxPerMs,
+          roomBeforeNext(span, spans[i + 1], view.pxPerMs),
+        );
+        boxes.set(span.file, { x: msToX(span.startMs, view), y, ...draw });
       }
     }
     // A device with nothing on it still occupies one lane (§7.5's "a camera that synced
     // nothing must be visible"), which is why this is `max(1, …)` and not `rows.length`.
-    trackTop += Math.max(1, track.rows.length) * LANE_HEIGHT_PX;
+    trackTop += Math.max(1, track.rows.length) * laneHeightPx;
   }
   return boxes;
 }
@@ -163,11 +287,13 @@ export function clipBoxes(
 export function hopDeltas(
   oldTracks: readonly HopTrack[],
   oldView: TimelineView,
+  oldLaneHeightPx: number,
   newTracks: readonly HopTrack[],
   newView: TimelineView,
+  newLaneHeightPx: number,
 ): Map<string, HopDelta> {
-  const before = clipBoxes(oldTracks, oldView);
-  const after = clipBoxes(newTracks, newView);
+  const before = clipBoxes(oldTracks, oldView, oldLaneHeightPx);
+  const after = clipBoxes(newTracks, newView, newLaneHeightPx);
   const deltas = new Map<string, HopDelta>();
   for (const [file, box] of after) {
     const was = before.get(file);
@@ -186,9 +312,10 @@ export function hopDeltas(
 export function hopExits(
   oldTracks: readonly HopTrack[],
   oldView: TimelineView,
+  oldLaneHeightPx: number,
   newTracks: readonly HopTrack[],
 ): Map<string, ClipBox> {
-  const before = clipBoxes(oldTracks, oldView);
+  const before = clipBoxes(oldTracks, oldView, oldLaneHeightPx);
   const survivors = new Set<string>();
   for (const track of newTracks) {
     for (const row of track.rows) for (const span of row) survivors.add(span.file);
@@ -240,8 +367,9 @@ export const HOP_TOTAL_MS = HOP_MAX_DELAY_MS + HOP_TRAVEL_MS;
  *  width is allowed to have an opinion (see `hopChoreography`). */
 export const HOP_JITTER_X_PX = 8;
 
-/** And vertically. Deliberately much smaller: a lane is 40 px and a clip 33 of them, so
- *  ±3 px is a shiver inside the lane rather than a clip climbing out of it. */
+/** And vertically. Deliberately much smaller: the tightest lane is `LANE_MIN_PX` and a clip
+ *  in it is 33 px, so ±3 px is a shiver inside the lane rather than a clip climbing out of
+ *  it — and a lane that has grown only gives it more room to shiver in. */
 export const HOP_JITTER_Y_PX = 3;
 
 /** The floor the width cap may not go below — a 3 px sliver still has to visibly move. */
@@ -299,21 +427,18 @@ function signedReach(magnitude: number, sign: number, reach: number): number {
  * One clip's delay and wander, from its path and its drawn width.
  *
  * **The width cap is the whole reason `widthPx` is a parameter.** A wedding draws 386 clips
- * at `MIN_CLIP_WIDTH_PX`, and a box that narrow wandering ±8 px travels further than its own
+ * at hairline width, and a box that narrow wandering ±8 px travels further than its own
  * width and back inside 140 ms — which the eye does not read as "finding itself", it reads
  * as flicker, or as a clip that jumped somewhere else and returned. Capping the horizontal
  * reach at the clip's own width keeps the wander proportional to the thing wandering: a wide
  * clip drifts a comfortable 8 px, a sliver shivers.
  *
- * The cap is deliberately a little conservative, and it is worth writing down why rather
- * than "fixing" it later. `widthPx` is the width this module computes and `Clip.tsx` writes
- * into `style.width` — but the box the operator actually sees at that setting measures about
- * 12.8 px, because `.clip`'s horizontal padding is wider than 3 px and the sheet is
- * `border-box`, so the padding sets a floor the declared width cannot go under. Reaching for
- * the drawn number would mean this module knowing a padding derived from the root font size,
- * which is exactly the kind of dependency the rest of the file refuses; and the error is in
- * the safe direction — a sliver shivering by 3 px of a 12.8 px box is legible (it was looked
- * at, at 24 clips and one frame per 100 ms), where the same box lurching by 8 is not.
+ * **Since D-091 `widthPx` is the width the operator actually sees**, and the note that used
+ * to stand here — explaining that the cap was conservative because `.clip`'s `border-box`
+ * padding secretly floored a 3 px box at 12.8 px — describes a stylesheet the app no longer
+ * has. The padding is on `.clip__chrome` now, which a hairline does not render, so the
+ * declared width IS the laid-out width and the cap is exact rather than merely safe.
+ * `HOP_MIN_JITTER_X_PX` is what keeps a 2 px tick's shiver visible at all.
  *
  * The vertical reach is not capped by anything — every clip is the same height, so there is
  * nothing for it to be out of proportion with.

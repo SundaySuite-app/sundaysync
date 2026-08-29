@@ -9,9 +9,9 @@ import {
 } from "react";
 import type { TimelineView as View } from "../../timeline/geometry";
 import {
-  CLIP_HEIGHT_PX,
   HOP_TOTAL_MS,
   clipBoxes,
+  clipHeightFor,
   hopChoreography,
   hopDeltas,
   hopExits,
@@ -171,6 +171,22 @@ interface HopRun {
   onAnimationEnd: ((e: AnimationEvent) => void) | null;
 }
 
+/**
+ * One complete description of a drawn layout — everything `clipBoxes` needs to say where
+ * every clip was, with no DOM read anywhere (D-063).
+ *
+ * `laneHeight` joined `tracks` and `view` in D-091, and it belongs here for exactly the
+ * reason the other two do: the pitch is a per-render value now, so "where the clips were"
+ * is only answerable together with "how tall the rows were when they were there". A hop
+ * that took the CURRENT pitch for both sides would be measuring the old layout against a
+ * stack the browser never laid out.
+ */
+interface HopLayout {
+  tracks: readonly HopTrack[];
+  view: View;
+  laneHeight: number;
+}
+
 export interface HopHandle {
   /** True while the result is being drawn under the pre-sync view — the signal
    *  `TimelineView`'s measure effect reads to hold its fit back. */
@@ -183,6 +199,7 @@ export interface HopHandle {
 export function useHop({
   tracks,
   view,
+  laneHeight,
   outcome,
   contentSpanMs,
   bodyRef,
@@ -195,6 +212,9 @@ export function useHop({
   /** The layout currently drawn — `TimelineView`'s per-device rows. */
   tracks: readonly HopTrack[];
   view: View;
+  /** The row pitch the layout above is drawn at (D-091) — `laneHeightFor`'s answer for this
+   *  render, the same number `Track` writes into every lane's `height`. */
+  laneHeight: number;
   /** Identity is what matters: a new object here means a new run's result arrived. */
   outcome: unknown | null;
   contentSpanMs: number;
@@ -227,7 +247,7 @@ export function useHop({
   // The last committed layout + view, and the outcome that produced it. Read on the commit
   // where the outcome arrives; written on every commit, which is what makes it the state
   // "one frame ago" rather than "at some point earlier".
-  const drawn = useRef<{ tracks: readonly HopTrack[]; view: View } | null>(null);
+  const drawn = useRef<HopLayout | null>(null);
   const lastOutcome = useRef<unknown | null>(null);
 
   // Read inside rAF callbacks, which outlive the render that scheduled them.
@@ -269,7 +289,7 @@ export function useHop({
   }, [bodyRef, fittedSpan, ghostRef, release, sectionRef]);
 
   const start = useCallback(
-    (from: { tracks: readonly HopTrack[]; view: View }, to: { tracks: readonly HopTrack[]; view: View }) => {
+    (from: HopLayout, to: HopLayout) => {
       const body = bodyRef.current;
       const section = sectionRef.current;
       if (!body || !section) return;
@@ -321,13 +341,18 @@ export function useHop({
       };
 
       // ---- The hop itself -------------------------------------------------------------
-      const deltas = hopDeltas(from.tracks, from.view, to.tracks, to.view);
-      const exits = hopExits(from.tracks, from.view, to.tracks);
+      // Each side is measured at ITS OWN pitch (D-091): the pre-sync layout may have had a
+      // different number of rows from the solved one, and `laneHeightFor` therefore may have
+      // answered differently for the two. A single lane height here would compute the "old"
+      // y-positions against a stack the DOM never drew — which is D-083's silent breakage,
+      // arriving through the new door rather than the old one.
+      const deltas = hopDeltas(from.tracks, from.view, from.laneHeight, to.tracks, to.view, to.laneHeight);
+      const exits = hopExits(from.tracks, from.view, from.laneHeight, to.tracks);
       // The clips' DRAWN widths, under the frozen view they are about to be animated in.
       // Arithmetic, not `offsetWidth`: reading a width off a node inside the same loop that
       // writes its custom properties would interleave a layout read with a style write once
       // per clip, which on a 386-file wedding is 386 forced reflows in one frame.
-      const widths = clipBoxes(to.tracks, to.view);
+      const widths = clipBoxes(to.tracks, to.view, to.laneHeight);
 
       // Address clips by their own `data-file` rather than by a selector built from a
       // path: a file name may contain anything a POSIX path may contain, quotes and
@@ -369,12 +394,17 @@ export function useHop({
       if (ghosts && exits.size > 0) {
         for (const [file, box] of exits) {
           const ghost = document.createElement("div");
-          ghost.className = `clip clip--pre ${GHOST_CLASS}`;
+          // A ghost stands in for a clip, so it has to be the same KIND of box the clip
+          // was: a departing sliver that kept a full-size clip's chrome would be a 12.8 px
+          // ghost fading where a 2 px tick used to be (D-091).
+          ghost.className = `clip clip--pre ${box.hairline ? "clip--hairline " : ""}${GHOST_CLASS}`;
           ghost.style.left = `${box.x}px`;
           ghost.style.top = `${box.y}px`;
           ghost.style.bottom = "auto";
           ghost.style.width = `${box.width}px`;
-          ghost.style.height = `${CLIP_HEIGHT_PX}px`;
+          // The ghost stands in for a clip that was drawn in the OLD layout, so it is the
+          // old pitch's clip height — not the new one's.
+          ghost.style.height = `${clipHeightFor(from.laneHeight)}px`;
           ghost.dataset.file = file;
           // Decorative twice over: it is a copy of something that was already announced,
           // and it is on its way out.
@@ -452,7 +482,7 @@ export function useHop({
 
     const previous = drawn.current;
     const previousOutcome = lastOutcome.current;
-    drawn.current = { tracks, view };
+    drawn.current = { tracks, view, laneHeight };
     lastOutcome.current = outcome;
 
     // A hop is exactly the arrival of a NEW outcome over something that was already drawn.
@@ -465,8 +495,8 @@ export function useHop({
     if (run.current) cancel();
     if (!previous || previous.tracks.length === 0) return;
     if (!motionAllowed()) return;
-    start(previous, { tracks, view });
-  }, [tracks, view, outcome, contentSpanMs, cancel, start]);
+    start(previous, { tracks, view, laneHeight });
+  }, [tracks, view, laneHeight, outcome, contentSpanMs, cancel, start]);
 
   // Nothing may outlive the component: a timer that fires after unmount would touch
   // detached nodes, and a rAF would call `setView` on a gone tree.

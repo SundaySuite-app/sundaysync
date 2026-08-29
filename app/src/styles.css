@@ -110,10 +110,12 @@ body {
      the second line's «3 filer · 1 t 42 min ●», `--tl-ruler-h` 22 → 26 px because the ruler
      row now carries the zoom buttons in its gutter cell.
 
-     The lane height is NOT here, and must not be: it is `LANE_HEIGHT_PX` in
-     `src/timeline/hop.ts`, the one number `Track`, `clipBoxes` and the hop's ghosts all read.
-     A CSS variable for it would be a second statement of the row pitch, which is exactly the
-     failure the hop cannot survive. */
+     The lane height is NOT here, and must not be: since V06-G2 (D-091) it is not even a
+     constant, it is `laneHeightFor(rows, availablePx)` in `src/timeline/hop.ts`, computed
+     once per render in `TimelineView` and handed to `Track` and to `clipBoxes` as one
+     number. A CSS variable for it would be a second statement of the row pitch, which is
+     exactly the failure the hop cannot survive — and a *stale* second statement now, since
+     the value moves with the room. */
   --tl-gutter: 14rem;
   --tl-ruler-h: 26px;
   height: 100vh;
@@ -1002,11 +1004,13 @@ select:hover, input:hover { border-color: var(--accent-border); }
    total length, the state dot).
 
    No `min-height` here, and none on `.track__lane` either — deliberately. The row pitch is
-   `LANE_HEIGHT_PX` in `src/timeline/hop.ts` and `Track.tsx` writes it into both boxes as an
-   explicit height; a gutter that could push a lane taller than that constant would leave the
-   hop's arithmetic measuring a stack the DOM no longer has, and every clip below the first
-   device would fly to a row it is not in. Two lines at 13 px and 11 px are ~36 px of content
-   inside a 40 px lane, so the constant is what holds and nothing needs to grow. */
+   `laneHeightFor(rows, availablePx)` in `src/timeline/hop.ts` (D-091, was the constant
+   `LANE_HEIGHT_PX`), and `Track.tsx` writes its answer into both boxes as an explicit height;
+   a gutter that could push a lane taller than that number would leave the hop's arithmetic
+   measuring a stack the DOM no longer has, and every clip below the first device would fly to
+   a row it is not in. Two lines at 13 px and 11 px are ~36 px of content, which fits inside
+   `LANE_MIN_PX` — the TIGHTEST the pitch can ever be — so the number is what holds and
+   nothing needs to grow at any of the heights the lane now takes. */
 .track__gutter {
   display: flex;
   flex-direction: column;
@@ -1064,17 +1068,22 @@ select:hover, input:hover { border-color: var(--accent-border); }
 
 .track__lanes { position: relative; overflow: hidden; min-width: 0; }
 
+/* The lane is the STAGE the clips are drawn on (V06-G2, D-091) — the darkest surface in the
+   app, not a raised one. It used to be `--surface2`, which was fine while a clip was a
+   saturated block sitting on it, and wrong the moment a clip became an outline and a 10 %
+   wash: the wash of the quietest state IS `--surface2`, and a drawing on a ground of its own
+   colour is not a drawing. Dark ground, lit marks. */
 .track__lane {
   position: relative;
   overflow: hidden;
-  border-top: 1px solid var(--bg);
-  background: var(--surface2);
+  border-top: 1px solid var(--border);
+  background: var(--bg);
 }
-.track__lane--empty { background: none; }
-/* Mirrors `LANE_HEIGHT_PX` (D-083). Cosmetic rather than load-bearing — it centres one line
-   of text in the lane and nothing measures it — but it has to be changed with the constant or
-   the "no clips" line stops sitting on the lane's middle. */
-.lane__empty { color: var(--text4); font-size: 0.75rem; padding-left: 0.5rem; line-height: 40px; }
+/* Centred rather than line-heighted (D-091): the lane's height is a value now, and a
+   `line-height` mirroring it would be a second statement of the pitch that goes stale on
+   every resize. Flex centres in whatever height the lane was given. */
+.track__lane--empty { background: none; display: flex; align-items: center; }
+.lane__empty { color: var(--text4); font-size: 0.75rem; padding-left: 0.5rem; }
 
 .timeline__ruler {
   position: relative;
@@ -1139,27 +1148,77 @@ select:hover, input:hover { border-color: var(--accent-border); }
 }
 .timeline__scrollbar:hover .timeline__thumb { background: var(--text3); }
 
+/* ── A clip is a DRAWING, not a fill (V06-G2, D-091) ─────────────────────────────────────
+   The owner's third goal for V06 was «mindre tekst, mer visuelt», and the approved canvas
+   answered it the way every editor the operator has ever used answers it: a clip is an
+   OUTLINE with its waveform inside it. What shipped in v0.6.0-beta.3 was the opposite — a
+   saturated `--green` block per clip — so a device's row read as one unbroken stripe of
+   colour with a filename repeated along it, and the picture of the audio (which is the only
+   thing on screen that lets an operator judge a sync by eye) was a darker green smudge
+   inside a lighter green box.
+
+   Every state is therefore the same three-part anatomy, and only the colour changes:
+
+     1. a **1 px border** in the state's colour — the box's claim about where it is;
+     2. the state's **10 % wash** as the background — enough to separate the box from the
+        dark lane, far too little to drown the waveform;
+     3. the **waveform stroked in the state's colour**, which is `--clip-ink`.
+
+   `--clip-ink` is a custom property rather than the box's own `color` because the two are
+   different inks: `drawWaveform` reads the CANVAS's computed `color`, and the filename needs
+   to be readable text on a dark wash (`--text`) rather than a saturated hue at 11 px.
+   `.clip__waveform` below is what turns `--clip-ink` into the canvas's `color`, so the
+   waveform tracks the state automatically and the label is never dragged along with it.
+
+   `--clip-pad` is the chrome's inset, stated here and consumed by `.clip__chrome` — NOT by
+   `.clip`. That move is the whole of D-091(b): the sheet is `border-box`, so `padding: 0
+   0.4rem` on the box itself floored every clip at 12.8 px however narrow its declared width
+   was, and at fit zoom on a dense card every adjacent pair therefore overlapped: 476 of 476
+   on the fixture in `e2e/clip-drawing.spec.ts`, and 309 of 340 on the owner's own wedding.
+   Playwright aiming at the centre of clip #3's box measurably selected clip #4 — the later
+   sibling paints on top — which is the app handing the operator the wrong file. Padding
+   inside the chrome layer costs the box nothing. */
 .clip {
+  --clip-ink: var(--green);
+  --clip-pad: 0.4rem;
   position: absolute;
   top: 3px;
   bottom: 3px;
-  border: none;
+  border: 1px solid var(--green);
   border-radius: var(--rxs);
-  padding: 0 0.4rem;
+  padding: 0;
   overflow: hidden;
   text-align: left;
   font-size: 0.72rem;
-  color: #04120a;
-  background: var(--green);
+  color: var(--text);
+  background: var(--green-bg);
 }
-.clip--warn { background: var(--orange); color: #1d1503; }
+/* Placed, with something to say. Same anatomy, amber throughout. */
+.clip--warn {
+  --clip-ink: var(--orange);
+  border-color: var(--orange);
+  background: var(--orange-bg);
+}
 /* Before a sync (v0.4, D-061). Deliberately NOT green: green is the §9.4 word for "the
    engine placed this and stands behind it", and nothing here has been placed yet. A muted
    slate box says "this is your material, roughly where its own timestamp claims" — and
-   when the sync lands, the hop to the real position happens in colour as well as in x. */
+   when the sync lands, the hop to the real position happens in colour as well as in x.
+
+   D-091 keeps the claim and changes the drawing: the same anatomy as every other state, in
+   the quietest colours the palette has. `--border2` edge, `--surface2` wash — which now
+   separates from the lane, because the lane went to `--bg` — and an ink of `--text2`.
+
+   **`--text2` and not `--text3`, and the number is the argument.** The ink is what
+   `drawWaveform` paints the bars in, and `--text3` (#4a5878) on the `--surface2` wash
+   measures about 2.1:1 — a grey smear that reads as a dirty box rather than as a picture of
+   audio, in the one state where the operator is squinting hardest at it («har denne fila
+   noe lyd i det hele tatt?»). `--text2` measures about 5.3:1 on the same ground and is still
+   two full steps quieter than any of the saturated states, which is what "waiting" has to
+   be. Quiet is a comparison, not a contrast ratio. */
 .clip--pre {
-  background: var(--surface3);
-  color: var(--text2);
+  --clip-ink: var(--text2);
+  background: var(--surface2);
+  color: var(--text);
   border: 1px solid var(--border2);
   cursor: default;
 }
@@ -1190,21 +1249,33 @@ select:hover, input:hover { border-color: var(--accent-border); }
 
    The ink is not decoration: `drawWaveform` reads the canvas's computed `color` at draw
    time, so it is what the waveform's bars are painted in. Leaving `--seq`'s `--text3` on a
-   blue fill would have been ~1.3:1 — a grey smear on blue, and a label to match. */
+   blue fill would have been ~1.3:1 — a grey smear on blue, and a label to match.
+
+   **D-091 replaces the 32 % blue FILL with the blue drawing.** A third of an opaque blue
+   across the whole box was the single loudest thing on a pre-sync timeline, and it drowned
+   the very waveform whose arrival it was announcing — the class means "this file's bytes
+   exist and here they are", and the picture was the half that could not be seen. Now:
+   `--blue` edge, `--blue-bg` wash, `--blue` ink. The division of the box between the two
+   vocabularies is unchanged and still needs both rules — the edge is the provenance's on
+   source order, the wash and the ink are the analysis's by the compound below. */
 .clip--analysed { border-color: var(--blue); }
 .clip--pre.clip--analysed {
-  background: rgba(79, 142, 247, 0.32);
-  color: #dbe7ff;
+  --clip-ink: var(--blue);
+  background: var(--blue-bg);
+  color: var(--text);
 }
 /* The outcome has no duration for this file, so the box is a 3px sliver standing in for a
    length nobody knows (V03-S6, finding 15). Hollow and dashed rather than solid: the eye
    reads a dashed edge as "not a measurement", which is exactly the claim. The accessible
-   name and the tooltip say it in words. */
+   name and the tooltip say it in words.
+
+   `min-width` is gone (D-091): the box's width is `clipDrawing`'s answer and nothing in the
+   sheet may floor it, or a sliver goes back to overlapping its neighbour. */
 .clip--nodur {
+  --clip-ink: var(--orange);
   background: none;
   border: 1px dashed var(--orange);
   color: var(--orange);
-  min-width: 3px;
 }
 /* ── What the recording time is MADE OF (V05-W3, D-067/D-068/D-071) ──────────────────────
    Three marks, all of them about the provenance of the position rather than the position.
@@ -1225,8 +1296,9 @@ select:hover, input:hover { border-color: var(--accent-border); }
    device's sequence (D-068). Fainter, and with the leading edge marked, since the one thing
    it does NOT claim is that it starts here. */
 .clip--seq {
+  --clip-ink: var(--text3);
   background: var(--surface2);
-  color: var(--text3);
+  color: var(--text2);
   border: 1px dashed var(--border2);
   /* The leading edge, thickened: the one thing a sequential clip does NOT claim is that it
      starts here, and the eye goes to the left edge of a box on a timeline first. */
@@ -1240,6 +1312,12 @@ select:hover, input:hover { border-color: var(--accent-border); }
   border: 1px dashed var(--orange);
   color: var(--orange);
 }
+/* All three provenance marks change the EDGE and nothing else — see the `clip--analysed`
+   note. None of them touches `--clip-ink`, deliberately: an analysed off-session clip draws
+   a blue waveform inside an amber dashed edge, and both claims stay on screen. `--seq` is
+   the exception that proves it — it sets an ink because "there is no recording time here at
+   all" is quieter than any of the states, and the compound below hands the ink back the
+   moment the analysis lands. */
 /* ── The clip's chrome row (V05-W1, D-065) ───────────────────────────────────
    The name and whatever the waveform has to say are SIBLINGS in one flex row, not two
    absolutely-placed children hoping not to meet. They met: a 386-file wedding drew every
@@ -1250,7 +1328,14 @@ select:hover, input:hover { border-color: var(--accent-border); }
    (`.waveform__regenerate`): this layer covers the whole clip, which is itself a button,
    and anything clickable here that is not meant to be pressed would eat the clip's own
    click. `padding-left` carries the label-slide (Clip.tsx) — it shrinks the row from the
-   left, where a `transform` used to slide one child across another. */
+   left, where a `transform` used to slide one child across another.
+
+   The clip's horizontal padding lives HERE since D-091, not on `.clip`. On a `border-box`
+   sheet, padding on the box itself is a floor under the box's WIDTH — 12.8 px of it — and a
+   clip whose declared width was 3 px was laid out four times too wide, over the top of its
+   neighbour. Inside an absolutely-positioned layer that already fills the box, the same
+   padding costs the box nothing. `Clip.tsx` writes `calc(var(--clip-pad) + <slide>px)` into
+   `padding-left`, so the label-slide adds to this rather than replacing it. */
 .clip__chrome {
   position: absolute;
   inset: 0;
@@ -1259,6 +1344,7 @@ select:hover, input:hover { border-color: var(--accent-border); }
   align-items: center;
   gap: 4px;
   overflow: hidden;
+  padding: 0 var(--clip-pad);
   pointer-events: none;
 }
 /* Takes the space the status does not, and ellipsises inside it — never pushes the status
@@ -1288,11 +1374,16 @@ select:hover, input:hover { border-color: var(--accent-border); }
    the clip box does not reflow when the S4 canvas arrives, and no longer a flex centring
    context — since D-065 nothing but the canvas lives in it, and the canvas places itself
    in absolute pixels from `barGeometry`. */
+/* …and, since D-091, the layer that carries the waveform's INK. `drawWaveform` reads
+   `getComputedStyle(canvas).color`, and the canvas inherits from here — so this one
+   declaration is what makes every clip's waveform its own state's colour, while `.clip`'s
+   own `color` stays readable label text. Two inks, one place each. */
 .clip__waveform {
   position: absolute;
   inset: 0;
   z-index: 0;
   overflow: hidden;
+  color: var(--clip-ink);
 }
 .clip:hover { filter: brightness(1.1); }
 .clip:focus-visible { outline: 2px solid var(--accent2); outline-offset: -2px; }
@@ -1372,16 +1463,42 @@ select:hover, input:hover { border-color: var(--accent-border); }
 
    One class of specificity, stated AFTER `.clip--warn` and the pre-sync marks, so it wins
    on source order over every fill a clip can otherwise wear — which is the point: for these
-   800 ms there is one state, and it is "travelling". */
-.clip--travelling { background: var(--blue); color: #04122a; }
+   800 ms there is one state, and it is "travelling".
+
+   D-091: the journey is the blue DRAWING, not the blue block — border, wash and ink
+   together, exactly like every other state. The clip is in the air with its waveform on it
+   the whole way, which is the point of the number: the operator watches the picture of the
+   audio slide into place, not a coloured rectangle that acquires a picture on arrival. */
+.clip--travelling {
+  --clip-ink: var(--blue);
+  border-color: var(--blue);
+  background: var(--blue-bg);
+  color: var(--text);
+}
 /* …with the one exception that is not a fill at all. A clip whose duration is unknown is a
-   hollow dashed sliver *because* it is not a measurement (`clip--nodur`), and filling it in
+   hollow dashed sliver *because* it is not a measurement (`clip--nodur`), and washing it in
    for the journey would be the app claiming a length for 800 ms that it never had. It
    travels in blue too — as an outline. */
 .clip--nodur.clip--travelling {
   background: none;
   border-color: var(--blue);
   color: var(--blue);
+}
+
+/* ── The tick (D-091) ────────────────────────────────────────────────────────────────────
+   Narrower than `CLIP_DRAWING_MIN_PX` there is no room for a drawing, so the box is a
+   2 px tick in the state's FULL colour — a 10 % wash two pixels wide is nothing at all, and
+   the one thing a wedding's 386 clips have to do at fit zoom is be visible and be countable.
+   `Clip.tsx` renders neither the chrome layer nor the waveform slot at this width, which is
+   what keeps the laid-out box exactly as wide as the declared one.
+
+   Stated LAST and with two classes on purpose: every state rule above sets a `background`,
+   including the two-class compounds, and a tick has to win all of them — its whole job is
+   to be the state's colour. The border is left to whatever the state (and the provenance
+   dashes) put there; at two pixels it reads as part of the tick. */
+.clip.clip--hairline {
+  border-radius: 0;
+  background: var(--clip-ink);
 }
 
 /* A clip the run did NOT place (unsynced, or removed) has no node left to fade — React
@@ -1424,10 +1541,25 @@ select:hover, input:hover { border-color: var(--accent-border); }
 
 /* ── Per-clip waveform (v0.3 S4, D-052) ─────────────────────────────────── */
 
+/* `height: 100%`, not `top: 0; bottom: 0` — and the difference is a bug that shipped
+   (found while looking at D-091's drawings, which is the only way it could have been found).
+   A `<canvas>` is a REPLACED element, and for a replaced element with `height: auto` CSS
+   resolves the box from its INTRINSIC size and then ignores `bottom` as over-constrained
+   (CSS 2.1 §10.6.5). The intrinsic height of a canvas is its backing store — 150 px by
+   default, and thereafter whatever `drawWaveform` last set `canvas.height` to, which it
+   computes from `clientHeight`. So the element was a 150 px tall canvas hanging out of the
+   top of a 33 px clip, with its own centre line — where the waveform is drawn, symmetric
+   about the middle — some 40 px BELOW the visible box. What the operator saw was the top
+   sliver of the bars, crushed against the clip's bottom edge, in every clip in the app.
+
+   Nobody could see it while a clip was a saturated green block with a slightly darker green
+   smudge in it. It is the whole picture now, so it had to be right. `height: 100%` resolves
+   against `.clip__waveform`, which is `inset: 0` on the clip — so the canvas is exactly as
+   tall as the box it draws in, at any lane pitch. */
 .waveform__canvas {
   position: absolute;
   top: 0;
-  bottom: 0;
+  height: 100%;
   display: block;
   pointer-events: none;
 }

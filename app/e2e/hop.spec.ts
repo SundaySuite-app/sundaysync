@@ -287,15 +287,41 @@ async function clipStates(page: Page) {
         travelling: node.classList.contains("clip--travelling"),
         delay: node.style.getPropertyValue("--hop-delay"),
         dx: node.style.getPropertyValue("--hop-dx"),
+        // The whole three-part anatomy, not just the fill (D-091): a clip is an outline,
+        // a 10 % wash and a waveform stroked in the state's colour, and «grønn» is now a
+        // claim about all three at once. `--clip-ink` is what `drawWaveform` paints the
+        // bars in, so reading it here is reading the waveform's colour without having to
+        // sample the canvas.
         background: getComputedStyle(node).backgroundColor,
+        border: getComputedStyle(node).borderTopColor,
+        ink: getComputedStyle(node).getPropertyValue("--clip-ink").trim(),
       };
     }),
   );
 }
 
-/** `--green` and `--blue` from `styles.css`, as the browser reports them. */
-const GREEN = "rgb(34, 197, 94)";
-const BLUE = "rgb(79, 142, 247)";
+/** What "green" and "blue" MEAN on a clip since D-091: an edge in the state's colour, that
+ *  colour's 10 % wash as the background, and the waveform's ink set to the same colour.
+ *  Written as the three-part shape rather than as one fill so a rule that changed only the
+ *  background — which is exactly what v0.6.0-beta.3 had, a saturated block with no drawing
+ *  in it — could not satisfy it. `--green`/`--green-bg`/`--blue`/`--blue-bg` from
+ *  `styles.css`, as the browser reports them — the ink is a custom property, so it comes
+ *  back as the literal token value rather than as a resolved `rgb()`. */
+const GREEN = {
+  background: "rgba(34, 197, 94, 0.1)",
+  border: "rgb(34, 197, 94)",
+  ink: "#22c55e",
+};
+const BLUE = {
+  background: "rgba(79, 142, 247, 0.1)",
+  border: "rgb(79, 142, 247)",
+  ink: "#4f8ef7",
+};
+
+/** One clip's drawn anatomy, for comparison against the two above. */
+function anatomy(clip: { background: string; border: string; ink: string }) {
+  return { background: clip.background, border: clip.border, ink: clip.ink };
+}
 
 /** Nothing on any clip is left over from a hop: no classes, no custom properties. */
 async function expectNothingLeftOnTheClips(page: Page) {
@@ -343,7 +369,7 @@ test.describe("the clips hop into place when the sync lands", () => {
       expect((await seen(page)).hopped).toEqual([]);
       for (const clip of await clipStates(page)) {
         expect(clip.travelling).toBe(false);
-        expect(clip.background).toBe(GREEN);
+        expect(anatomy(clip)).toEqual(GREEN);
       }
 
       // And the layout IS the solved one: each clip's left edge is its own
@@ -424,7 +450,7 @@ test.describe("the clips hop into place when the sync lands", () => {
     // no leftover class on the section.
     await expectNothingLeftOnTheClips(page);
     await expect(page.locator(".timeline")).not.toHaveClass(/timeline--hopping/);
-    for (const clip of await clipStates(page)) expect(clip.background).toBe(GREEN);
+    for (const clip of await clipStates(page)) expect(anatomy(clip)).toEqual(GREEN);
   });
 
   test("the clips travel BLUE and land green, each on its own delay", async ({ page }) => {
@@ -445,7 +471,7 @@ test.describe("the clips hop into place when the sync lands", () => {
       // green is the default for every one of these clips and this is what overrides it.
       expect(clip.hop).toBe(true);
       expect(clip.travelling).toBe(true);
-      expect(clip.background).toBe(BLUE);
+      expect(anatomy(clip)).toEqual(BLUE);
       // Each carries its own delay, inside the window the band's hold is sized from.
       const delayMs = Number(clip.delay.replace("ms", ""));
       expect(delayMs).toBeGreaterThanOrEqual(0);
@@ -462,7 +488,7 @@ test.describe("the clips hop into place when the sync lands", () => {
     // And it ends: the blue is a state with an end, not a repaint.
     await waitForResult(page);
     await expect(page.locator(".clip--travelling")).toHaveCount(0);
-    for (const clip of await clipStates(page)) expect(clip.background).toBe(GREEN);
+    for (const clip of await clipStates(page)) expect(anatomy(clip)).toEqual(GREEN);
   });
 
   test("a clip that lost its place fades out instead of blinking away", async ({ page }) => {
@@ -516,7 +542,7 @@ test.describe("the clips hop into place when the sync lands", () => {
     // left blue waiting for an animation that will never end.
     for (const clip of await clipStates(page)) {
       expect(clip.travelling).toBe(false);
-      expect(clip.background).toBe(GREEN);
+      expect(anatomy(clip)).toEqual(GREEN);
     }
 
     // And the view stays where the operator left it: the interrupted fit does not creep

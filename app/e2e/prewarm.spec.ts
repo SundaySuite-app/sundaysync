@@ -498,6 +498,9 @@ async function boxStyle(page: Page, file: string) {
     return {
       background: s.backgroundColor,
       color: s.color,
+      // What the WAVEFORM is painted in (D-091): `.clip__waveform` sets the canvas's
+      // `color` from `--clip-ink`, and `drawWaveform` reads exactly that.
+      ink: s.getPropertyValue("--clip-ink").trim(),
       borderColor: s.borderTopColor,
       borderStyle: s.borderTopStyle,
       borderLeftWidth: s.borderLeftWidth,
@@ -529,12 +532,22 @@ test.describe("the blue and the provenance marks divide the box between them", (
     for (const f of [PLAIN, NOCLOCK, STRAY]) await emit(page, "prewarm:file", { file: f, ok: true });
     await expect(clip(page, NOCLOCK)).toHaveClass(/clip--analysed/);
 
-    const BLUE_WASH = "rgba(79, 142, 247, 0.32)";
-    const BLUE_INK = "rgb(219, 231, 255)";
+    // D-091 re-expressed the blue, it did not relax the claim. What used to be a 32 %
+    // opaque blue FILL with a pale label on it is now the same drawing every other state
+    // is: `--blue-bg`'s 10 % wash, and — the half that actually matters here — the
+    // waveform's ink set to `--blue`. The old assertion could be satisfied by a blue block
+    // with no picture in it, which is precisely what the review found on screen; this one
+    // cannot, because the ink IS the picture's colour. The label goes to plain `--text`:
+    // readable text on a dark wash, rather than a tinted white that only worked on a
+    // saturated fill.
+    const BLUE_WASH = "rgba(79, 142, 247, 0.1)";
+    const BLUE_INK = "#4f8ef7";
+    const LABEL = "rgb(234, 234, 246)";
     for (const f of [PLAIN, NOCLOCK, STRAY]) {
       const s = await boxStyle(page, f);
-      expect(s.background, `${f} fill`).toBe(BLUE_WASH);
-      expect(s.color, `${f} ink`).toBe(BLUE_INK);
+      expect(s.background, `${f} wash`).toBe(BLUE_WASH);
+      expect(s.ink, `${f} waveform ink`).toBe(BLUE_INK);
+      expect(s.color, `${f} label`).toBe(LABEL);
     }
 
     // …and every edge still says exactly what it said before the analysis landed: the

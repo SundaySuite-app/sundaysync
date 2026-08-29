@@ -4531,3 +4531,159 @@ flicker; the overshoot reads as a landing; and at ~890 ms five clips are green w
 still blue, which is the picture the owner asked for. The green arrives as a **scatter**
 rather than as a left-to-right sweep — the delay is seeded from the path, not from the clip's
 position — and that is the owner's own choice 3 («små tilfeldige forsinkelser»), kept.
+
+## D-091 — V06-G2: klippene er tegninger, ingen ligger oppå naboen, og banene vokser inn i rommet
+
+**Status:** implemented (v0.6, G2).
+
+Three connected changes, all of them out of one owner goal the V06 self-critical review found
+had failed: **«mindre tekst, mer visuelt»**. The approved canvas draws a clip in every state
+as an outline with its waveform inside it. What v0.6.0-beta.3 shipped was the opposite, and
+the review measured three consequences of it that are all the same mistake seen from three
+sides.
+
+### (a) A clip is a drawing, not a fill
+
+Every clip, in every state, is now three things:
+
+1. a **1 px border** in the state's colour — the box's claim about where it is;
+2. that colour's **10 % wash** as the background;
+3. the **waveform stroked in the state's colour**.
+
+| state | border | wash | ink (`--clip-ink`) |
+|---|---|---|---|
+| placed (result) | `--green` | `--green-bg` | `--green` |
+| placed, with warnings | `--orange` | `--orange-bg` | `--orange` |
+| analysed pre-sync (D-080) | `--blue` | `--blue-bg` | `--blue` |
+| waiting pre-sync (D-061) | `--border2` | `--surface2` | `--text2` |
+| travelling (D-090) | `--blue` | `--blue-bg` | `--blue` |
+
+The provenance edges (`--est` / `--seq` / `--offsession`, D-067/D-068/D-071) are unchanged and
+still win the border; the selection ring and the playhead's `aria-current` mark are unchanged
+and still sit on top. What shipped before was `background: var(--green)` — an opaque block —
+so a device's row read as one unbroken green stripe with the filename repeated along it, and
+the waveform (which is the only thing on screen that lets an operator judge a sync by eye) was
+a slightly darker green smudge inside a lighter green box. The pre-sync «analysed» state was
+worse: a 32 % opaque blue fill, the loudest thing on the timeline, drowning the very picture
+whose arrival it was announcing.
+
+**Two inks, not one.** `drawWaveform` reads the canvas's computed `color`, which the clip's
+own `color` used to supply — so the waveform's colour and the label's colour were the same
+declaration, and could not both be right once the box became dark. `--clip-ink` is set per
+state on `.clip` and turned into the canvas's `color` by `.clip__waveform`; the label takes
+plain `--text`, which is readable on every one of the washes above. The one deliberate
+departure from the brief is the waiting state's ink: `--text3` on the `--surface2` wash
+measures ~2.1:1, a grey smear in the state where the operator is squinting hardest at the
+picture, so it is `--text2` (~5.3:1) — still two steps quieter than any saturated state, which
+is what «waiting» has to be. Quiet is a comparison, not a contrast ratio.
+
+**The lane went dark.** `.track__lane` was `--surface2`, which is fine under a saturated block
+and impossible under a 10 % wash — the quietest state's wash IS `--surface2`, and a drawing on
+a ground of its own colour is not a drawing. The lane is `--bg` now: a dark stage with lit
+marks on it.
+
+**A bug the fill was hiding.** `.waveform__canvas` was sized `top: 0; bottom: 0`. A `<canvas>`
+is a REPLACED element, and CSS 2.1 §10.6.5 resolves a replaced element's `height: auto` from
+its INTRINSIC size and then ignores `bottom` as over-constrained. The intrinsic height of a
+canvas is its backing store — 150 px by default — so the element was a 150 px canvas hanging
+out of the top of a 33 px clip, with the centre line the bars are drawn symmetric about some
+40 px BELOW the visible box. Every waveform in the app was the top sliver of its bars, crushed
+against the clip's bottom edge. Invisible while a clip was a green block with a darker green
+smudge in it; the whole picture now. `height: 100%`.
+
+### (b) No clip is drawn across its neighbour's start
+
+`clipDrawing(spanPx, roomPx)` (`timeline/hop.ts`) is the one rule, and `Clip.tsx` and
+`clipBoxes` both go through it, so a fade ghost and its clip can never disagree.
+
+- **The declared start is sacred; the width yields.** `roomPx` is the distance from this
+  clip's start to the next clip's start in the same lane, and the drawn box is clamped to it.
+- **Below `CLIP_DRAWING_MIN_PX` (6 px) the box is a `HAIRLINE_WIDTH_PX` (2 px) tick** in the
+  full state colour, with no padding, no label and no waveform. Under six pixels a box's width
+  no longer tells anyone how long its clip is, and a row of even ticks is countable where a row
+  of ragged five-pixel stubs is not.
+- **The padding moved from `.clip` to `.clip__chrome`.** This is the actual bug. The sheet is
+  `border-box`, so `padding: 0 0.4rem` on the box was a 12.8 px floor under its WIDTH: a clip
+  DECLARED 3 px wide was LAID OUT 12.8 px wide, and nothing in the code said so. Inside an
+  absolutely-positioned layer that already fills the box, the same padding costs the box
+  nothing — and a hairline, which renders no chrome layer, has none at all. `.clip--nodur`'s
+  `min-width: 3px` went with it: nothing in the stylesheet may floor the width any more.
+
+Measured on a four-camera, 480-clip, three-hour drop at fit zoom in a 1280×800 window:
+**476 of 476 adjacent pairs overlapped before, 0 of 476 after.** And the half that is not a
+matter of taste: aiming at the centre of `c0_002.mp4`'s own box selected `c0_003.mp4` before
+(the later sibling paints on top), and selects `c0_002.mp4` after. The app was handing the
+operator the wrong file.
+
+### (c) The lanes grow into the room
+
+`laneHeightFor(rows, availablePx)` = `clamp(LANE_MIN_PX, floor(availablePx / rows),
+LANE_MAX_PX)`, i.e. 40…90 px. The floor is D-083's constant, which was right for twenty rows
+in a laptop frame and a waste of a room for three; the ceiling is where a lane stops reading as
+a row of a timeline and starts reading as a panel.
+
+**The D-083 constraint is the thing to be careful about, and it survives as a rule about the
+number rather than about the keyword.** `LANE_HEIGHT_PX` was the single source for both
+`Track`'s rendering and `clipBoxes`' y-arithmetic, and a divergence between them breaks the hop
+silently — every clip below the first device flies to a row it is not in, with no error
+anywhere. So the pitch has exactly ONE producer and is **passed**, never recomputed:
+`TimelineView` measures the stage through its own `ResizeObserver`, calls `laneHeightFor` once
+per render, and hands the same number to `Track` and to `useHop` (which threads it into
+`clipBoxes`, `hopDeltas`, `hopExits` and the ghosts' `clipHeightFor`). `clipBoxes` takes the
+pitch as a required parameter rather than a defaulted one, so no caller can forget it.
+
+`hopDeltas` takes a pitch **per side**: a sync that drops a device changes the row count, so
+`laneHeightFor` can legitimately answer differently for the two layouts, and the FLIP has to
+measure each against the stack the browser actually drew it in.
+
+**No feedback loop**, and the reason is arithmetic rather than luck: `floor(available / rows)`
+means `rows × lane <= available` always, so growing the lanes can never make the content taller
+than the stage and can never summon the vertical scrollbar that would change the measurement.
+Past the ceiling it stops growing; at the floor the stage already scrolls.
+
+`.lane__empty`'s `line-height: 40px` — the stylesheet's last mirror of the pitch — is gone;
+the empty lane centres with flex, which works at any height. Nothing in the sheet states the
+pitch now.
+
+### The dead space, measured
+
+1280×800, stage 638 px:
+
+| drop | rows | lane before → after | dead space before → after | overlapping pairs before → after |
+|---|---|---|---|---|
+| 3 devices, 1 clip each | 3 | 40 → 90 | 81.2 % → 57.7 % | 0/0 → 0/0 |
+| 6 devices, 3 clips each | 6 | 40 → 90 | 62.4 % → 15.4 % | 0/12 → 0/12 |
+| 4 devices, 120 clips each | 4 | 40 → 90 | 74.9 % → 43.6 % | **476/476 → 0/476** |
+| 16 devices, 25 clips each | 16 | 40 → 40 | 0 % → 0 % | 0/384 → 0/384 |
+
+The stated target was «under ~30 %», and two of the four are above it. That is the ceiling
+binding, and it is worth being exact about what remains: three rows and a 90 px ceiling is
+270 px however tall the window is. The rest of the emptiness is not a question about how tall
+a LANE should be — it is a question about how much of the room the timeline frame should claim
+when it has three rows in it, which belongs to the grid. Raising `LANE_MAX_PX` until the
+numbers looked right would answer the wrong question with a 200 px row.
+
+### The harness gap this stage also closed
+
+`syncOutcome()` in `app/e2e/harness.ts` never carried the REFERENCE placement, though the
+engine always places the reference at zero by construction (`crates/core/src/place.rs`). No
+browser spec had ever rendered the reference row: every outcome the suite exercised drew ONE
+clip on a two-device timeline, so the recorder's lane was permanently the §7.5 "placed
+nothing" case, and anything that only goes wrong on a row that HAS clips was untestable there.
+It carries `psr: null`, which is what actually reaches the UI — the engine writes
+`f64::INFINITY` and `serde_json` has no spelling for it, which is why `PreviewPanel` guards the
+field with `Number.isFinite`.
+
+`timeline.spec.ts`'s §7.5 test was split rather than relaxed (D-085): one test now asserts that
+the reference DRAWS its clip at zero, and a second carries the old claim on a fixture that
+actually produces it (an outcome that places cam-a and nothing else).
+
+### What was looked at
+
+Six screenshots at 1280×800 — a three-device drop, the 480-clip card at fit and zoomed in, the
+six-device drop before / mid-hop / landed — compared side by side against the same six on
+`main`. Before: rows of saturated blocks, filenames repeated along a stripe, the waveform a
+darker smudge at the bottom edge. After: an outline, a wash and a legible waveform in every
+box; at fit the dense rows are a countable comb of evenly-spaced ticks instead of a smear of
+overlapping boxes; mid-hop the clips travel with their pictures on them rather than acquiring
+one on landing.

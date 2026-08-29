@@ -2,6 +2,7 @@ import { memo, useMemo } from "react";
 import type { Strings } from "../../i18n";
 import { formatDuration } from "../../i18n";
 import { visibleClips, type TimelineView } from "../../timeline/geometry";
+import { roomBeforeNext } from "../../timeline/hop";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import type { PrewarmStatus } from "../../state";
 import type { TimeSource } from "../../timeline/recordingTime";
@@ -94,6 +95,9 @@ export const Track = memo(function Track({
   /** file -> background pre-analysis status (v0.4, D-062); a file the pass is not
    *  tracking is simply absent. */
   prewarm: Record<string, PrewarmStatus>;
+  /** The row pitch for THIS render, from `laneHeightFor` (D-091). The same number
+   *  `clipBoxes` sums for the hop's y-arithmetic — one computation, two consumers, which is
+   *  what D-083's constant was protecting and what a divergence here would break silently. */
   laneHeight: number;
   /** Mark a clip — by FILE since D-070, so a pre-sync clip can be marked too. */
   onSelect: (file: string) => void;
@@ -188,7 +192,7 @@ export const Track = memo(function Track({
               aria-label={t.subTrackAria(i + 1)}
               style={{ height: `${laneHeight}px` }}
             >
-              {visibleClips(row, visStart, visEnd).map(({ item }) => {
+              {visibleClips(row, visStart, visEnd).map(({ item, index }) => {
                 // With an outcome in hand, a span whose file has no placement is a hole
                 // in the outcome and is not drawn. Before a sync there are no placements
                 // at all, and every span is drawn — that is the whole point (D-061).
@@ -199,6 +203,12 @@ export const Track = memo(function Track({
                     key={item.file}
                     t={t}
                     span={item}
+                    // The neighbour is looked up in the WHOLE row, not in the visible
+                    // window (D-091): the clip at the right edge of the viewport has a
+                    // successor whether or not that successor has a DOM node yet, and a
+                    // width computed against `Infinity` there would widen — and overlap —
+                    // one clip per pan frame, at the one edge nobody is looking at.
+                    roomPx={roomBeforeNext(item, row[index + 1], view.pxPerMs)}
                     placement={placement ?? null}
                     view={view}
                     durationUnknown={unknownDurations.has(item.file)}

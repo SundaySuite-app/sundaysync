@@ -107,22 +107,45 @@ async function scrollbarBoxes(page: Page) {
 }
 
 test.describe("timeline tracks", () => {
-  test("every device gets a track, including one with nothing placed (§7.5)", async ({
+  test("every device gets a track, and the reference draws its own clip at zero", async ({
     page,
   }) => {
     await reachResult(page);
 
-    // The fixture places one clip on cam-a and nothing on rec.
     await expect(page.locator(".track:not(.track--ruler):not(.track--scrollbar)")).toHaveCount(2);
-    await expect(page.getByRole("group", { name: en.trackAria("Zoom recorder") })).toBeVisible();
+    const reference = page.getByRole("group", { name: en.trackAria("Zoom recorder") });
+    await expect(reference).toBeVisible();
     await expect(page.getByRole("group", { name: en.trackAria("Camera A") })).toBeVisible();
 
-    // The empty one says so rather than looking like a rendering failure.
+    // The reference device is badged…
+    await expect(reference.getByText(en.reference)).toBeVisible();
+
+    // …and it has a CLIP, which until the V06-G2 review it never did in this suite. The
+    // engine places the reference at zero by construction (`place.rs`: "The reference
+    // defines the origin"), and `syncOutcome()` had simply never said so — so no browser
+    // spec had ever rendered the reference row, and the row that the whole timeline's
+    // vertical geometry is measured from was permanently the §7.5 empty case here.
+    await expect(reference.locator(".clip")).toHaveCount(1);
+    await expect(reference.getByText(en.emptyLane)).toHaveCount(0);
+    // At zero: its left edge is the lane column's own origin, which is what "the reference
+    // defines the origin" means on screen.
+    const lane = (await page.locator("#timeline-viewport").boundingBox())!;
+    const box = (await reference.locator(".clip").boundingBox())!;
+    expect(box.x - lane.x).toBeLessThanOrEqual(1);
+  });
+
+  test("a device the run placed nothing on is still visible, and says so (§7.5)", async ({
+    page,
+  }) => {
+    // The same claim the test above used to carry, moved to a fixture that actually
+    // produces it (D-085: re-express, never delete). `outcomeWithPlacements` replaces the
+    // placement list wholesale, so this outcome places cam-a and nothing else — the shape a
+    // run has when the reference itself could not be laid out, and the shape §7.5 is about.
+    await reachResult(page, outcomeWithPlacements([placement()]));
+
     const empty = page.getByRole("group", { name: en.trackAria("Zoom recorder") });
     await expect(empty.getByText(en.emptyLane)).toBeVisible();
     await expect(empty.locator(".clip")).toHaveCount(0);
-
-    // The reference device is badged.
     await expect(empty.getByText(en.reference)).toBeVisible();
   });
 
