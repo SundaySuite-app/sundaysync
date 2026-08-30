@@ -82,6 +82,25 @@ Etter en selvkritisk gjennomgang av «Ett rom» med friske øyne (D-092):
   som en egen flate, ordmerket tilbake på 20 px, og avkrysningsbokser i suitens gull i stedet
   for Chromes blå.
 
+Og en ting under panseret, som ikke flytter en piksel men som burde ha vært på plass lenge
+(D-093):
+
+- **Nå starter appen faktisk opp i CI — på ekte Windows og ekte Mac.** Hver eneste utgivelse
+  har bygd et signert Windows-installasjonsprogram og en macOS-DMG, og *ingen av dem hadde
+  noen gang blitt åpnet av noe som helst*. Alt vi har testet av brukerflata har kjørt i
+  Chromium med Tauri-broa etterlignet — 490 enhetstester og 262 nettleser-tester, alle sanne,
+  ingen av dem om det programmet du faktisk installerer. Det kjører i WKWebView på Mac og
+  WebView2 på Windows, to helt andre motorer, og suiten har betalt for akkurat den forskjellen
+  før: SundayEdit sendte ut en tegneflate som var **42 ganger tregere i ekte WKWebView** fordi
+  nettleserstrengen mangler ordet «Safari» — usynlig fra Chromium, ikke fordi vi testet for
+  lite, men fordi det ikke *gikk* an å se det med verktøyene vi hadde. Nå bygges og startes
+  appen på begge plattformer ved hver eneste endring, og den må selv melde fra at den er oppe:
+  at vinduet kom, at brukerflata ble bygd og fikk virkelig størrelse, at stilarket slapp
+  gjennom sikkerhetsreglene, at ingenting kastet en feil under oppstart, at motoren er den
+  riktige for plattformen, og at appen finner ffmpeg-en den bærer med seg. Melder den ikke fra
+  i tide — en app som starter og blir stående svart sier ingenting selv — faller bygget.
+  Skjermbilde og appens egen logg lagres fra hver kjøring, også de som feiler.
+
 ## v0.6.0-beta.3
 
 - **Klippene stokker seg, reiser og spretter på plass — og blir grønne i det de lander.** Når

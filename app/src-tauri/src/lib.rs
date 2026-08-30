@@ -5,6 +5,7 @@
 //! move work off the UI thread, translate progress into events, and hand results to the
 //! frontend as JSON.
 
+mod smoke;
 mod telemetry;
 
 use serde::Serialize;
@@ -2204,12 +2205,28 @@ mod update_tests {
     }
 }
 
+/// The webview reporting that it came up and rendered — D-093, `smoke.rs`.
+///
+/// Offered on every launch because the webview cannot read the shell's environment and so
+/// cannot know whether anyone is listening. `smoke::report` returns immediately unless
+/// `SUNDAYSYNC_SMOKE=1`, so on a normal launch this is one no-op IPC round trip and nothing
+/// else: no file, no stdout, no thread, no exit.
+#[tauri::command]
+fn smoke_report(app: AppHandle, report: smoke::FrontendReport) {
+    smoke::report(&app, report);
+}
+
 /// # Panics
 /// Only if Tauri itself cannot start, which is not a recoverable condition.
 pub fn run() {
     // E7: arm the crash panic hook as early as possible, before any plugin setup,
     // so a panic during startup already leaves a scrubbed record on disk.
     telemetry::install_crash_hook();
+
+    // D-093: under SUNDAYSYNC_SMOKE=1, start the watchdog before anything can hang. A build
+    // that opens no window produces no error of its own, so the deadline is what turns
+    // «did the app launch and render» into something CI can fail on. Inert otherwise.
+    smoke::arm();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -2293,6 +2310,7 @@ pub fn run() {
             update_check,
             update_download_install,
             update_relaunch,
+            smoke_report,
             telemetry::telemetry_status,
             telemetry::set_telemetry_consent,
             telemetry::telemetry_preview,

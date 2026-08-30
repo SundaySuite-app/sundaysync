@@ -4981,3 +4981,121 @@ er et helt multiplum av bildevarigheten» var skrevet før driftkorreksjonen og 
 den dagen den landet; «kalibrert kun på syntetisk materiale» motsa «en foreløpig kalibrering fra
 det første ekte korpuset» i seksjonen tjue linjer under. Tre nye seksjoner: det manglende «Vis i
 Finder»-avviket fra D-092, og de to denne runden selv etterlater.
+
+## D-093 — Nobody had ever launched the thing we ship, and Chromium cannot tell us whether it works
+
+Every release of this app has built a signed Windows NSIS installer and a macOS DMG. Not one
+of them had ever been launched by anything. All frontend verification to date ran in headless
+Chromium with the Tauri IPC mocked (`app/e2e/harness.ts`'s `__TAURI_INTERNALS__` shim) — 262
+Playwright specs and 490-odd vitest cases, all of them true, none of them about the runtime.
+
+The runtime is **WKWebView** on macOS and **WebView2** on Windows. Those are different
+engines from Chromium and from each other, and the suite has already paid for the gap:
+SundayEdit shipped a renderer that was **42× slower in real WKWebView** because its user agent
+carries no `Safari` token, and a dependency branched on that. In Chromium the branch was never
+taken, so the defect was invisible by construction — not under-tested, *untestable* with the
+tools we had. Everything between "the bundle was produced" and "the operator sees the app" was
+unverified: whether the window opens at all, whether the frontend evaluates, whether the CSP
+and Tauri's asset protocol actually let the stylesheet through, whether the app finds the
+ffmpeg it carries.
+
+### The gate is the app's own word
+
+Three mechanisms were on the table.
+
+**(a) A smoke mode the app itself reports from.** An environment variable makes the shell wait
+for the frontend to say it is up, print that as JSON, and exit. Deterministic, needs no
+screen, works identically on both platforms.
+
+**(b) OS screenshot tooling.** `screencapture` on macOS, a PowerShell GDI grab on Windows.
+Cheap, but it can only answer "were pixels present", it is permission-dependent, and a
+screenshot cannot be asserted on without image comparison this round has no appetite for.
+
+**(c) WebDriver.** `tauri-driver` + `msedgedriver` gives real interaction — on Windows only.
+**WKWebView has no WebDriver at all**, so option (c) cannot cover the platform whose engine
+bit us in the first place. Heavy, and half a gate.
+
+**(a) is the gate; (b) is a best-effort artefact next to it.** The honest signal is the one the
+app emits about itself; the picture is for a human who wants to look. (c) stays open as a
+later round for interaction, once launching is no longer the unknown.
+
+### What the frontend reports, and why each field
+
+`app/src/smoke.ts` is imported FIRST in `main.tsx` — ES modules evaluate in import order, so
+its `error`/`unhandledrejection` listeners are attached before `App.tsx` is evaluated. That
+window matters: App.tsx installs its own handlers inside an effect, i.e. only once React has
+already mounted, which is exactly the wrong side of an engine-specific module-evaluation
+failure. The report is taken after two animation frames (a report taken in the same task as
+`render()` would measure a root that has not been laid out and call a healthy app zero-height)
+and carries:
+
+- **`userAgent`** — the field this whole round exists for. Now recorded on every push, on both
+  engines, so the next UA-sniffing dependency is a fact in a log rather than a bug report.
+- **`mounted`** plus **the root's laid-out box** — mounted alone is a weak claim, because an
+  empty `<div>` mounts just as happily; a zero-height root is not a rendered one.
+- **`elementCount`** — a mounted, sized, but empty tree is not the app either.
+- **`bodyBackground`** — the cheapest available proof that the bundled stylesheet was fetched
+  through Tauri's custom asset protocol and applied. The CSP and the protocol both have to be
+  right for this to be anything but transparent, and neither is exercised by Chromium.
+- **`bootErrors`** — everything caught between the first line of the bundle and the report.
+  A WebView2-only `TypeError` is precisely the class of defect that used to reach the owner.
+
+### The guard, and what smoke mode costs a normal launch
+
+`smoke::enabled_from` accepts **exactly the string `"1"`**. Not `"true"`, not `"0"`, and
+specifically not the empty string: an empty environment variable is NOT an absent one, a
+distinction that has already broken a release workflow in this suite (`APPLE_ID: ''` did not
+disable notarization). It is a pure function, and it is unit-tested against all of those
+rather than read and trusted — the failure mode of a wrong guard is a release build that exits
+on its own, so the guard is not something to be confident about.
+
+With smoke mode off, `smoke::arm()` returns before spawning anything and `smoke::report()`
+returns before touching a file, stdout, a thread or the exit code. The single cost to a normal
+launch is **one fire-and-forget `invoke`**: the webview cannot read the shell's environment and
+therefore cannot know whether anyone is listening, so it always offers the report and the
+shell decides. That call is wrapped twice (a synchronous `try` for "no Tauri at all", a
+`.catch` for "a Tauri that rejects the command", which is what the e2e harness does), nothing
+awaits it, and no UI path depends on it.
+
+The watchdog is the half that makes this a gate rather than a hope. A build that starts its
+process, opens no window and sits there forever produces no error of its own to observe; the
+deadline turns that silence into a `timeout` report and a non-zero exit.
+
+### What the job proves — and what it still does not
+
+Per push, on `macos-latest` and `windows-latest`: the app builds, the real binary launches
+(the **.app bundle** on macOS, because that is what a user gets; the **bare exe** on Windows,
+because that is exactly what the NSIS installer's payload is), the webview comes up, the
+frontend evaluates and mounts, the root lays out, the stylesheet applies, nothing throws during
+boot, the engine is the one this platform is supposed to be running, the bundled ffmpeg
+resolves next to the executable (D-031 — the first check in this repo to see the app AS
+bundled), and the process exits 0.
+
+It does **not** prove: that anything is *interactive* (no click is ever made — that is
+WebDriver's job and WKWebView has no driver); that the app *looks* right (no rendering fidelity
+or visual comparison — the screenshot is an artefact for a human, never an assertion); that
+performance is acceptable on either engine (the SundayEdit defect was a *slowness*, and this
+job would have caught its UA cause but not its cost); that the GPU path works, that the
+installer installs, or that a signed and notarized build behaves like this unsigned one. The
+exit is also forced after a backstop if Tauri's clean shutdown does not complete, so a
+crash-on-quit could hide behind a pass — the claim being gated is launch and render.
+
+The verdict itself is a pure function (`validateSmoke` in `app/scripts/native-smoke.mjs`) with
+its own unit tests, including the rules for the platform the test is not running on. A CI gate
+whose logic is only ever exercised on the runner fails **green** when it is wrong, which is
+worse than not having it.
+
+### The user agents, recorded
+
+- **macOS / WKWebView:**
+  `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)`
+  — no `Version/` token and **no `Safari` token**, the exact shape behind the SundayEdit bug.
+  The gate deliberately does not require one, or macOS would fail forever for the wrong
+  reason; it requires `AppleWebKit` and *forbids* `Chrome`, because a macOS run reporting
+  Chrome means the smoke test measured the wrong engine and every conclusion from it is void.
+- **Windows / WebView2:** a Chromium UA carrying both `Chrome/` and `Edg/`; both are required.
+
+### Artefacts
+
+`native-smoke-{macos,windows}-latest`, uploaded on every run including failed ones: the report
+JSON, the app's own stdout and stderr, and a best-effort screenshot.

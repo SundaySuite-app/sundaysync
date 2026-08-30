@@ -152,6 +152,91 @@ jobs:
         working-directory: app/src-tauri
         run: cargo test
 
+  # docs/DECISIONS.md D-093: the built app must LAUNCH and RENDER on the engines it ships on.
+  #
+  # Every check above this one runs the frontend in headless Chromium with the Tauri IPC
+  # mocked (`app/e2e/harness.ts`). The app a user installs runs in WKWebView (macOS) or
+  # WebView2 (Windows), which are different engines — and the suite has already shipped a
+  # defect that lives only in that gap: SundayEdit's renderer was 42× slower in real
+  # WKWebView because its user agent carries no `Safari` token, invisible from Chromium by
+  # construction. Until this job existed, nobody had ever launched a SundaySync installer.
+  #
+  # The gate is the app's own word, not a screen scrape: under `SUNDAYSYNC_SMOKE=1` the shell
+  # (app/src-tauri/src/smoke.rs) writes one JSON line once the webview has mounted, carrying
+  # the user agent, the root's laid-out box, the element count, `<body>`'s computed
+  # background, and every error caught during boot — then exits. A watchdog fails the run if
+  # that never happens, which is the case a launched-but-blank app produces and nothing else
+  # would catch. No display scraping, no WebDriver (WKWebView has no driver anyway).
+  native-smoke:
+    name: Native smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "app/src-tauri -> target"
+
+      # Which WebView2 runtime the runner has. Printed rather than asserted: the version
+      # moves with the image, and the point is to have it in the log next to the user agent
+      # when a Windows-only rendering bug eventually shows up.
+      - name: WebView2 runtime version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          if (Test-Path $key) { "WebView2 runtime: $((Get-ItemProperty $key).pv)" }
+          else { "WebView2 runtime: not found in the registry (the app may still find it)" }
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      # The REAL sidecars, not the stubs the `shell` job uses. This is the only check in the
+      # repo that runs the app as bundled, so it is also the only one that can see D-031's
+      # "ffmpeg travels inside the app" claim fail — the runner treats
+      # "ffmpeg could not be resolved at startup" on the app's stderr as a failure.
+      - name: Fetch ffmpeg sidecars
+        working-directory: app
+        run: node scripts/fetch-ffmpeg.mjs
+
+      # macOS: build the .app, because the .app is what a user gets — Info.plist, bundle
+      # identifier, sidecars in Contents/MacOS, all of it. `tauri.smoke.conf.json` turns off
+      # updater artefacts, which otherwise fail the build outright without the signing key.
+      - name: Build the app (macOS bundle)
+        if: runner.os == 'macOS'
+        working-directory: app
+        run: npx tauri build --debug --bundles app --config src-tauri/tauri.smoke.conf.json
+
+      # Windows: no bundling. The NSIS installer's payload IS this exe, and installing it
+      # would want UAC and minutes for no extra fidelity.
+      - name: Build the app (Windows binary)
+        if: runner.os == 'Windows'
+        working-directory: app
+        run: npx tauri build --debug --no-bundle
+
+      - name: Launch it and prove it rendered
+        working-directory: app
+        run: node scripts/native-smoke.mjs --out ../native-smoke --hold-ms 5000 --timeout-ms 90000
+
+      # `always()`: the artefacts are at their most useful on the run that FAILED — the
+      # report, the app's own stdout/stderr, and a screenshot of whatever was on screen.
+      - name: Upload the smoke artefacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-smoke-${{ matrix.os }}
+          path: native-smoke/
+          if-no-files-found: warn
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
