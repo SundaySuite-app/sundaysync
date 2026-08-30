@@ -4892,96 +4892,6 @@ and the settings dialog. The 1024 exported strip was rebuilt three times against
 measurements before it read as a row of controls rather than as ink on top of ink.
 
 
-## D-094 — R: en innstillingsdialog som får plass, feil på norsk, et lesbart sporhode og et sant begrensningsdokument
-
-Opprydderunden etter designgjennomgangen av v0.6.0-beta.4. Fire jobber, ingen av dem ny
-funksjonalitet — tre målte feil og en sannhetsrunde på dokumentasjonen. Hver av de tre
-oppførselsendringene har en `e2e`-prøve som ble skrevet først og sett feile på `main` (059616b).
-
-### ① Rammen står stille, kroppen ruller
-
-`.dialog` var selv rulleboksen (`overflow: auto`), og ✕-knappen er `position: absolute` inni
-den. Målt på main, begge vindusstørrelser: så snart operatøren ruller ned til den siste
-kontrollen i Innstillinger — 1334 px innhold i en 678 px boks ved 1280×800, 508 px ved 1024×600
-— bæres ✕ og overskrifta **~750 px over toppen av SKJERMEN**. Eneste vei ut er Escape, eller å
-rulle tilbake opp for å finne krysset igjen.
-
-Nå er `.dialog` en flex-kolonne med `overflow: hidden`, og `.dialog__body` er rulleboksen med
-`min-height: 0`. Den nullstillinga er den bærende halvdelen og ikke pynt: et flex-barns
-automatiske minstestørrelse er innholdet, så uten den vokser boksen til 1334 px, `max-height`
-taper, og dialogen renner ut av vinduet akkurat som før — med en rullefelt på en boks som aldri
-flyter over. Overskrifta er `position: sticky` i toppen av rulleboksen, med negative marger ut
-til polstringskanten så innholdet passerer UNDER den og ikke ved siden av.
-
-Forklaringene under hver kontroll er samtidig kuttet til én setning hver, og den ene som bare
-gjentok etiketten sin (`telemetryToggleHint` — «du kan se hva som sendes», rett over de to
-knappene som gjør nettopp det) er borte. Ingen kontroll, ingen etikett og intet
-tilgjengelighetsnavn er rørt; `settings.spec`, `control-sweep.spec`, `update.spec` og
-`consent.spec` fester dem, og alle fire står grønne uendret.
-
-**Det som står igjen** er ærlig og skrevet ned i `KNOWN_LIMITATIONS.md`: panelet er fremdeles
-omtrent dobbelt så høyt som vinduet. Den ekte løsninga er seksjoner eller færre innstillinger,
-og det er en designbeslutning om hvilke av §9s kontroller som fortjener første skjerm.
-
-### ② «busy: sync in progress» var fremdeles engelsk på et norsk banner
-
-V06-kontrollsveipen (D-089) rutet Innstillingers tre kommandoer gjennom `mapEngineError`. Den ga
-dem aldri noe å lande på: `busy:`-avslaget — nøyaktig den saken sveipen ble funnet på — hadde
-ingen gren i kartlegginga, så det falt helt ned til `errUnknown` og en norsk operatør leste
-«Noe gikk galt: busy: sync in progress». Innrammet, ja, men engelsk, og med krasj-ordlyd for en
-tilstand som går over av seg selv. En e2e-prøve *festet* den setningen på main.
-
-Alle steder en motor-avvisning blir synlig tekst er gjennomgått (`String(e)`, `catch`,
-`banner/set`, `.message`, `mapEngineError`-fallbackene). Alle går gjennom kartlegginga; det ene
-som ikke gjorde det, `update.ts`, har ingen `Strings` og rammer inn i `SettingsPanel` i stedet —
-og rammer nå bare inn det kartlegginga *ikke* kjente igjen, så en tidsavbrudd ikke leser «Kunne
-ikke oppdatere: Motoren svarte ikke i tide».
-
-Nye setninger, valgt etter én regel — kan en operatør produsere meldinga ved å BRUKE appen:
-`busy:` × 4 aktiviteter, `too many files to scan` (feilsluppet mappe, D-032),
-`refusing to clear …` (buffer-mappe appen ikke skrev, D-032), `could not decode …`,
-`nothing was extracted for …`, `nothing has been synced yet`, `internal state was poisoned`,
-og `did not answer within … ms` (oppdaterings-tidsavbruddet). Bevisst generiske:
-argumentgrensene (`preview height … out of range`, `requested … samples`) og eksportsti-vaktene
-dialogboksen alt oppfyller — betingelser bare en feil eller en fiendtlig kaller kan nå.
-
-`busy:` er en **notis**, ikke en feil: `kind` bestemmer bannerfargen, og et rødt banner for «synken
-du startet holder fortsatt på» er appen som forteller operatøren at noe gikk i stykker.
-`BUSY_PREFIX` flyttet fra `waveformStore.ts` til `errors.ts` av samme grunn som hullet oppsto:
-det er ikke et bølgeform-begrep.
-
-**Fallbacken** beholder rå tekst — å kaste det eneste faktumet som finnes hjelper ingen — men
-siterer den nå og sier at det er motorens egne ord, så den engelske halen leser som et sitat og
-ikke som at appen bytter språk midt i setninga.
-
-### ③ Navnet slår merket
-
-Sporhodets første linje er ikon, navn, referansemerke og M/S i 14 rem. Merket var ordet
-«Referanse», og ordet vant en kamp det ikke skulle vært i: `.track__name` har `overflow: hidden`
-og dermed automatisk minstestørrelse 0, mens et `nowrap`-merke ikke har noen — så navnet var det
-eneste på linja som *kunne* krympe, og det krympet til ingenting. Målt, begge størrelser, samme
-fikstur: **46,1 px** til navnet, «ZOOM…».
-
-Merket er en ★ nå, og navnet får **92,7 px**. Et glyf framfor et kortere ord fordi dette er ett
-merke på én rad av tolv, lest i et blikk, og stjerna er lesbar på en avstand ordet aldri var —
-eierens «mindre tekst, mer visuelt» brukt på appens tetteste linje. Ordet er ikke tapt: det ligger
-på `aria-label` og `title`, `badge--ref` er fortsatt kroken spesifikasjonene griper i, og
-`role="img"` er det som holder det tilgjengelige navnet et navn. Linje to var den andre kandidaten
-og tapte: «Referanse» er hvem enheten ER, og linje to er uttrykkelig radens fotnote (D-083).
-
-**Kostnaden er at ingenting på skjermen staver ordet.** Skrevet ned i `KNOWN_LIMITATIONS.md`; blir
-sporhodet noen gang bredere, skal ordet tilbake.
-
-### ④ Sannhetsrunde på KNOWN_LIMITATIONS
-
-Alle 21 seksjonene lest mot koden på 059616b. Sju rettet, ingen fjernet for å gjøre fila kortere
-— verdien i dette dokumentet er at det er sant. Verst: «Bufferen vokser uten grense» sa «ingenting
-fjerner den» mens §18 i samme fil sa at 90-dagers feiinga kjører; «hver eneste tid i dokumentet
-er et helt multiplum av bildevarigheten» var skrevet før driftkorreksjonen og sluttet å være sant
-den dagen den landet; «kalibrert kun på syntetisk materiale» motsa «en foreløpig kalibrering fra
-det første ekte korpuset» i seksjonen tjue linjer under. Tre nye seksjoner: det manglende «Vis i
-Finder»-avviket fra D-092, og de to denne runden selv etterlater.
-
 ## D-093 — Nobody had ever launched the thing we ship, and Chromium cannot tell us whether it works
 
 Every release of this app has built a signed Windows NSIS installer and a macOS DMG. Not one
@@ -5093,9 +5003,114 @@ worse than not having it.
   The gate deliberately does not require one, or macOS would fail forever for the wrong
   reason; it requires `AppleWebKit` and *forbids* `Chrome`, because a macOS run reporting
   Chrome means the smoke test measured the wrong engine and every conclusion from it is void.
-- **Windows / WebView2:** a Chromium UA carrying both `Chrome/` and `Edg/`; both are required.
+- **Windows / WebView2:**
+  `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0`
+  — a Chromium UA carrying both `Chrome/` and `Edg/`; both are required. Runtime 151.0.4129.101
+  on the current runner image, printed by the job so the number sits next to the UA when a
+  Windows-only rendering bug eventually shows up.
+
+Note the asymmetry, because it is the whole lesson: the two engines agree on almost nothing in
+that string. A dependency that reads it — and there is no shortage of them — sees a Chromium
+that says Safari on Windows and a Safari that does not say Safari on macOS.
+
+### Proven to bite
+
+Both platforms were run twice on `ci.yml` before this landed: once as written, once against a
+scratch commit that threw during boot. macOS and Windows both passed clean, and both failed on
+the scratch commit with `✗ JS error during boot: … D-093 deliberate boot failure` — a job that
+is green because it silently skipped is worse than no job.
 
 ### Artefacts
 
 `native-smoke-{macos,windows}-latest`, uploaded on every run including failed ones: the report
 JSON, the app's own stdout and stderr, and a best-effort screenshot.
+
+## D-094 — R: en innstillingsdialog som får plass, feil på norsk, et lesbart sporhode og et sant begrensningsdokument
+
+Opprydderunden etter designgjennomgangen av v0.6.0-beta.4. Fire jobber, ingen av dem ny
+funksjonalitet — tre målte feil og en sannhetsrunde på dokumentasjonen. Hver av de tre
+oppførselsendringene har en `e2e`-prøve som ble skrevet først og sett feile på `main` (059616b).
+
+### ① Rammen står stille, kroppen ruller
+
+`.dialog` var selv rulleboksen (`overflow: auto`), og ✕-knappen er `position: absolute` inni
+den. Målt på main, begge vindusstørrelser: så snart operatøren ruller ned til den siste
+kontrollen i Innstillinger — 1334 px innhold i en 678 px boks ved 1280×800, 508 px ved 1024×600
+— bæres ✕ og overskrifta **~750 px over toppen av SKJERMEN**. Eneste vei ut er Escape, eller å
+rulle tilbake opp for å finne krysset igjen.
+
+Nå er `.dialog` en flex-kolonne med `overflow: hidden`, og `.dialog__body` er rulleboksen med
+`min-height: 0`. Den nullstillinga er den bærende halvdelen og ikke pynt: et flex-barns
+automatiske minstestørrelse er innholdet, så uten den vokser boksen til 1334 px, `max-height`
+taper, og dialogen renner ut av vinduet akkurat som før — med en rullefelt på en boks som aldri
+flyter over. Overskrifta er `position: sticky` i toppen av rulleboksen, med negative marger ut
+til polstringskanten så innholdet passerer UNDER den og ikke ved siden av.
+
+Forklaringene under hver kontroll er samtidig kuttet til én setning hver, og den ene som bare
+gjentok etiketten sin (`telemetryToggleHint` — «du kan se hva som sendes», rett over de to
+knappene som gjør nettopp det) er borte. Ingen kontroll, ingen etikett og intet
+tilgjengelighetsnavn er rørt; `settings.spec`, `control-sweep.spec`, `update.spec` og
+`consent.spec` fester dem, og alle fire står grønne uendret.
+
+**Det som står igjen** er ærlig og skrevet ned i `KNOWN_LIMITATIONS.md`: panelet er fremdeles
+omtrent dobbelt så høyt som vinduet. Den ekte løsninga er seksjoner eller færre innstillinger,
+og det er en designbeslutning om hvilke av §9s kontroller som fortjener første skjerm.
+
+### ② «busy: sync in progress» var fremdeles engelsk på et norsk banner
+
+V06-kontrollsveipen (D-089) rutet Innstillingers tre kommandoer gjennom `mapEngineError`. Den ga
+dem aldri noe å lande på: `busy:`-avslaget — nøyaktig den saken sveipen ble funnet på — hadde
+ingen gren i kartlegginga, så det falt helt ned til `errUnknown` og en norsk operatør leste
+«Noe gikk galt: busy: sync in progress». Innrammet, ja, men engelsk, og med krasj-ordlyd for en
+tilstand som går over av seg selv. En e2e-prøve *festet* den setningen på main.
+
+Alle steder en motor-avvisning blir synlig tekst er gjennomgått (`String(e)`, `catch`,
+`banner/set`, `.message`, `mapEngineError`-fallbackene). Alle går gjennom kartlegginga; det ene
+som ikke gjorde det, `update.ts`, har ingen `Strings` og rammer inn i `SettingsPanel` i stedet —
+og rammer nå bare inn det kartlegginga *ikke* kjente igjen, så en tidsavbrudd ikke leser «Kunne
+ikke oppdatere: Motoren svarte ikke i tide».
+
+Nye setninger, valgt etter én regel — kan en operatør produsere meldinga ved å BRUKE appen:
+`busy:` × 4 aktiviteter, `too many files to scan` (feilsluppet mappe, D-032),
+`refusing to clear …` (buffer-mappe appen ikke skrev, D-032), `could not decode …`,
+`nothing was extracted for …`, `nothing has been synced yet`, `internal state was poisoned`,
+og `did not answer within … ms` (oppdaterings-tidsavbruddet). Bevisst generiske:
+argumentgrensene (`preview height … out of range`, `requested … samples`) og eksportsti-vaktene
+dialogboksen alt oppfyller — betingelser bare en feil eller en fiendtlig kaller kan nå.
+
+`busy:` er en **notis**, ikke en feil: `kind` bestemmer bannerfargen, og et rødt banner for «synken
+du startet holder fortsatt på» er appen som forteller operatøren at noe gikk i stykker.
+`BUSY_PREFIX` flyttet fra `waveformStore.ts` til `errors.ts` av samme grunn som hullet oppsto:
+det er ikke et bølgeform-begrep.
+
+**Fallbacken** beholder rå tekst — å kaste det eneste faktumet som finnes hjelper ingen — men
+siterer den nå og sier at det er motorens egne ord, så den engelske halen leser som et sitat og
+ikke som at appen bytter språk midt i setninga.
+
+### ③ Navnet slår merket
+
+Sporhodets første linje er ikon, navn, referansemerke og M/S i 14 rem. Merket var ordet
+«Referanse», og ordet vant en kamp det ikke skulle vært i: `.track__name` har `overflow: hidden`
+og dermed automatisk minstestørrelse 0, mens et `nowrap`-merke ikke har noen — så navnet var det
+eneste på linja som *kunne* krympe, og det krympet til ingenting. Målt, begge størrelser, samme
+fikstur: **46,1 px** til navnet, «ZOOM…».
+
+Merket er en ★ nå, og navnet får **92,7 px**. Et glyf framfor et kortere ord fordi dette er ett
+merke på én rad av tolv, lest i et blikk, og stjerna er lesbar på en avstand ordet aldri var —
+eierens «mindre tekst, mer visuelt» brukt på appens tetteste linje. Ordet er ikke tapt: det ligger
+på `aria-label` og `title`, `badge--ref` er fortsatt kroken spesifikasjonene griper i, og
+`role="img"` er det som holder det tilgjengelige navnet et navn. Linje to var den andre kandidaten
+og tapte: «Referanse» er hvem enheten ER, og linje to er uttrykkelig radens fotnote (D-083).
+
+**Kostnaden er at ingenting på skjermen staver ordet.** Skrevet ned i `KNOWN_LIMITATIONS.md`; blir
+sporhodet noen gang bredere, skal ordet tilbake.
+
+### ④ Sannhetsrunde på KNOWN_LIMITATIONS
+
+Alle 21 seksjonene lest mot koden på 059616b. Sju rettet, ingen fjernet for å gjøre fila kortere
+— verdien i dette dokumentet er at det er sant. Verst: «Bufferen vokser uten grense» sa «ingenting
+fjerner den» mens §18 i samme fil sa at 90-dagers feiinga kjører; «hver eneste tid i dokumentet
+er et helt multiplum av bildevarigheten» var skrevet før driftkorreksjonen og sluttet å være sant
+den dagen den landet; «kalibrert kun på syntetisk materiale» motsa «en foreløpig kalibrering fra
+det første ekte korpuset» i seksjonen tjue linjer under. Tre nye seksjoner: det manglende «Vis i
+Finder»-avviket fra D-092, og de to denne runden selv etterlater.
