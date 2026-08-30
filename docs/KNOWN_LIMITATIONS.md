@@ -21,8 +21,12 @@ that governs the audio is exact and sub-frame; only the visible clip edge is qua
 
 ## FCPXML: what is verified and what is not
 
-- Times are exact rationals throughout, including NTSC rates, and every time in the
-  document is a whole multiple of the frame duration.
+- Times are exact rationals throughout, including NTSC rates. Every `offset` and
+  `duration` is a whole multiple of the frame duration; the `<timeMap>` a drift-corrected
+  clip carries is **not** — its `timept`s are written on a finer 1/48000 s timebase on
+  purpose (`fcpxml.rs`), because a frame-quantised retime ratio is not a retime ratio.
+  (The doc claimed frame-multiples throughout until the R round; that was written before
+  drift correction landed and stopped being true the day it did.)
 - Video snaps to the frame grid; the residual is recorded per clip.
 - **Sub-frame audio placement is not implemented.** §6 allows it, but everything is
   currently frame-aligned. Whether Resolve would honour sub-frame audio offsets is
@@ -52,17 +56,29 @@ pair. That supersedes PLAN §10's "< 40 MB excluding ffmpeg" budget, which only 
 described the part of the download the user did not have to think about. The app's own
 code is 10 MB.
 
-## The analysis cache grows without bound
+## The analysis cache is bounded by age, not by size — unless you say so
 
-Roughly 169 MB per hour of audio, and nothing removes it. A church syncing weekly will
-accumulate tens of GB over a year. There is no eviction policy and the plan does not
-specify one. See DECISIONS.md D-013.
+Roughly 169 MB per hour of audio. This section used to say "nothing removes it"; that has
+been false since D-040. A **90-day mtime sweep runs at every app start, on by default**
+(`lib.rs`, `cache.rs`'s `sweep_older_than`), and a size cap exists — but the cap is
+**off unless the operator sets one** (`cacheCapMb` defaults to `null`).
 
-## Thresholds are calibrated on synthetic material only
+What is left is the shape of the bound, not its absence: a church syncing weekly still
+holds a rolling 90 days of analysis, which on a two-hour service is a few GB rather than
+the tens of GB the old text warned about. Settings shows the live number and can clear it.
+See D-013, D-040.
 
-`MIN_PSR = 15.0` was measured against generated fixtures (D-015). Real rooms, real mics and
-real congregations are not in that sample. Phase 6's corpus is what would make this claim
-trustworthy; until then, treat the threshold as provisional.
+## The base threshold is synthetic; the bars derived from it are not
+
+`MIN_PSR = 15.0` was measured against generated fixtures (D-015) — real rooms, real mics and
+real congregations are not in *that* sample, and the number is still provisional.
+
+The section used to stop there and say "synthetic material only", which stopped being true
+at D-045: the factors applied *on top of* 15.0 — the 5/3 short-clip bar (see "Short clips
+clear a higher bar") and the credible-evidence factor in `place.rs` — were tuned against the
+first real corpus, where every observed false placement scored between 15 and 19. So the
+honest statement is a split one: the floor is synthetic, the rules built on it are not, and
+a larger real corpus is what would let the floor itself move.
 
 ## Playback is the analysis audio, not the mix (v0.3)
 
@@ -95,9 +111,11 @@ Judging the final audio still means exporting and listening in Resolve.
   vitest covers the reducer, error mapping, settings logic and every pure timeline module.
 - **One known accessibility violation, accepted deliberately.** The "Rebuild waveform"
   affordance inside a clip is a `role="button"` span nested inside the clip's own real
-  `<button>`, which axe flags as `nested-interactive`. Both halves are forced: the clip
+  `<button>` — the shape the `nested-interactive` rule names. Named from reading the code,
+  not measured: **there is no axe (or any other automated a11y checker) in this repo**, so
+  nothing in CI reports this and nothing in CI would report a second one. Both halves are forced: the clip
   root must stay a `<button>` (the timeline tells a clip click from a background-pan
-  gesture by `target.closest("button, …")`), and a genuinely nested `<button>` is
+  gesture by `target.closest("button, ...")`), and a genuinely nested `<button>` is
   *un-nested by the HTML parser*, which would break the DOM rather than merely fail a
   validator. The span is keyboard-operable (`tabIndex`, Enter/Space, `aria-disabled`), so
   the practical cost is the flagged rule, not a lost control. See D-054/D-055/D-057.
@@ -107,9 +125,12 @@ Judging the final audio still means exporting and listening in Resolve.
 Files land on the timeline the moment they are scanned, positioned by whatever clock the app
 can find without listening to anything. That is frequently wrong: cameras drift, cameras are
 set to the wrong time zone, and a camera that lost its battery comes back reading 1970. Those
-clips are drawn in a muted grey rather than the placed green, and they say «foreløpig» in as
-many words — but the picture is still a *claim by the cards*, not by SundaySync, until the
-sync corrects it.
+clips are drawn with a dashed top edge — grey while their audio is unanalysed and blue once it
+is (D-080), never the placed green — and the slot carries «Foreløpig» behind an ⓘ, with the
+whole sentence on its `title` (D-092). The picture is a *claim by the cards*, not by
+SundaySync, until the sync corrects it. (Until the R round this section said the clips were
+"muted grey" and said «foreløpig» "in as many words"; both were written before D-080 and
+D-092 and neither survived them.)
 
 Since v0.5 (D-067) that clock is a **ladder of four kinds of evidence**, not one field, and
 the specific shapes are these:
@@ -197,8 +218,8 @@ needs a decision about whether the zoom changes too, which is a design question 
 
 ## The 12 kHz playback note is a tooltip, not a caption (v0.6)
 
-«lyd for synk-kontroll (12 kHz analyselyd), ikke eksportkvalitet» was a visible caption under the
-transport. In the 38 px slot it is the transport bar's `title` (D-083): measured, the slot at
+«Lyd for kontroll av synk (12 kHz analyselyd) — ikke eksportkvalitet» (`i18n`'s
+`playbackQualityNote`) was a visible caption under the transport. In the 38 px slot it is the transport bar's `title` (D-083): measured, the slot at
 1280×800 is exactly full without it, and at 1024×600 it overflowed by 38 px with it — and a sentence
 cut off mid-word is not a sentence anybody reads.
 
@@ -225,6 +246,42 @@ But at 1024:
 The honest fix is a stated rule for what the strip DROPS at a narrow window — «Legg til» becoming
 icon-only, or the project name moving off the strip — and that is a design decision about which
 claim matters least, not a number. Named here rather than guessed at.
+
+**There is no separate «Vis i Finder» button any more (D-092).** The exported strip at 1024
+needs ~1080 px of a 1000 px line for its nine things, so one of them went rather than all nine
+shrinking to illegibility, and the one that went was the button — because it and the receipt
+were always one object. Pressing the receipt sentence opens the file. Its accessible name still
+*ends* in «Vis i Finder», so screen readers and specs find it by that name and the visible text
+is part of it (WCAG 2.5.3), but a sighted operator looking for a button labelled «Vis i Finder»
+will not find one. Stated here because it is a deviation from D-081's "one primary action always
+in the same place", knowingly taken.
+
+## The settings dialog scrolls; it does not fit (R)
+
+At 1280×800 the settings panel is ~1300 px of content in a ~680 px box, and at 1024×600 in a
+~510 px one — so roughly half of it is below the fold at any window this app supports. Since the
+R round the **frame** holds still and only the body moves (the ✕ and the heading no longer ride
+the content off the top of the screen, which they did), and the explanatory prose under each
+control has been cut to one sentence each. It is still a scrolling panel with no map of itself:
+nothing tells the operator that «System» and the diagnostics button exist below the fold.
+
+The real fix is structural — sections, or a two-column layout, or fewer settings — and that is a
+design decision about which of §9's advanced controls deserve to be on the first screen, not a
+CSS change. Pinned at both sizes in `tidy-round.spec.ts`.
+
+## The reference mark in the gutter is a star, not a word (R)
+
+The device gutter's first line is icon, name, reference mark and the M/S buttons in 14 rem. The
+mark used to be the word «Referanse», and at that width the word won: `.track__name` shrinks
+(it has `overflow: hidden`) and a `nowrap` badge does not, so a real recorder name rendered as
+«ZOOM…» — 46 px of it. The mark is a ★ now and the name gets 93 px, which is double but still
+not the whole name; a long name still ellipsises.
+
+**The cost is discoverability.** «Referanse» is on the mark's `aria-label` and `title`, so a
+screen reader and a hover both say it, but nothing on screen spells the word out — an operator
+meeting the app for the first time has to hover to learn what the star means. Accepted because
+the name is what twelve rows are scanned for and the mark is what one row carries; if the
+gutter ever gets wider, the word should come back.
 
 ## The scan's ✕ needs a clip or a problem row (v0.6)
 
@@ -262,8 +319,11 @@ recoverable rather than open-ended:
 - The work is the same decode the sync would have done anyway, into the same cache — nothing
   is done twice, and an excluded file's cache entry is simply never read.
 - An excluded file is skipped by any *later* pass, and by the sync itself.
-- Pressing Sync preempts the pass within a second or two (D-059); dropping a different folder
-  cancels it (D-063); clearing the sources cancels it.
+- Pressing Sync preempts the pass (D-059); dropping a different folder cancels it (D-063);
+  clearing the sources cancels it. **The preemption is bounded at 5 s, not "a second or
+  two"** (`PREWARM_PREEMPT_WAIT`): §7.4's ≤ 2 s is the engine's cancel budget, and the guard
+  deliberately waits longer than that before giving up and reporting busy, so a healthy
+  cancel never loses the race. A wedged read on a dead NAS can use all five.
 - The cache is swept on the 90-day mtime rule (D-040), so an unneeded entry is not permanent.
 
 What it is not: it is not something to wait for, and it never reports failure. A pass that is

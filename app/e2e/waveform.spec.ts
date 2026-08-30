@@ -245,7 +245,7 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     const busy = clipBox(page).getByRole("button", { name: busyLabel });
     await expect(busy).toBeVisible();
     await expect(busy).not.toHaveAttribute("aria-disabled", "true");
-    await expect(busy).toHaveAttribute("title", /busy: sync in progress/);
+    await expect(busy).toHaveAttribute("title", en.errBusySync);
     await expect(clipBox(page).getByText(en.errUnknown("busy: sync in progress"))).toHaveCount(0);
 
     // Retrying is the same action, still available — not a dead end.

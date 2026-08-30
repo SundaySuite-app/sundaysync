@@ -26,6 +26,27 @@
 
 ## Uutgitt
 
+Opprydderunden etter designgjennomgangen (D-094):
+
+- **Innstillinger renner ikke lenger ut av vinduet.** Panelet er nesten dobbelt så høyt som
+  boksen det ligger i, og fram til nå rullet hele dialogen — så i det du kom ned til den siste
+  knappen, var ✕ og overskrifta båret 750 piksler over toppen av skjermen. Eneste vei ut var
+  Escape. Nå står ramma stille og bare innholdet ruller, overskrifta blir liggende øverst, og
+  forklaringene under hver innstilling er kuttet til én setning hver — den som bare gjentok
+  etiketten sin er borte. Alle kontrollene er der, uendret.
+- **Motoren snakker norsk hele veien ned.** «Noe gikk galt: busy: sync in progress» — engelsk
+  motortekst med krasj-ordlyd for noe som går over av seg selv — er borte, sammen med resten av
+  de rå meldingene en operatør faktisk kan treffe: for mange filer i en feilsluppet mappe, en
+  buffer-mappe appen ikke har skrevet, en fil lyden ikke kan leses ut av. «Vent litt — en
+  synkronisering holder på» er dessuten en beskjed, ikke en feil, og males ikke lenger rødt. En
+  melding appen aldri har hørt om beholder fortsatt sin egen tekst — men sitert, inne i en norsk
+  setning, aldri alene.
+- **Enhetsnavnet får plassen i sporhodet.** «Referanse»-merket tok bredden og en ekte opptaker
+  sto igjen som «ZOOM…» — 46 piksler av navnet. Merket er en gullstjerne nå (ordet ligger på
+  hover og på skjermleseren), og navnet får dobbelt så mye plass.
+- **`docs/KNOWN_LIMITATIONS.md` er sant igjen.** Alle 21 seksjonene lest mot koden; sju rettet,
+  ingen fjernet for å gjøre fila kortere.
+
 Etter en selvkritisk gjennomgang av «Ett rom» med friske øyne (D-092):
 
 - **«Kilder» viser alle filene igjen.** Med mer enn en skjermhøyde i lista klemte panelet

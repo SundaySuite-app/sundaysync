@@ -117,8 +117,9 @@ test.describe("timeline tracks", () => {
     await expect(reference).toBeVisible();
     await expect(page.getByRole("group", { name: en.trackAria("Camera A") })).toBeVisible();
 
-    // The reference device is badged…
-    await expect(reference.getByText(en.reference)).toBeVisible();
+    // The reference device is marked — a ★ carrying «Referanse» as its accessible name
+    // since R/D-094, so the device name gets the gutter's width. See gutter.spec.ts.
+    await expect(reference.getByRole("img", { name: en.reference })).toBeVisible();
 
     // …and it has a CLIP, which until the V06-G2 review it never did in this suite. The
     // engine places the reference at zero by construction (`place.rs`: "The reference
@@ -146,7 +147,7 @@ test.describe("timeline tracks", () => {
     const empty = page.getByRole("group", { name: en.trackAria("Zoom recorder") });
     await expect(empty.getByText(en.emptyLane)).toBeVisible();
     await expect(empty.locator(".clip")).toHaveCount(0);
-    await expect(empty.getByText(en.reference)).toBeVisible();
+    await expect(empty.getByRole("img", { name: en.reference })).toBeVisible();
   });
 
   test("two overlapping clips on one device stack into two sub-tracks", async ({ page }) => {

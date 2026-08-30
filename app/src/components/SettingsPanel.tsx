@@ -22,6 +22,7 @@ import {
   subscribeProgress,
   type UpdateStatus,
 } from "../update";
+import type { Banner } from "../state";
 import type { CacheStatus, SidecarStatus } from "../types";
 import { Dialog } from "./Dialog";
 
@@ -40,8 +41,15 @@ function updateStatusText(t: Strings, u: UpdateStatus): string {
       return t.updateDownloading(u.percent);
     case "readyToInstall":
       return t.updateReady(u.version);
-    case "error":
-      return t.updateError(u.message);
+    case "error": {
+      // R/D-094: `update.ts` has no `Strings` to hand, so it carries the raw rejection up
+      // and the framing happens here. A message the mapping recognises — a timeout, a
+      // `busy:` refusal — is already a whole Norwegian sentence and must NOT be wrapped
+      // again («Kunne ikke oppdatere: Motoren svarte ikke i tide»); only the §7.5 fallback
+      // needs the frame, and `unmapped` is how it says so.
+      const mapped = mapEngineError(u.message, t);
+      return mapped.kind === "error" && mapped.unmapped ? t.updateError(u.message) : mapped.text;
+    }
   }
 }
 
@@ -62,9 +70,17 @@ function updateStatusText(t: Strings, u: UpdateStatus): string {
  * through `mapEngineError`, and §7.5's honesty rule is satisfied by the mapping too: an
  * unrecognised message keeps its raw text, inside a sentence that says what it is. Found in
  * the V06 control sweep, on the D-046 activity guard refusing a cache clear mid-sync.
+ *
+ * That sweep routed the calls; it did not give the messages anywhere to land. A `busy:`
+ * refusal — the exact case it was found on — still had no branch in `mapEngineError`, so it
+ * fell through to `errUnknown` and a Norwegian operator read «Noe gikk galt: busy: sync in
+ * progress»: framed, yes, but English, and crash-shaped wording for a condition that clears
+ * itself. It has its own sentence now, and its own banner colour — hence the KIND travelling
+ * with the text (R, D-094). A wait is not a failure and must not be painted red.
  */
-function engineErrorText(e: unknown, t: Strings): string {
-  return mapEngineError(String(e), t).text;
+function engineError(e: unknown, t: Strings): { kind: Banner["kind"]; text: string } {
+  const mapped = mapEngineError(String(e), t);
+  return { kind: mapped.kind === "notice" ? "info" : "error", text: mapped.text };
 }
 
 export function SettingsPanel({
@@ -80,7 +96,9 @@ export function SettingsPanel({
   onLangChange: (lang: Lang | null) => void;
   onShowOnboarding: () => void;
   onShowConsent: () => void;
-  onNotice: (kind: "ok" | "error", text: string) => void;
+  /** Widened from `"ok" | "error"` (R, D-094): a D-046 «vent litt» is a notice, and a
+   *  notice painted in the error colour is the app telling the operator something broke. */
+  onNotice: (kind: Banner["kind"], text: string) => void;
 }) {
   const settings = getSettings();
   const [minPsrDraft, setMinPsrDraft] = useState(
@@ -229,7 +247,10 @@ export function SettingsPanel({
       onNotice("ok", t.cacheCleared(formatBytes(freed)));
       refreshCache();
     } catch (e) {
-      onNotice("error", engineErrorText(e, t));
+      {
+        const { kind, text } = engineError(e, t);
+        onNotice(kind, text);
+      }
     }
   };
 
@@ -259,7 +280,10 @@ export function SettingsPanel({
       if (ev.entries > 0) onNotice("ok", t.cacheEvicted(ev.entries, formatBytes(ev.bytes)));
       refreshCache();
     } catch (e) {
-      onNotice("error", engineErrorText(e, t));
+      {
+        const { kind, text } = engineError(e, t);
+        onNotice(kind, text);
+      }
     }
   };
 
@@ -273,7 +297,10 @@ export function SettingsPanel({
       await invoke("export_diagnostics", { path });
       onNotice("ok", t.diagnosticsSaved);
     } catch (e) {
-      onNotice("error", engineErrorText(e, t));
+      {
+        const { kind, text } = engineError(e, t);
+        onNotice(kind, text);
+      }
     }
   };
 
@@ -435,7 +462,6 @@ export function SettingsPanel({
               />
               <span>{t.telemetryToggleLabel}</span>
             </span>
-            <small>{t.telemetryToggleHint}</small>
           </label>
           <small className="subtle">
             {telemetry ? t.telemetryStatus(telemetry.granted, telemetry.queued) : t.telemetryUnavailable}

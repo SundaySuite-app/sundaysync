@@ -373,10 +373,15 @@ describe("classifyWaveformError", () => {
     expect(err.text).toBe(nb.errCacheMissing);
   });
 
-  it("maps a D-046 busy refusal to kind busy, carrying the raw detail", () => {
+  it("maps a D-046 busy refusal to kind busy, named in the operator's language", () => {
+    // R/D-094: the detail used to be the RAW rejection, because the mapping had no busy
+    // branch to send it to. It has one now — per activity — so the tooltip this text ends
+    // up in (`WaveformCanvas`'s `title`) is Norwegian too, and nothing is lost: the
+    // sentence says which activity is holding the slot, which is all the raw string said.
     const err = classifyWaveformError("busy: sync in progress", nb);
     expect(err.kind).toBe("busy");
-    expect(err.text).toContain("busy: sync in progress");
+    expect(err.text).toBe(nb.errBusySync);
+    expect(err.text).not.toContain("busy: sync in progress");
   });
 
   it("maps the other maintenance-busy variant the same way", () => {

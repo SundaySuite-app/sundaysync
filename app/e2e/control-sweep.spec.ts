@@ -924,7 +924,7 @@ test.describe("sources: the inspector's three decisions", () => {
     await expect(star).toHaveAttribute("aria-pressed", "true");
     await expect(auto).toBeHidden();
     const camA = page.getByRole("group", { name: en.trackAria("Camera A") });
-    await expect(camA.locator(".badge--ref")).toHaveText(en.reference);
+    await expect(camA.getByRole("img", { name: en.reference })).toBeVisible();
     await expect(page.locator(".badge--ref")).toHaveCount(1);
 
     await star.click();
@@ -1177,7 +1177,7 @@ test.describe("result: the timeline and the gutter", () => {
   test("the reference badge names the device the engine chose", async ({ page }) => {
     await reachResult(page);
     const rec = page.getByRole("group", { name: en.trackAria("Zoom recorder") });
-    await expect(rec.locator(".badge--ref")).toHaveText(en.reference);
+    await expect(rec.getByRole("img", { name: en.reference })).toBeVisible();
     await expect(page.locator(".badge--ref")).toHaveCount(1);
   });
 
@@ -1491,15 +1491,20 @@ test.describe("settings dialog", () => {
     await dialog.getByRole("button", { name: en.cacheClear }).click();
 
     const banner = page.locator(".banner");
-    await expect(banner).toHaveClass(/banner--error/);
     // Localised, like every other engine error the operator can meet (D-030) — an
     // unrecognised message keeps its raw text (§7.5), inside a sentence that says what it is.
-    await expect(banner).toContainText(en.errUnknown("busy: sync in progress"));
+    // R/D-094: this one used to read «Something went wrong: busy: sync in progress» —
+    // framed, but English, and crash-shaped for a condition that clears itself. It has its
+    // own sentence now, and an INFO banner: a wait is not a failure.
+    await expect(banner).toContainText(en.errBusySync);
+    await expect(banner).not.toContainText("busy: sync in progress");
+    await expect(banner).toHaveClass(/banner--info/);
 
     // A recognised one is replaced outright by the sentence the dictionary has for it. (The
     // banner is a single slot, so the second notice takes the first one's place.)
     await dialog.getByRole("button", { name: en.diagnostics }).click();
     await expect(banner).toContainText(en.errIo("/Users/e2e/out"));
+    await expect(banner).toHaveClass(/banner--error/);
   });
 
   test("what Settings says back is read OVER the modal — the owner's call (D-089)", async ({

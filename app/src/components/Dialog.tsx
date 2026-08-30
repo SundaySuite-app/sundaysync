@@ -95,7 +95,16 @@ export function Dialog({
             ✕
           </button>
         )}
-        {children}
+        {/* The scroller (R, D-094). `.dialog` used to be the scrolling box itself, and the ✕
+            above is `position: absolute` inside it — so scrolling to the bottom of Settings
+            (1334 px of content in a 678 px box at 1280×800; 508 px at 1024×600) carried the
+            close button and the heading ~750 px off the top of the SCREEN. The way out was
+            Escape, or scrolling back up to find the ✕ again. Now the frame holds still and
+            only this box moves. `min-height: 0` in the sheet is the load-bearing half: a
+            flex child's automatic minimum size is its content, so without it the box simply
+            grows to 1334 px and pushes the whole dialog past `max-height` again — the exact
+            trap this was meant to close. */}
+        <div className="dialog__body">{children}</div>
       </div>
     </div>
   );

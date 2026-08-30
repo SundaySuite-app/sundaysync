@@ -16,7 +16,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { CACHE_MISSING, mapEngineError, type MappedError } from "../errors";
+import { BUSY_PREFIX, CACHE_MISSING, mapEngineError, type MappedError } from "../errors";
 import type { Strings } from "../i18n";
 import { getSettings } from "../settings";
 import type { WaveformMeta } from "../types";
@@ -351,7 +351,7 @@ export interface WaveformError {
 /** Stable prefix on the D-046 activity-guard refusal (`ActivityGuard::begin` in
  *  `lib.rs`) — `"busy: sync in progress"` / `"busy: cache maintenance in progress"`.
  *  Matched the same way `errors.ts` matches every other stable engine prefix (D-030). */
-export const BUSY_PREFIX = "busy:";
+export { BUSY_PREFIX };
 
 function rawMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -403,7 +403,7 @@ export function classifyWaveformError(e: unknown, t: Strings): WaveformError {
     }
   }
   if (raw.includes(BUSY_PREFIX)) {
-    return { kind: "busy", text: raw };
+    return { kind: "busy", text: mapEngineError(raw, t).text };
   }
   return { kind: "other", text: mapEngineError(raw, t).text };
 }
