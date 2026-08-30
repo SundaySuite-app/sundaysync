@@ -130,7 +130,33 @@ export const Track = memo(function Track({
           <span className="track__name" title={name}>
             {name}
           </span>
-          {isReference && <span className="badge badge--ref">{t.reference}</span>}
+          {/* The reference mark (R, D-094). It was the word «Referanse» in a `badge`, and the
+              word won a fight it should not have been in: `.track__name` has `overflow:
+              hidden`, which zeroes its automatic minimum size, while a `white-space: nowrap`
+              badge has none — so in a 14 rem gutter the badge took its ~60 px and «ZOOM
+              H6 — Hovedmikser» became «Zoom…». The name is the thing the operator is looking
+              for; the badge is a property OF that name, and a property must not eat its
+              subject.
+
+              A glyph rather than a shorter word: this is a mark on one row out of twelve,
+              read at a glance, and the ★ is legible at a distance the word never was — the
+              owner's «mindre tekst, mer visuelt» applied to the densest line in the app. The
+              word is not lost, it moves to where a word belongs: `aria-label` for the screen
+              reader and `title` for the pointer. `badge--ref` stays the hook, and
+              `role="img"` is what keeps the accessible name a name and not stray text.
+
+              Line two was the other candidate and lost: «Referanse» is who this device IS,
+              and line two is explicitly the row's footnote (D-083). */}
+          {isReference && (
+            <span
+              className="badge badge--ref"
+              role="img"
+              aria-label={t.reference}
+              title={t.reference}
+            >
+              ★
+            </span>
+          )}
           {showMix && (
             <span className="track__mix">
               <button

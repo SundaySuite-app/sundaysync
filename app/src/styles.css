@@ -1246,7 +1246,20 @@ select:hover, input:hover { border-color: var(--accent-border); }
   min-width: 0;
 }
 .track__gutter svg { flex-shrink: 0; color: var(--text3); }
-.track__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* `flex: 1 1 auto` says out loud what the name is for: it takes the room the fixed things
+   beside it do not need. Everything else on the line is now `flex-shrink: 0` and small, so
+   there is a real amount of room to take — see `.badge--ref` below. */
+.track__name { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The reference mark in the gutter (R, D-094). One glyph, fixed, never a shrink target —
+   the word it replaced is on `aria-label`/`title` (see Track.tsx). `line-height: 1` keeps
+   the star from growing the 13 px line the two-line gutter's height arithmetic assumes. */
+.track__ident .badge--ref {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--accent);
+}
 
 /* Line two. Quieter than the name by a whole step — it is the row's footnote, not its
    heading, and a device whose count shouted as loud as its name would make twelve rows read
@@ -2018,12 +2031,42 @@ select:hover, input:hover { border-color: var(--accent-border); }
   max-width: 34rem;
   width: 100%;
   max-height: 85vh;
-  overflow: auto;
-  padding: 1.5rem;
+  /* The FRAME. It does not scroll — `.dialog__body` does (R, D-094). What that buys is a ✕
+     that is always where it was put: it is `position: absolute` against this box, so while
+     this box was the scroller it travelled with the content and left the screen entirely at
+     the bottom of a long panel. `overflow: hidden` also keeps the rounded corners clipping
+     the body's own scrollbar. */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
   position: relative;
 }
+/* `min-height: 0` is not decoration. A flex child's automatic minimum size is its
+   content, so a 1334 px settings panel would refuse to shrink into a 678 px frame,
+   `max-height` would lose, and the dialog would run off the bottom of the window exactly
+   as it did before — with the scrollbar sitting on a box that never overflows. */
+.dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.5rem;
+}
 .dialog h2 { font-size: 1.05rem; margin-bottom: 1rem; }
-.dialog__close { position: absolute; top: 0.9rem; right: 0.9rem; }
+/* The heading rides along at the top of the scroller. Negative margins take it out to the
+   body's padding edge so the content passes UNDER it rather than beside it; the padding
+   puts the inset back visually. Only a direct child qualifies — a dialog whose heading is
+   nested inside its own layout (Onboarding) simply scrolls as before. */
+.dialog__body > h2 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -1.5rem -1.5rem 1rem;
+  padding: 1.5rem 3rem 0.6rem 1.5rem;
+  background: var(--surface);
+}
+.dialog__close { position: absolute; top: 0.9rem; right: 0.9rem; z-index: 2; }
 
 .detail-grid {
   display: grid;

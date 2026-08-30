@@ -42,13 +42,12 @@ import { SourcesPopover } from "./components/shell/SourcesPopover";
 import { problemFiles, sourceCounts } from "./components/shell/sourcesModel";
 import { TopStrip } from "./components/shell/TopStrip";
 
-import { mapEngineError } from "./errors";
+import { BUSY_PREFIX, mapEngineError } from "./errors";
 import { invokeWithTimeout } from "./invoke";
 import { detectLang, dictionaries, formatDuration, type Lang, type Strings } from "./i18n";
 import { getSettings } from "./settings";
-import { initialState, reducer, type PrewarmEndReason } from "./state";
+import { initialState, reducer, type Banner, type PrewarmEndReason } from "./state";
 import {
-  BUSY_PREFIX,
   invalidate as invalidateWaveform,
   invalidateAll as invalidateAllWaveforms,
   subscribeRegenerated,
@@ -492,7 +491,7 @@ export function App() {
     }
   }, [projectName, t, state.phase, state.reference, state.overrides, state.excluded]);
 
-  const notice = useCallback((kind: "ok" | "error", text: string) => {
+  const notice = useCallback((kind: Banner["kind"], text: string) => {
     dispatch({ type: "banner/set", banner: { kind, text } });
   }, []);
 

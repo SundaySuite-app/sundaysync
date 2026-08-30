@@ -17,17 +17,24 @@ describe("classifyWaveformError", () => {
     }
   });
 
-  it("keeps the engine's raw detail for the busy state's title, unwrapped", () => {
-    // Finding 6: this used to go through `mapEngineError`, which has no busy branch, so
+  it("says which activity is holding the slot, in the operator's language", () => {
+    // Finding 6: this used to go through `mapEngineError`, which had no busy branch, so
     // it fell through to `errUnknown` and the Norwegian UI read «Noe gikk galt: busy:
     // sync in progress» — English engine text, crash-shaped wording for a self-clearing
-    // condition, in a slot that is ~28 px tall and cannot wrap. The visible label is now
-    // `t.waveformBusy` (chosen in WaveformCanvas from `kind`); `text` is the detail only.
+    // condition, in a slot that is ~28 px tall and cannot wrap. The fix then was to route
+    // AROUND the mapping and keep the raw string as the detail; that stopped the crash
+    // wording but left English in the tooltip.
+    //
+    // R/D-094 gives `busy:` its own branch instead — one sentence per activity — so this
+    // goes back THROUGH the mapping and comes out translated. Still not `errUnknown`, and
+    // still not the raw text.
     const nbBusy = classifyWaveformError(BUSY_SYNC, nb);
-    expect(nbBusy.text).toBe(BUSY_SYNC);
+    expect(nbBusy.text).toBe(nb.errBusySync);
     expect(nbBusy.text).not.toBe(nb.errUnknown(BUSY_SYNC));
     expect(nbBusy.text).not.toContain("Noe gikk galt");
-    expect(classifyWaveformError(BUSY_SYNC, en).text).toBe(BUSY_SYNC);
+    expect(nbBusy.text).not.toContain(BUSY_SYNC);
+    expect(classifyWaveformError(BUSY_MAINTENANCE, nb).text).toBe(nb.errBusyMaintenance);
+    expect(classifyWaveformError(BUSY_SYNC, en).text).toBe(en.errBusySync);
   });
 
   it("still classifies a cache miss as regenerable, with the source path", () => {

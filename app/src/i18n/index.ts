@@ -309,7 +309,24 @@ export const nb = {
   errIo: (path: string) => `Kunne ikke lese ${path}.`,
   errInvariant: (detail: string) =>
     `Intern feil — dette er en programfeil, ikke et problem med filene dine. (${detail})`,
-  errUnknown: (raw: string) => `Noe gikk galt: ${raw}`,
+  // §7.5's honest fallback. The raw text stays — throwing away the only detail there is
+  // helps nobody — but it is QUOTED, and said to be the engine's own words, so the English
+  // tail reads as a citation rather than as the app switching language mid-sentence.
+  errUnknown: (raw: string) => `Noe gikk galt. Motoren sier: «${raw}»`,
+  // D-046 — the single-activity guard. Notices, not errors: nothing is broken and the
+  // condition clears itself. Each one names what is holding the slot (R, D-094).
+  errBusySync: "Vent litt — en synkronisering holder på.",
+  errBusyMaintenance: "Vent litt — bufferen ryddes akkurat nå.",
+  errBusyPrewarm: "Vent litt — lyden analyseres i bakgrunnen.",
+  errBusy: "Vent litt — appen holder på med noe annet.",
+  errTooManyFiles: (limit: string) =>
+    `For mange filer her (grensen er ${limit}). Slipp inn mappen med selve opptaket, ikke hele disken.`,
+  errNotACacheDir: (path: string) =>
+    `${path} er ikke en SundaySync-buffer, så ingenting ble slettet. Velg mappen appen selv bruker.`,
+  errNothingSynced: "Ingenting er synkronisert ennå.",
+  errDecode: (path: string) => `Kunne ikke lese lyden i ${path}.`,
+  errNoAudio: (path: string) => `Fant ingen lyd i ${path}.`,
+  errPoisoned: "Appen havnet i en ugyldig tilstand. Start SundaySync på nytt.",
   // V03-S4 (D-052): the analysis cache has no entry for this clip yet — not a failure,
   // the "Bygg bølgeform på nytt"-button one tap away is the actual answer.
   errCacheMissing: "Ingen bufret analyse for dette klippet ennå.",
@@ -323,23 +340,21 @@ export const nb = {
   language: "Språk",
   minPsr: "Terskel for treff",
   minPsrHint:
-    "Lavere verdi gir flere treff, men øker risikoen for feil. Klipp under terskelen blir rapportert som ikke synkronisert i stedet for å bli plassert på slump. Tom = standard (15).",
+    "Klipp under terskelen rapporteres som ikke synkronisert i stedet for å plasseres på slump.",
   minPsrInvalid: "Må være et tall over 0, eller tomt for standard.",
   segmentCount: "Segmenter per klipp",
-  segmentCountHint:
-    "Hvor mange utsnitt av hvert klipp som sammenlignes med referansen. Flere segmenter gir sikrere driftmåling på lange klipp, men tar lengre tid.",
+  segmentCountHint: "Flere segmenter gir sikrere driftmåling på lange klipp, men tar lengre tid.",
   segmentDefault: "5 (standard)",
   driftCorrect: "Korriger klokkedrift",
-  driftCorrectHint:
-    "Retter langsom klokkedrift så klipp holder synk helt til slutten. Skriver en skånsom retiming i FCPXML-en (rører ingen filer) kun for klipp som driver mer enn en halv frame. På som standard.",
+  driftCorrectHint: "Skrives som en skånsom retiming i FCPXML-en — mediefilene dine røres ikke.",
   // V03-S6: S5 la til innstillingen, denne økta gir den en bryter. Egen fra eksport-
   // korreksjonen med vilje (D-055) — å høre forskjellen er hele poenget.
   playbackDriftCorrect: "Driftkorreksjon ved avspilling",
   playbackDriftCorrectHint:
-    "Bruker samme driftkorreksjon på avspillingen som på eksporten. Skru av for å høre hvordan klippene ville ligget uten. Endringen gjelder umiddelbart, også midt i avspilling. På som standard.",
+    "Egen bryter fra eksporten, så du kan høre forskjellen — endringen gjelder umiddelbart, også midt i avspilling.",
   cacheDir: "Mappe for analyse-buffer",
   cacheHint:
-    "Bufferen gjør ny synkronisering nesten øyeblikkelig. Den bruker ca. 170 MB per time lyd. Oppføringer som ikke er brukt på 90 dager ryddes automatisk ved oppstart.",
+    "Ca. 170 MB per time lyd; oppføringer som ikke er brukt på 90 dager ryddes automatisk ved oppstart.",
   cachePick: "Velg mappe",
   cacheUsage: (entries: number, size: string) =>
     entries === 1 ? `1 oppføring · ${size}` : `${entries} oppføringer · ${size}`,
@@ -348,8 +363,7 @@ export const nb = {
   cacheCleared: (size: string) => `Frigjorde ${size}.`,
   cacheCap: "Størrelsestak (MB)",
   cacheCapOff: "Av",
-  cacheCapHint:
-    "Valgfritt. Når satt, fjernes de eldst brukte oppføringene så snart bufferen overstiger taket. La feltet stå tomt for å slå det av.",
+  cacheCapHint: "De eldst brukte oppføringene fjernes så snart bufferen overstiger taket.",
   cacheCapError: "Skriv inn et positivt tall, eller la feltet stå tomt for å slå av.",
   cacheEvicted: (entries: number, size: string) =>
     entries === 1
@@ -408,8 +422,6 @@ export const nb = {
   // Settings — telemetry section
   telemetryTitle: "Anonym bruksstatistikk",
   telemetryToggleLabel: "Del anonym bruksstatistikk",
-  telemetryToggleHint:
-    "Av til du slår det på. Du kan når som helst se nøyaktig hva som ville blitt sendt, eller be om at dataene slettes.",
   telemetryStatus: (granted: boolean, queued: number): string => {
     if (!granted) return "Av";
     if (queued <= 0) return "På";
@@ -429,8 +441,7 @@ export const nb = {
   // Settings — System / oppdateringer (E9)
   systemTitle: "System",
   betaChannelLabel: "Få betaversjoner",
-  betaChannelHint:
-    "Av som standard. Slått på får du tidlige testversjoner før de slippes til alle. De kan være mindre stabile — skru av igjen når som helst for å gå tilbake til vanlige versjoner.",
+  betaChannelHint: "Tidlige testversjoner før de slippes til alle. De kan være mindre stabile.",
   updateCheck: "Se etter oppdatering",
   updateDownload: (version: string) => `Last ned og installer ${version}`,
   updateRestart: "Start på nytt og installer",
@@ -688,7 +699,19 @@ export const en: Strings = {
   errIo: (path: string) => `Could not read ${path}.`,
   errInvariant: (detail: string) =>
     `Internal error — this is a bug in the app, not a problem with your files. (${detail})`,
-  errUnknown: (raw: string) => `Something went wrong: ${raw}`,
+  errUnknown: (raw: string) => `Something went wrong. The engine says: “${raw}”`,
+  errBusySync: "Just a moment — a sync is running.",
+  errBusyMaintenance: "Just a moment — the cache is being tidied.",
+  errBusyPrewarm: "Just a moment — the audio is being analysed in the background.",
+  errBusy: "Just a moment — the app is busy with something else.",
+  errTooManyFiles: (limit: string) =>
+    `Too many files here (the limit is ${limit}). Drop in the folder with the shoot, not a whole disk.`,
+  errNotACacheDir: (path: string) =>
+    `${path} is not a SundaySync cache, so nothing was deleted. Choose the folder the app uses itself.`,
+  errNothingSynced: "Nothing has been synced yet.",
+  errDecode: (path: string) => `Could not read the audio in ${path}.`,
+  errNoAudio: (path: string) => `No audio was found in ${path}.`,
+  errPoisoned: "The app ended up in an invalid state. Restart SundaySync.",
   // V03-S4 (D-052): the analysis cache has no entry for this clip yet — see the nb
   // comment above.
   errCacheMissing: "No cached analysis for this clip yet.",
@@ -701,22 +724,20 @@ export const en: Strings = {
   language: "Language",
   minPsr: "Match threshold",
   minPsrHint:
-    "A lower value accepts more matches but raises the risk of a wrong one. Clips below the threshold are reported as not synced rather than placed on a guess. Empty = default (15).",
+    "Clips below the threshold are reported as not synced rather than placed on a guess.",
   minPsrInvalid: "Must be a number above 0, or empty for the default.",
   segmentCount: "Segments per clip",
-  segmentCountHint:
-    "How many excerpts of each clip are compared against the reference. More segments give a more reliable drift measurement on long clips, but take longer.",
+  segmentCountHint: "More segments give a more reliable drift measurement on long clips, but take longer.",
   segmentDefault: "5 (default)",
   driftCorrect: "Correct clock drift",
-  driftCorrectHint:
-    "Fixes slow clock drift so clips stay in sync all the way to the end. Writes a gentle retime into the FCPXML (touches no files), only for clips that drift more than half a frame. On by default.",
+  driftCorrectHint: "Written as a gentle retime into the FCPXML — your media files are not touched.",
   // V03-S6 — see the nb comment above.
   playbackDriftCorrect: "Drift correction during playback",
   playbackDriftCorrectHint:
-    "Applies the same drift correction to playback as to the export. Turn it off to hear how the clips would sit without it. The change takes effect immediately, even mid-playback. On by default.",
+    "A separate switch from the export one, so you can hear the difference — the change takes effect immediately, even mid-playback.",
   cacheDir: "Analysis cache folder",
   cacheHint:
-    "The cache makes re-syncing nearly instant. It uses about 170 MB per hour of audio. Entries untouched for 90 days are cleared automatically at startup.",
+    "About 170 MB per hour of audio; entries untouched for 90 days are cleared automatically at startup.",
   cachePick: "Choose folder",
   cacheUsage: (entries: number, size: string) =>
     entries === 1 ? `1 entry · ${size}` : `${entries} entries · ${size}`,
@@ -725,8 +746,7 @@ export const en: Strings = {
   cacheCleared: (size: string) => `Freed ${size}.`,
   cacheCap: "Size cap (MB)",
   cacheCapOff: "Off",
-  cacheCapHint:
-    "Optional. When set, the least-recently-used entries are removed as soon as the cache exceeds the cap. Leave empty to turn it off.",
+  cacheCapHint: "The least-recently-used entries are removed as soon as the cache exceeds the cap.",
   cacheCapError: "Enter a positive number, or leave the field empty to turn it off.",
   cacheEvicted: (entries: number, size: string) =>
     entries === 1 ? `Removed 1 entry · freed ${size}.` : `Removed ${entries} entries · freed ${size}.`,
@@ -780,8 +800,6 @@ export const en: Strings = {
   // Settings — telemetry section
   telemetryTitle: "Anonymous usage statistics",
   telemetryToggleLabel: "Share anonymous usage statistics",
-  telemetryToggleHint:
-    "Off until you turn it on. You can see exactly what would be sent, or ask for the data to be deleted, at any time.",
   telemetryStatus: (granted: boolean, queued: number): string => {
     if (!granted) return "Off";
     if (queued <= 0) return "On";
@@ -801,8 +819,7 @@ export const en: Strings = {
   // Settings — System / updates (E9)
   systemTitle: "System",
   betaChannelLabel: "Receive beta versions",
-  betaChannelHint:
-    "Off by default. When on, you get early test builds before they reach everyone. They may be less stable — turn it off again at any time to go back to regular releases.",
+  betaChannelHint: "Early test builds before they reach everyone. They may be less stable.",
   updateCheck: "Check for updates",
   updateDownload: (version: string) => `Download and install ${version}`,
   updateRestart: "Restart and install",
