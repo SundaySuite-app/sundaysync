@@ -29,3 +29,6 @@ dist/
 app/node_modules/
 app/dist/
 app/src-tauri/target/
+
+# D-093 native-smoke artefacts (report JSON, app log, screenshot). Produced per run.
+native-smoke/

@@ -4,7 +4,10 @@ export default defineConfig({
   test: {
     // settings.ts touches localStorage; jsdom provides it without a browser.
     environment: "jsdom",
-    include: ["src/**/*.test.ts"],
+    // `scripts/` is in here for one reason: the native-smoke runner's verdict (D-093). A CI
+    // gate whose pass/fail logic is only ever exercised on the runner fails GREEN when it is
+    // wrong, so its rules are unit-tested like anything else.
+    include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
     // V05-W3 (D-067): the recording-time ladder deliberately reads a BWF's date + clock and
     // a timestamp in a filename as LOCAL wall time, and a container stamp as UTC. That
     // distinction is only testable against a KNOWN offset — on a machine set to UTC the two
