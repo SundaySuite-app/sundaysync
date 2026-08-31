@@ -90,6 +90,28 @@ jobs:
 
       # tauri-action builds the bundle, signs the updater artifacts when the signing
       # secret exists, and attaches everything (installers + latest.json) to the release.
+      # ── Releasenotatet, HENTET FRA REPOET ──────────────────────────────
+      # `releaseBody` blir `notes`-feltet i `latest.json`, og det feltet er
+      # teksten brukeren leser i oppdateringsdialogen. tauri-action skriver det
+      # ved BYGGETID, så en tekst noen skriver på GitHub etterpå når aldri
+      # manifestet — og dermed aldri brukeren. Da dette var en fast tekst her i
+      # fila, fikk hver eneste utgivelse nøyaktig samme notat.
+      #
+      # Notatet bor derfor i `docs/release-notes/<tagg>.md` og blir reviewet i
+      # samme PR som versjonsbumpen. Skriptet AVBRYTER jobben hvis fila mangler,
+      # er tom eller står med en plassholder: en stille tilbakefall-tekst er
+      # nøyaktig feilen vi fikser, bare vanskeligere å oppdage.
+      #
+      # Den egentlige vakten ligger i CI, på PR, og stopper slippet før noen har
+      # begynt å bygge. Dette steget er den andre låsen på samme dør — den som
+      # fortsatt holder når en tagg dyttes fra en gammel commit.
+      - name: Hent releasenotatet for taggen
+        id: notat
+        shell: bash
+        run: node app/scripts/release-notes.mjs --emit "$TAG" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ github.ref_name }}
+
       - name: Build and publish
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
@@ -130,22 +152,12 @@ jobs:
           releaseName: "SundaySync ${{ github.ref_name }}"
           # NOTE: this text also becomes the updater dialog's release notes (tauri-action
           # copies it into latest.json at build time), so keep it what a USER should read.
-          releaseBody: |
-            **Alt innebygd — ingenting å installere ved siden av.** ffmpeg følger med i
-            appen; introduksjonen bekrefter det med en selvtest. Se CHANGELOG.md for hva
-            som er nytt i denne versjonen.
-
-            **macOS:** appen er kodesignert, men ennå ikke notarisert — høyreklikk → Åpne
-            første gang (eller Systeminnstillinger → Personvern og sikkerhet →
-            «Åpne likevel»).
-            **Windows:** SmartScreen advarer — «Mer info» → «Kjør likevel».
-
-            ---
-            **Everything bundled — nothing else to install**; the onboarding self-test
-            confirms it. See CHANGELOG.md for what's new. macOS builds are code-signed but
-            not yet notarized: right-click → Open the first time (or System Settings →
-            Privacy & Security → "Open Anyway"). Windows: SmartScreen → "More info" →
-            "Run anyway".
+          # Fra `docs/release-notes/<tagg>.md`, ikke fra denne fila. Se steget
+          # over for hvorfor. Vil du ha den lange versjonen med bilder og
+          # tabeller på selve utgivelsessiden, rediger utgivelsesteksten på
+          # GitHub etterpå — `latest.json` er da allerede lastet opp med
+          # notatet herfra.
+          releaseBody: ${{ steps.notat.outputs.notes }}
           # A `-beta.N` tag ships as a GitHub pre-release; a plain `vX.Y.Z` tag ships as a
           # normal release. The updater feed (the Worker) serves only tags an owner has
           # explicitly promoted, so this flag is only about how github.com labels the

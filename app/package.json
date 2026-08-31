@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
     "test": "vitest run",
+    "notes:check": "node scripts/release-notes.mjs --check",
     "e2e": "playwright test",
     "audit": "npm audit --omit=dev --audit-level=high"
   },
