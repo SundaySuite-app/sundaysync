@@ -5114,3 +5114,99 @@ er et helt multiplum av bildevarigheten» var skrevet før driftkorreksjonen og 
 den dagen den landet; «kalibrert kun på syntetisk materiale» motsa «en foreløpig kalibrering fra
 det første ekte korpuset» i seksjonen tjue linjer under. Tre nye seksjoner: det manglende «Vis i
 Finder»-avviket fra D-092, og de to denne runden selv etterlater.
+
+## D-095 — N: oppdateringen sier hva den er
+
+`latest.json` har båret et `notes`-felt siden releasenotat-mekanismen landet (PR #68).
+Appen har aldri lest det. Feltet er hentet ned ved hver eneste oppdateringssjekk, fra hver
+eneste installasjon, siden 31. august — og så kastet, fordi fase-enumet skallet sender til
+frontenden ikke hadde noe sted å legge det. Alt operatøren fikk se var «Ny versjon
+tilgjengelig: 0.6.0-beta.6.» og en gul knapp. Man oppdaterer i blinde.
+
+Det er den dyrere halvdelen av feilen PR #68 gikk løs på. Den første halvdelen var at
+teksten ikke fantes; den er løst — notatet skrives i samme PR som versjonsbumpen, vakten
+leser det på hver PR, `release.yml` avbryter et slipp uten det. Denne halvdelen er at
+teksten finnes, er lastet ned og ligger i minnet til prosessen som tegner dialogen,
+og likevel ikke er på skjermen.
+
+### Feltet, og hvorfor det er valgfritt
+
+Verifisert mot den ekte feeden før noe ble skrevet (`curl
+https://updates.sundaysuite.app/v1/update/sundaysync/beta`): notatet ligger **på toppnivå**
+i manifestet, ved siden av `version` og `pub_date` — ikke per plattform under `platforms.*`.
+Tauri-tillegget leser det inn som `RemoteRelease::notes` og gir det videre som
+`Update::body`. Ingen gjetting: en manifestform kan ikke utledes av å lese en klients
+API-navn.
+
+`UpdateStatus::Available` og `::ReadyToInstall` har fått `notes: Option<String>`, additivt,
+med `skip_serializing_if = "Option::is_none"`. Fraværende felt, ikke `null`, og grunnen er
+konkret: **hver eneste utgitte versjon av denne appen er eldre enn mekanismen.** Feeden
+serverer akkurat nå v0.6.0-beta.5, hvis notat er den gamle standardteksten — og den
+inneholder `**stjerner**, fordi den ble skrevet da feltet var pynt ingen leste. En
+installasjon som kjører denne koden mot dagens beta-ring må derfor oppføre seg nøyaktig
+som før: ingen overskrift, ingen tom boks, ingenting. Det er den vanlige tilstanden en god
+stund til, ikke kanttilfellet.
+
+Blank tekst er det samme som ikke noe notat, avgjort på begge sider (`release_notes` i
+`lib.rs`, `releaseNotes` i `update.ts`). En feed som sender `""` eller en enslig linjeskift
+skal ikke åpne en tom ramme under versjonslinja.
+
+### Ren tekst er en kontrakt, ikke en antagelse
+
+Notatet settes inn som et React-tekstbarn — altså escapet — og `white-space: pre-line` er
+det eneste som tolker noe som helst av det: forfatterens egne linjeskift blir avsnittene
+hans. Ingen markdown-tolkning, og det er ikke en forglemmelse:
+
+1. Vakten forbyr markup i notatet på hver eneste PR (`docs/release-notes/README.md`).
+   En renderer her ville vært et andre, mykere svar på et spørsmål som allerede har et
+   hardt.
+2. Teksten kommer fra nettet. Signaturkontrollen sier at *bygget* er vårt; den sier
+   ingenting om at strengen er trygg å tolke. Den behandles som data.
+
+Prisen er synlig og akseptert: mot dagens beta.5-notat står stjernene på skjermen, akkurat
+som README-en forutsa at de ville. Det er en riktigere ting å vise enn å begynne å tolke.
+
+### Hvor det står, og hvorfor det blir stående
+
+Rett under statuslinja i Innstillinger → System, med overskrifta «Nytt i denne versjonen».
+Overskrifta er der fordi teksten under den ikke er appens egne ord — den er skrevet i
+utgivelsen og hentet fra feeden — og uten den leser notatet som enda en dempet forklaring
+i et panel som har mange av dem.
+
+Notatet følger med gjennom nedlastinga og helt fram til «Start på nytt og installer».
+`downloading`-fasen settes sammen i rendereren fra `update:progress`, som bare kjenner
+versjon og prosent, så den måtte bæres eksplisitt videre (funksjonell `setUpdate`). Det er
+verdt de fire linjene: øyeblikket notatet betyr mest er ikke når man vurderer å laste ned,
+det er når man vurderer å **starte på nytt** — som i denne appen kan være tjue minutter før
+en gudstjeneste. «Hva starter jeg opp i» er nettopp det notatet svarer på. Det var
+SundayStage-feilen mekanismen ble laget etter: blackout flyttet fra Escape til ⇧B, og
+varselet sa det samme som forrige gang.
+
+Boksen er kappet på åtte linjer med egen rulling. Notatet er kappet på 1000 bytes av
+vakten, så åtte linjer er romslig — men innstillingspanelet er allerede omtrent dobbelt så
+høyt som vinduet det ligger i (D-094, `KNOWN_LIMITATIONS.md`), og et ukappet notat ville
+dyttet «Vis introduksjonen», «Diagnostikk» og ffmpeg-linja enda en skjermhøyde ned. Boksen
+er fokuserbar (`tabindex="0"`, `role="group"` med overskrifta som navn) fordi en rulleflate
+et tastatur ikke når er en felle.
+
+### Prøvene
+
+`update.spec.ts`: et tilbud med notat viser teksten, med linjeskiftene i behold og null
+elementbarn (beviset på at ingenting tolkes); notatet overlever nedlasting og står der ved
+`readyToInstall`; et tilbud uten notat viser **ingenting**; blankt notat likeså; og et
+notat på 908 bytes ruller inne i sin egen boks mens dialogramma blir stående i vinduet og
+✕ blir værende på skjermen — D-094s egen feilmodus, sjekket på nytt med det høyeste panelet
+nå kan inneholde. De tre første ble sett feile mot `main`s `SettingsPanel` (adc2e6c); de to
+«viser ingenting»-prøvene var grønne der og skal være det, for de fester oppførselen som
+ikke endrer seg.
+
+Skallet har en enhetsprøve som fester selve IPC-stavemåten mot `serde_json`. Et navnebytte
+på én av sidene er en klassisk skjøtefeil ([[reference-seam-bugs]]): feltet leser bare
+`undefined`, dialogen blir stille igjen, og ingen test hadde merket det.
+
+### Det som ikke er gjort
+
+Bannerlinja som møter deg ved oppstart («Ny versjon 0.6.0-beta.6 er tilgjengelig. Åpne
+Innstillinger → System …») viser fortsatt bare versjonsnummeret. Det er med vilje: banneret
+er én linje over tidslinja, og et notat der ville dekket arbeidsflata. Den peker til stedet
+notatet nå faktisk står.

@@ -1,5 +1,16 @@
 # Changelog
 
+## Ikke sluppet ennå
+
+- **Oppdateringen sier hva den er.** Appen har lastet ned releasenotatet ved hver eneste
+  sjekk siden slutten av august — og kastet det. Alt du fikk se var «Ny versjon
+  tilgjengelig: 0.6.0-beta.6» og en gul knapp, så du oppdaterte i blinde. Nå står notatet
+  under versjonslinja i Innstillinger → System, med overskrifta «Nytt i denne versjonen»,
+  og det blir stående gjennom nedlastinga helt fram til «Start på nytt og installer» —
+  for det er der spørsmålet egentlig stilles: hva er det jeg starter opp i, tjue minutter
+  før en gudstjeneste. Utgivelser fra før notatene ble innført har ingen tekst å vise, og
+  da vises det ingenting — ingen tom ramme (D-095).
+
 ## v0.6.0-beta.4
 
 
