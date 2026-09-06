@@ -13,8 +13,14 @@ corpus/
 # ffmpeg sidecar binaries (fetched per-platform from Phase 7, never committed)
 app/src-tauri/binaries/
 
-# Node / Tauri (from Phase 7)
-node_modules/
+# Node / Tauri (from Phase 7).
+#
+# No trailing slash, and that is the whole point. `node_modules/` matches a DIRECTORY
+# only, so the self-referential SYMLINK at `app/node_modules` that rode along in #68 was
+# never covered by these rules — git saw a file, not a directory, and happily staged it.
+# Untracking it (this commit) fixes today; dropping the slash is what stops the same
+# `git add -A` from re-committing it tomorrow.
+node_modules
 dist/
 
 # Editor / OS
@@ -26,7 +32,7 @@ dist/
 .claude/
 
 # Frontend build output and deps (app/)
-app/node_modules/
+app/node_modules
 app/dist/
 app/src-tauri/target/
 
