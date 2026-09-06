@@ -213,3 +213,23 @@ prisen er dekning.
 
 Det er en eierbeslutning, og den bør tas på målingen i §7 første kule, ikke på dette dokumentet
 alene.
+
+## §8 — Etterkjøringen: de avvistes PSR-fordeling (2026-09-06)
+
+Baseline-bryllupet ble kjørt på nytt med bevis-feltet (varm cache, samme mapper, motor fra
+main `2d5cabb`): fortsatt **8 plasserte**, og nå bærer **166 av 172 avviste** korrelasjonsbevis.
+
+Fordelingen (PSR for avviste): min **8,21** · median **13,92** · maks **24,96**.
+Histogram 5–10 / 10–15 / 15–20 / 20–25 / ≥25: **24 / 82 / 47 / 13 / 0**.
+
+- **Ikke én eneste avvist når 25** — og toppen ligger på 24,6 / 24,8 / **25,0**. Populasjonen
+  presser mot taket; terskelen skjærer nøyaktig langs den, ikke i et gap over den.
+- **60 av 166** ville passert terskelen brukeren faktisk har satt (15); **142** ville passert
+  den bevisgraderte tieren (10) — som de i dag er strukturelt utestengt fra (§4).
+- Dette beviser IKKE at de 60/142 er sanne treff: D-015 målte falske treff på 15,2–19,0,
+  midt i denne massen. Å senke gulvet rått ville sluppet inn falske. Svaret dataene peker på
+  er det samme som §4s forslag: **segmentering under 45 s**, slik at korte klipp kan tjene
+  bevis og dømmes av troverdighetsgaten (D-045) på graded tier — diskriminatoren som beviste
+  seg med PSR-131-avvisningen, og som i dag aldri får kjøre på dem.
+
+Beslutningen er eierens; tallene over er hele grunnlaget.
