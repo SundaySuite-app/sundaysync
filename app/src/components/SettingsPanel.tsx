@@ -19,6 +19,7 @@ import {
   checkForUpdate,
   downloadAndInstall,
   relaunchForUpdate,
+  releaseNotes,
   subscribeProgress,
   type UpdateStatus,
 } from "../update";
@@ -123,6 +124,9 @@ export function SettingsPanel({
   const [betaChannel, setBetaChannel] = useState(settings.betaChannel);
   const [update, setUpdate] = useState<UpdateStatus>({ phase: "idle" });
   const [updateBusy, setUpdateBusy] = useState(false);
+  // D-095: the release note that came with the offer — `null` for every phase that is not
+  // an offer, and for an offer from a release built before notes existed.
+  const notes = releaseNotes(update);
 
   const refreshCache = () => {
     invoke<CacheStatus>("cache_status", { dir: getSettings().cacheDir })
@@ -145,7 +149,14 @@ export function SettingsPanel({
     let unlisten: UnlistenFn | undefined;
     let cancelled = false;
     subscribeProgress((p) => {
-      setUpdate({ phase: "downloading", version: p.version, percent: p.percent });
+      // Functional update so the note the operator was reading survives the download
+      // (D-095): the progress event knows the version and the percent, nothing else.
+      setUpdate((s) => ({
+        phase: "downloading",
+        version: p.version,
+        percent: p.percent,
+        notes: releaseNotes(s),
+      }));
     }).then((u) => {
       if (cancelled) u();
       else unlisten = u;
@@ -186,7 +197,9 @@ export function SettingsPanel({
   const runDownloadInstall = async () => {
     setUpdateBusy(true);
     setUpdate((s) =>
-      s.phase === "available" ? { phase: "downloading", version: s.version, percent: 0 } : s,
+      s.phase === "available"
+        ? { phase: "downloading", version: s.version, percent: 0, notes: releaseNotes(s) }
+        : s,
     );
     const status = await downloadAndInstall(getSettings().betaChannel);
     setUpdate(status);
@@ -551,6 +564,28 @@ export function SettingsPanel({
             )}
           </div>
           <small className="subtle">{updateStatusText(t, update)}</small>
+          {notes !== null && (
+            <div className="relnotes">
+              <span className="relnotes__title" id="update-notes-title">
+                {t.updateNotesTitle}
+              </span>
+              {/* Plain text, rendered as text: `{notes}` is a React text child, so the
+                  string is escaped, and `white-space: pre-line` is what turns the note's
+                  own newlines into the paragraphs its author wrote. No markdown pass —
+                  the release-note guard forbids markup on every PR, and a renderer here
+                  would be the app deciding to interpret bytes that came off the network.
+                  `tabIndex` because the box scrolls: a 1000-byte note is taller than it,
+                  and a scroll region a keyboard cannot reach is a trap. */}
+              <p
+                className="relnotes__body"
+                role="group"
+                tabIndex={0}
+                aria-labelledby="update-notes-title"
+              >
+                {notes}
+              </p>
+            </div>
+          )}
         </div>
 
         <hr className="sep" />

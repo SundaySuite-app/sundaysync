@@ -453,6 +453,10 @@ export const nb = {
   updateReady: (version: string) =>
     `${version} er klar. Start appen på nytt for å fullføre.`,
   updateError: (message: string) => `Kunne ikke oppdatere: ${message}`,
+  // D-095. Overskrifta står der fordi teksten under den ikke er appens egne ord: den er
+  // skrevet i utgivelsen og hentet fra oppdateringsfeeden. Uten den leser notatet som en
+  // ny forklaring under statuslinja.
+  updateNotesTitle: "Nytt i denne versjonen",
   updateBannerAvailable: (version: string) =>
     `Ny versjon ${version} er tilgjengelig. Åpne Innstillinger → System for å installere.`,
 
@@ -830,6 +834,7 @@ export const en: Strings = {
   updateDownloading: (percent: number) => `Downloading … ${percent}%`,
   updateReady: (version: string) => `${version} is ready. Restart the app to finish.`,
   updateError: (message: string) => `Could not update: ${message}`,
+  updateNotesTitle: "What’s new in this version",
   updateBannerAvailable: (version: string) =>
     `Version ${version} is available. Open Settings → System to install it.`,
 

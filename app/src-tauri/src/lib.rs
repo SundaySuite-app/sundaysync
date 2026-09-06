@@ -2000,17 +2000,56 @@ fn update_percent(downloaded: u64, total: u64) -> u8 {
     (downloaded.saturating_mul(100) / total).min(100) as u8
 }
 
+/// The release note that came with an offer, or `None` when there is nothing to show.
+///
+/// The plugin hands us `Update::body`, which it filled from the manifest's top-level
+/// `notes` (verified against the live feed: `notes` sits beside `version`/`pub_date`,
+/// NOT inside `platforms.*`). Whitespace-only is the same as absent — a feed that sends
+/// `""` or a lone newline must not open an empty box under the version line — and the
+/// text is trimmed here so the renderer never has to guess whether a leading blank line
+/// is meaningful.
+///
+/// The note is **plain text by contract** (`docs/release-notes/README.md`; the guard in
+/// `app/scripts/release-notes.mjs` rejects markdown on every PR). Nothing here parses it,
+/// and nothing downstream may either: it arrives from the network, and the renderer
+/// treats it as data.
+fn release_notes(body: Option<String>) -> Option<String> {
+    let text = body?.trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
 /// The update phases the renderer renders. Serialised tagged so the frontend gets a
 /// discriminated union (`{ phase: "available", version: "0.2.0" }`).
+///
+/// D-095: the two phases that *offer* a build carry the release note with them. The field
+/// is optional in both directions — omitted entirely when there is no note, because every
+/// release built before the note mechanism (PR #68) has nothing but the old boilerplate,
+/// and an install on this build must render those exactly the way it did before: nothing.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "phase", rename_all = "camelCase")]
 enum UpdateStatus {
     /// This build is current — includes the 204/paused-ring "nothing promoted" case.
     UpToDate,
     /// A newer signed release is offered on the chosen ring.
-    Available { version: String },
+    Available {
+        version: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notes: Option<String>,
+    },
     /// Downloaded + staged; the app must relaunch to apply it.
-    ReadyToInstall { version: String },
+    ///
+    /// Carries the note too, and deliberately: this is the state the operator reads while
+    /// deciding whether to restart NOW, which for this app can be minutes before a
+    /// service. "What am I about to restart into" is the question the note answers.
+    ReadyToInstall {
+        version: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notes: Option<String>,
+    },
     /// The check or download failed (network, signature, feed). Carries a message.
     Error { message: String },
 }
@@ -2059,6 +2098,7 @@ async fn update_check(app: AppHandle, beta: bool) -> Result<UpdateStatus, String
     match updater.check().await {
         Ok(Some(update)) => Ok(UpdateStatus::Available {
             version: update.version.clone(),
+            notes: release_notes(update.body.clone()),
         }),
         Ok(None) => Ok(UpdateStatus::UpToDate),
         Err(e) => Ok(UpdateStatus::Error {
@@ -2093,6 +2133,9 @@ async fn update_download_install(app: AppHandle, beta: bool) -> Result<UpdateSta
     };
 
     let version = update.version.clone();
+    // Taken before `download_and_install` consumes `update` — the note belongs to the
+    // build we are about to stage, and there is no second chance to read it afterwards.
+    let notes = release_notes(update.body.clone());
     // `on_download` is `Fn` (not `FnMut`), so the running total lives in an atomic.
     let downloaded = Arc::new(AtomicU64::new(0));
     let app_for_progress = app.clone();
@@ -2116,7 +2159,7 @@ async fn update_download_install(app: AppHandle, beta: bool) -> Result<UpdateSta
         .await;
 
     match result {
-        Ok(()) => Ok(UpdateStatus::ReadyToInstall { version }),
+        Ok(()) => Ok(UpdateStatus::ReadyToInstall { version, notes }),
         Err(e) => Ok(UpdateStatus::Error {
             message: e.to_string(),
         }),
@@ -2191,6 +2234,62 @@ mod update_tests {
         // plain build ships: the Worker, never a GitHub feed.
         assert_eq!(update_base(), "https://updates.sundaysuite.app");
         assert!(!update_base().contains("github.com"));
+    }
+
+    #[test]
+    fn release_notes_treats_blank_as_absent() {
+        assert_eq!(release_notes(None), None);
+        assert_eq!(release_notes(Some(String::new())), None);
+        assert_eq!(release_notes(Some("   \n\t ".into())), None);
+        // Trimmed, but the note's own line breaks are the operator's paragraphs and stay.
+        assert_eq!(
+            release_notes(Some("\n  Blackout er flyttet.\n\nTo linjer.  \n".into())),
+            Some("Blackout er flyttet.\n\nTo linjer.".to_string())
+        );
+    }
+
+    /// The IPC spelling the frontend's `UpdateStatus` union is written against
+    /// (`app/src/update.ts`). A rename on either side is a silent seam bug — the field
+    /// simply reads `undefined` and the dialog goes quiet again — so it is pinned here.
+    #[test]
+    fn update_status_serialises_notes_as_an_optional_camel_case_field() {
+        let with = serde_json::to_value(UpdateStatus::Available {
+            version: "0.6.0-beta.6".into(),
+            notes: Some("Nytt: en ting.".into()),
+        })
+        .unwrap();
+        assert_eq!(
+            with,
+            serde_json::json!({
+                "phase": "available",
+                "version": "0.6.0-beta.6",
+                "notes": "Nytt: en ting.",
+            })
+        );
+
+        // No note → the key is ABSENT, not `null`: an older release (everything before the
+        // note mechanism) must reach the renderer looking exactly like it did before this
+        // field existed.
+        let without = serde_json::to_value(UpdateStatus::Available {
+            version: "0.6.0-beta.6".into(),
+            notes: None,
+        })
+        .unwrap();
+        assert_eq!(
+            without,
+            serde_json::json!({ "phase": "available", "version": "0.6.0-beta.6" })
+        );
+        assert!(without.get("notes").is_none());
+
+        // The staged-and-waiting phase carries it too — that is where "restart now?" is
+        // answered.
+        let ready = serde_json::to_value(UpdateStatus::ReadyToInstall {
+            version: "0.6.0-beta.6".into(),
+            notes: Some("Nytt: en ting.".into()),
+        })
+        .unwrap();
+        assert_eq!(ready["phase"], "readyToInstall");
+        assert_eq!(ready["notes"], "Nytt: en ting.");
     }
 
     #[test]

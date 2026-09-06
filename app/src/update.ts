@@ -18,15 +18,43 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-/** The terminal + transient phases the Settings panel renders. */
+/**
+ * The terminal + transient phases the Settings panel renders.
+ *
+ * `notes` (D-095) is the release note the feed shipped with this offer — the manifest's
+ * top-level `notes` field, which `release.yml` fills from `docs/release-notes/<tag>.md`.
+ * Optional everywhere it appears: releases built before that mechanism carry only the old
+ * boilerplate and send no note at all, and a build talking to such a feed must behave
+ * exactly as it did before the field existed. It is **plain text by contract** — never
+ * render it as markup, and never trust it as anything but data.
+ *
+ * `downloading` carries it because the phase is assembled in the renderer from
+ * `update:progress` events; without the field the note the operator was reading would
+ * blink out for the length of the download and come back at `readyToInstall`.
+ */
 export type UpdateStatus =
   | { phase: "idle" }
   | { phase: "checking" }
   | { phase: "upToDate" }
-  | { phase: "available"; version: string }
-  | { phase: "downloading"; version: string; percent: number }
-  | { phase: "readyToInstall"; version: string }
+  | { phase: "available"; version: string; notes?: string | null }
+  | { phase: "downloading"; version: string; percent: number; notes?: string | null }
+  | { phase: "readyToInstall"; version: string; notes?: string | null }
   | { phase: "error"; message: string };
+
+/**
+ * The note attached to a status, or `null` when there is nothing worth a box.
+ *
+ * The backend already trims and drops blanks (`release_notes` in `lib.rs`), but this is
+ * the boundary where a value from the network becomes something the UI branches on, so it
+ * is re-checked here rather than assumed: an old build's `undefined`, a `null` from a
+ * hand-rolled feed and a whitespace-only string all mean the same thing to the operator.
+ */
+export function releaseNotes(status: UpdateStatus): string | null {
+  const raw = "notes" in status ? status.notes : null;
+  if (typeof raw !== "string") return null;
+  const text = raw.trim();
+  return text === "" ? null : text;
+}
 
 /** Payload of the `update:progress` event the backend emits while downloading. */
 export interface UpdateProgress {

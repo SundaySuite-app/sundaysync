@@ -2068,6 +2068,44 @@ select:hover, input:hover { border-color: var(--accent-border); }
 }
 .dialog__close { position: absolute; top: 0.9rem; right: 0.9rem; z-index: 2; }
 
+/* The release note that came with an update offer (D-095). Quiet on purpose: this is the
+   release speaking, under the app's own status line, and it must not out-shout the two
+   buttons next to it.
+
+   The height cap is the load-bearing part. The note is capped at 1000 bytes by the guard
+   that writes it, but the settings panel is ALREADY about twice the height of the window
+   it lives in (D-094, `KNOWN_LIMITATIONS.md` §«Innstillinger»), so an uncapped note pushes
+   everything below it — «Vis introduksjonen», «Diagnostikk», the ffmpeg line — a further
+   screenful down inside the body's scroller. Eight lines is what a note of that size needs
+   to read as a paragraph rather than a slot; anything past that scrolls inside the box, and
+   the box is focusable so a keyboard can reach that scroll. */
+.relnotes { margin-top: 0.6rem; }
+.relnotes__title {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text3);
+  margin-bottom: 0.2rem;
+}
+.relnotes__body {
+  margin: 0;
+  /* `pre-line`, not `pre`: the note's own line breaks are its paragraphs and are kept,
+     while a long line still wraps to the box instead of pushing a horizontal scrollbar
+     into a dialog that has no room for one. */
+  white-space: pre-line;
+  color: var(--text2);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  max-height: calc(8 * 1.5 * 0.8125rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-left: 2px solid var(--border2);
+  padding-left: 0.6rem;
+}
+/* No focus rule of its own: the global `:focus-visible` ring at the top of this file
+   already covers anything focusable, this box included. */
+
 .detail-grid {
   display: grid;
   grid-template-columns: auto 1fr;
