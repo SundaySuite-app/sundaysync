@@ -5316,3 +5316,88 @@ Pillene er små. En 16 px rad rommer en 14 px kapsel, og det er under det en ber
 være — bevisst, fordi den godkjente formen er et MERKE på en rad og ikke en kontroll å sikte på:
 hele lista, med kontroller i full størrelse, er én klikk unna i popoveren, og pillene er tastaturnåbare.
 Skrevet ned i `KNOWN_LIMITATIONS.md`.
+---
+
+## D-098 — K: en avvisning som kan leses, og den redigerte miksen som prøve
+
+Kalibreringsrunden mot ekte produksjoner (rapport: [`CALIBRATION-2026-09.md`](CALIBRATION-2026-09.md)).
+Oppdraget var å prøve den stående påstanden fra D-015: golvet er syntetisk kalibrert, og barene
+D-045/D-049 er utledet fra fire små korpus og ett bryllup. Holder de mot flere ekte produksjoner?
+
+Runden fant **ett produktavvik** som måtte fikses før spørsmålet i det hele tatt kunne besvares,
+og **bekreftet ett vern** som til nå bare NAS-en kunne demonstrere. Ingen terskel er endret —
+justering er eierklasse, og forslagene står med tall i rapportens §6.
+
+### ① En avvisning bar ingen måling
+
+`Unsynced` var en sti og ett ord:
+
+```json
+{ "file": ".../02106.MTS", "reason": "low_confidence" }
+```
+
+På grunnlinja (`LINNEA&SIGURD`, bryllupsdagens 175 kandidater) dekket det ordet de aller fleste
+filene. Ingenting i utdataene skilte «dette er urelatert materiale» fra «dette bommet på baren
+med 0,4». Det er to helt ulike saker for en bruker — den ene betyr «fila hører ikke hjemme her»,
+den andre «senk terskelen eller velg en annen referanse» — og de var samme ord.
+
+Verre for denne runden: **spørsmålet oppdraget stilte var ikke besvarbart fra utdataene.** Man kan
+ikke avgjøre om en terskel er riktig uten å se fordelinga av det den avviste.
+
+`Unsynced.evidence` bærer nå det beste avviste treffet: `psr`, `offset_seconds` (hvor det ville
+plassert klippet, så en nesten-treff på *riktig sted* er gjenkjennelig), `segments`, og
+`required_psr` — baren treffet faktisk ble holdt til. `None` der betyr «ingen PSR ville vært nok»,
+altså drept av troverdighetsporten framfor av golvet; å rapportere et høyt tall der ville vært en
+løgn av et annet slag, for det ville fortalt brukeren at et sterkere klipp hadde blitt plassert.
+
+`required_psr` er skilt ut av `admissible`, som nå er et tynt skall over den. Det er poenget:
+**én funksjon er eneste myndighet på hvilken bar som gjelder**, så porten og forklaringa av porten
+ikke kan gli fra hverandre. En kopi av den avgjørelsen ved siden av rapporteringskoden er nøyaktig
+slik den slags glir.
+
+Endringa er additiv på §5-kontrakten i **begge** retninger — gammel JSON leses (`serde(default)`),
+ny JSON leses av en konsument som er eldre enn feltet, og en avvisning uten måling utelater nøkkelen
+helt, så byte-likheten i §13.4 er urørt for de tilfellene. `SCHEMA_VERSION` står derfor på 1.
+Prøven `refusal_evidence_is_additive_in_both_directions` fester alle tre.
+
+**Merk for eier:** `app/src/types.ts` er håndskrevet og eies av et annet spor; `Unsynced` der har
+ikke `evidence` ennå. Det er trygt (ekstra felt ignoreres), men grensesnittet viser altså ikke
+målinga enda. Å la «avvist» kunne peke på sitt eget tall i UI-et er en naturlig oppfølger.
+
+### ② Den redigerte miksen er nå en prøve, ikke bare en historie
+
+`Johnny Hansen/Marie og Fredrik` på NAS-en er ikke et opptak, men et arkiv av seks ferdige klipp av
+ett bryllup — lang film, 40-minutters, tredelt fest, kirkedel. Hver fil *er* hendelsen, med høy PSR.
+Det er den farligste formen ekte materiale har, og den D-045 ble skrevet for.
+
+Motoren plasserte ingenting. Og da hver av tre ulike redigeringer ble tvunget som referanse etter
+tur, plasserte den fortsatt ingenting. Riktig svar, tre ganger, på ekte materiale.
+
+Forgjengeren i denne runden hadde begynt på `emit_edited_mix` i `fixturegen` uten å ta den i bruk.
+Den er nå ferdig og brukt: kutt av masteren i hendelsesrekkefølge med materiale fjernet mellom dem
+— det en klipper faktisk gjør. Hvert kutt er ekte hendelseslyd, så en korrelator som bare veier
+toppstyrke blir lurt; det fila ikke har, er én forskyvning, så segmentene spriker og regresjonen
+gjennom dem beskriver ingen klokke som finnes.
+
+Prøven `a_produced_edit_is_refused_for_its_scatter_not_its_volume` fester **grunnen**, ikke bare
+avvisninga: `required_psr: None`. Å avvise fila for å være svak ville vært flaks; å avvise den for
+spredning er D-045 som virker. Den kjører i CI, uten NAS.
+
+### ③ Hva feltet fant med det samme
+
+Verdt å notere, fordi det er selve begrunnelsen for ①: første kjøring **med** feltet på
+redigeringsarkivet viste at `Marie og Fredrik 40 minutt.mp4` ble avvist med **PSR 131,39** —
+fem ganger over den strengeste baren, nesten ni ganger over golvet — med `required_psr: null`,
+altså drept av troverdighetsporten. Fila korrelerer så voldsomt fordi den *er* det samme
+bryllupet, klippet på nytt; et hvilket som helst PSR-golv ville plassert den, og plassert den
+grovt feil.
+
+Før dette feltet fantes stod det tallet ingen steder. Utdataene sa `low_confidence`, det samme
+ordet som for en stille dronefil. Motorens sterkeste og viktigste avgjørelse i hele korpuset var
+usynlig i sin egen rapport. Det er argumentet for ① i én linje.
+
+### ④ Terskler er ikke rørt
+
+Rapporten foreslår, med tall, at den strenge korte-klipp-baren står for høyt, og at rotårsaken
+er at et klipp under 45 s ikke *får lov* til å skaffe seg segmentbevis mot en lang referanse.
+Ingen konstant er endret i denne runden. Se `CALIBRATION-2026-09.md` §4 og §8.

@@ -233,18 +233,16 @@ fn scan_detailed_workers(
     for (path, outcome) in candidates.iter().zip(outcomes) {
         match outcome {
             // §4.1: no audio stream means nothing to correlate on.
-            Ok(p) if !p.has_audio() => unsynced.push(Unsynced {
-                file: path.clone(),
-                reason: UnsyncedReason::NoAudio,
-            }),
+            Ok(p) if !p.has_audio() => {
+                unsynced.push(Unsynced::new(path.clone(), UnsyncedReason::NoAudio));
+            }
             Ok(p) => probed.push(p),
             // A cancelled probe is not a broken file — reporting it as `decode_error`
             // would slander the user's media for stopping the run.
             Err(probe::ProbeError::Cancelled) => return Err(Error::Cancelled),
-            Err(_) => unsynced.push(Unsynced {
-                file: path.clone(),
-                reason: UnsyncedReason::DecodeError,
-            }),
+            Err(_) => {
+                unsynced.push(Unsynced::new(path.clone(), UnsyncedReason::DecodeError));
+            }
         }
     }
     let total = candidates.len();
@@ -547,10 +545,7 @@ fn collect(
             // classifies, exactly as it is only the walk that hides dotfiles.
             walked.files.push(input.clone());
         } else {
-            missing.push(Unsynced {
-                file: input.clone(),
-                reason: UnsyncedReason::DecodeError,
-            });
+            missing.push(Unsynced::new(input.clone(), UnsyncedReason::DecodeError));
         }
     }
 
@@ -1712,6 +1707,7 @@ mod tests {
         m.unsynced.push(Unsynced {
             file: PathBuf::from("/x/broken.mp4"),
             reason: UnsyncedReason::DecodeError,
+            evidence: None,
         });
         m
     }

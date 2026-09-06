@@ -1,0 +1,1026 @@
+{
+  "schema": 1,
+  "parameters": {
+    "analysis_rate": 12000,
+    "min_psr": 15.0
+  },
+  "reference": {
+    "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/200101_001.WAV",
+    "device": "folder-f2"
+  },
+  "devices": [
+    {
+      "id": "folder-f2",
+      "label": "F2",
+      "kind": "audio",
+      "files": [
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/200101_001.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/200101_002.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/200101_003.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/200101_004.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/230326_001.WAV"
+      ]
+    },
+    {
+      "id": "folder-f6",
+      "label": "F6",
+      "kind": "audio",
+      "files": [
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_001.TAKE/260725_001_Tr1.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_001.TAKE/260725_001_TrL_R.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_002.TAKE/260725_002_Tr1.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_002.TAKE/260725_002_TrL_R.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_003.TAKE/260725_003_Tr1.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_003.TAKE/260725_003_TrL_R.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_004.TAKE/260725_004_Tr1.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_004.TAKE/260725_004_TrL_R.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_005_0001.TAKE/260725_005_0001_Tr1.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_005_0001.TAKE/260725_005_0001_TrL_R.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_005_0002.TAKE/260725_005_0002_Tr1.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_005_0002.TAKE/260725_005_0002_TrL_R.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_006.TAKE/260725_006_Tr1.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_006.TAKE/260725_006_TrL_R.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_007.TAKE/260725_007_Tr1.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_007.TAKE/260725_007_TrL_R.WAV"
+      ]
+    },
+    {
+      "id": "folder-filmer",
+      "label": "Filmer",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02106.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02107.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02108.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02109.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02110.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02111.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02112.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02113.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02114.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02115.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02116.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02117.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02118.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02119.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02120.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02121.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02122.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02123.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02124.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02125.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02126.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02127.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02128.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02129.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02130.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02131.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02132.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02133.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02134.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02135.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02136.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02137.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02138.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02139.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02140.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02141.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02142.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02143.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02144.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02145.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02146.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02147.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02148.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02149.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02150.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02151.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02152.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02153.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02154.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02155.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02156.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02157.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02158.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02159.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02160.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02161.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02162.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02163.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02164.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02165.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02166.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02167.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02168.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02169.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02170.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02171.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02172.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02173.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02174.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02175.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02176.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02177.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02178.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02179.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02180.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02181.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02182.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02183.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02184.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02185.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02186.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02187.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02188.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02189.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02190.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02191.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02192.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02193.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02194.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02195.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02196.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02197.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02198.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02199.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02200.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02201.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02202.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02203.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02204.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02205.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02206.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02207.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02208.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02209.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02210.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02211.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02212.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02213.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02214.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02215.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02216.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02217.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02218.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02219.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02220.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02221.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02222.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02223.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02224.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02225.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02226.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02228.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02229.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02230.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02231.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02232.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02233.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02234.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02235.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02236.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02237.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02238.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02239.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02240.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02241.MTS",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02242.MTS"
+      ]
+    },
+    {
+      "id": "folder-johnny-bryllup",
+      "label": "JOHNNY BRYLLUP",
+      "kind": "audio",
+      "files": [
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/MUSIC_01.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/MUSIC_02.WAV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/MUSIC_03.WAV"
+      ]
+    },
+    {
+      "id": "folder-mikser",
+      "label": "MIKSER",
+      "kind": "audio",
+      "files": [
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260724_141546.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_125533.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_133638.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_134613.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_134641.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_141633.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_144019.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_145615.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_155446.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_183250.wav",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_185930.wav"
+      ]
+    },
+    {
+      "id": "folder-steinar",
+      "label": "STEINAR",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/STEINAR/IMG_4210.MP4"
+      ]
+    },
+    {
+      "id": "folder-xt4",
+      "label": "XT4",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/FUJI/XT4/DSCF1735.MOV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/FUJI/XT4/DSCF1736.MOV",
+        "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/FUJI/XT4/DSCF1737.MOV"
+      ]
+    }
+  ],
+  "placements": [
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/200101_001.WAV",
+      "device": "folder-f2",
+      "offset_seconds": 0.0,
+      "confidence": 1.0,
+      "psr": null,
+      "drift_ppm": null,
+      "projected_end_error_ms": null,
+      "chain": [],
+      "warnings": []
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02121.MTS",
+      "device": "folder-filmer",
+      "offset_seconds": 120.38500272860334,
+      "confidence": 0.4991521478679456,
+      "psr": 29.949214988437397,
+      "drift_ppm": null,
+      "projected_end_error_ms": null,
+      "chain": [],
+      "warnings": []
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02114.MTS",
+      "device": "folder-filmer",
+      "offset_seconds": 4102.680235717127,
+      "confidence": 0.4077070153197472,
+      "psr": 25.32530417880552,
+      "drift_ppm": null,
+      "projected_end_error_ms": null,
+      "chain": [],
+      "warnings": []
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260724_141546.wav",
+      "device": "folder-mikser",
+      "offset_seconds": 6217.679673688843,
+      "confidence": 0.787651724164898,
+      "psr": 70.63867102762906,
+      "drift_ppm": null,
+      "projected_end_error_ms": null,
+      "chain": [],
+      "warnings": []
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02215.MTS",
+      "device": "folder-filmer",
+      "offset_seconds": 6234.00374087325,
+      "confidence": 0.5040894377214482,
+      "psr": 30.247389632275134,
+      "drift_ppm": null,
+      "projected_end_error_ms": null,
+      "chain": [],
+      "warnings": []
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/FUJI/XT4/DSCF1736.MOV",
+      "device": "folder-xt4",
+      "offset_seconds": 6235.625662714562,
+      "confidence": 0.6081433012938173,
+      "psr": 38.27929967645423,
+      "drift_ppm": null,
+      "projected_end_error_ms": null,
+      "chain": [],
+      "warnings": []
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02118.MTS",
+      "device": "folder-filmer",
+      "offset_seconds": 10462.165250231728,
+      "confidence": 0.818765829818541,
+      "psr": 82.76584920482374,
+      "drift_ppm": null,
+      "projected_end_error_ms": null,
+      "chain": [],
+      "warnings": []
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02160.MTS",
+      "device": "folder-filmer",
+      "offset_seconds": 10885.130333321866,
+      "confidence": 0.4115591907849422,
+      "psr": 25.49109403205572,
+      "drift_ppm": null,
+      "projected_end_error_ms": null,
+      "chain": [],
+      "warnings": []
+    }
+  ],
+  "unsynced": [
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/DRONE/SÆVIK DRONE JUNI23/DJI_0075.MP4",
+      "reason": "no_audio"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/DRONE/SÆVIK DRONE JUNI23/DJI_0076.MP4",
+      "reason": "no_audio"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/DRONE/SÆVIK DRONE JUNI23/DJI_0077.MP4",
+      "reason": "no_audio"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/DRONE/SÆVIK DRONE JUNI23/DJI_0078.MP4",
+      "reason": "no_audio"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/DRONE/SÆVIK DRONE JUNI23/DJI_0079.MP4",
+      "reason": "no_audio"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/FUJI/XT4/DSCF1735.MOV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/FUJI/XT4/DSCF1737.MOV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02106.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02107.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02108.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02109.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02110.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02111.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02112.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02113.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02115.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02116.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02117.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02119.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02120.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02122.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02123.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02124.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02125.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02126.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02127.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02128.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02129.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02130.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02131.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02132.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02133.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02134.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02135.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02136.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02137.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02138.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02139.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02140.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02141.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02142.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02143.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02144.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02145.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02146.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02147.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02148.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02149.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02150.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02151.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02152.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02153.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02154.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02155.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02156.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02157.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02158.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02159.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02161.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02162.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02163.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02164.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02165.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02166.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02167.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02168.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02169.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02170.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02171.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02172.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02173.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02174.MTS",
+      "reason": "device_overlap"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02175.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02176.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02177.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02178.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02179.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02180.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02181.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02182.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02183.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02184.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02185.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02186.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02187.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02188.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02189.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02190.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02191.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02192.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02193.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02194.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02195.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02196.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02197.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02198.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02199.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02200.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02201.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02202.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02203.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02204.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02205.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02206.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02207.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02208.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02209.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02210.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02211.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02212.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02213.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02214.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02216.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02217.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02218.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02219.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02220.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02221.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02222.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02223.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02224.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02225.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02226.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02228.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02229.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02230.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02231.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02232.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02233.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02234.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02235.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02236.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02237.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02238.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02239.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02240.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02241.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/Filmer/02242.MTS",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/MUSIC_01.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/MUSIC_02.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/JOHNNY BRYLLUP/MUSIC_03.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/01_FILM/STEINAR/IMG_4210.MP4",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/200101_002.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/200101_003.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/200101_004.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F2/230326_001.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_001.TAKE/260725_001_Tr1.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_001.TAKE/260725_001_TrL_R.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_002.TAKE/260725_002_Tr1.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_002.TAKE/260725_002_TrL_R.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_003.TAKE/260725_003_Tr1.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_003.TAKE/260725_003_TrL_R.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_004.TAKE/260725_004_Tr1.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_004.TAKE/260725_004_TrL_R.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_005_0001.TAKE/260725_005_0001_Tr1.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_005_0001.TAKE/260725_005_0001_TrL_R.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_005_0002.TAKE/260725_005_0002_Tr1.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_005_0002.TAKE/260725_005_0002_TrL_R.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_006.TAKE/260725_006_Tr1.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_006.TAKE/260725_006_TrL_R.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_007.TAKE/260725_007_Tr1.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/F6/260725_007.TAKE/260725_007_TrL_R.WAV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_125533.wav",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_133638.wav",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_134613.wav",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_134641.wav",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_141633.wav",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_144019.wav",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_145615.wav",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_155446.wav",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_183250.wav",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINNEA&SIGURD/02_LYD/MIKSER/uirec-20260725_185930.wav",
+      "reason": "low_confidence"
+    }
+  ],
+  "sequence": {
+    "fps": "50/1",
+    "duration_seconds": 11184.469333
+  },
+  "warnings": [
+    {
+      "code": "mixed_fps"
+    }
+  ]
+}

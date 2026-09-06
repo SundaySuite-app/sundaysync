@@ -793,3 +793,114 @@ fn device_overrides_flow_through_the_full_pipeline() {
         serde_json::to_string(&again).unwrap()
     );
 }
+
+/// D-098: a produced *edit* of the event must never be used as if it were a recording.
+///
+/// This is the single most dangerous shape real material has, and the K calibration round
+/// met it head-on: `Johnny Hansen/Marie og Fredrik` on the NAS is not a shoot at all but an
+/// archive of six finished cuts of one wedding — a long film, a 40-minute version, a
+/// three-part reception, a church edit. Every file in it genuinely *is* the event, at high
+/// PSR. Run over that folder the engine placed nothing, and forcing each of three different
+/// edits as the reference in turn changed nothing: still nothing placed. That is the right
+/// answer, and D-045 is why — but until now it was an answer only the NAS could demonstrate.
+///
+/// The fixture reproduces the shape without the NAS: cuts of the master in event order with
+/// material removed between them, which is exactly what an editor does. Every cut is real
+/// event audio, so a correlator judging peak strength alone is fooled; what the file does
+/// not have is a single offset, so the segments scatter and the regression through them
+/// describes no clock that exists.
+///
+/// The assertion that matters is the *reason*. Refusing this file for being quiet would be
+/// luck; refusing it because its segments do not describe a clock is D-045 working. So the
+/// test pins `required_psr: None` — "no PSR would have been enough" — which is the only
+/// outcome that stays correct if the mix happens to correlate loudly.
+#[test]
+fn a_produced_edit_is_refused_for_its_scatter_not_its_volume() {
+    let Some(sidecar) = require_ffmpeg() else {
+        return;
+    };
+    let root = scratch("edited-mix");
+    let seed = 23u64;
+    let spec = shoot::full_suite(seed);
+    let dir = shoot::suite_dir(&root, &spec.name, seed);
+    let mut truth = shoot::emit(&spec, &dir, &sidecar.ffmpeg).expect("emit");
+
+    // Five cuts of a 600 s event, in order, with the boring parts dropped. 130 s total —
+    // comfortably over the 45 s whole-clip limit, so §4.3 segments it and the credibility
+    // gate actually has something to check. That is the point of the fixture.
+    let cuts = [
+        (30.0, 25.0),
+        (140.0, 30.0),
+        (260.0, 25.0),
+        (400.0, 30.0),
+        (520.0, 20.0),
+    ]
+    .iter()
+    .map(|(start_seconds, duration_seconds)| shoot::ClipSpec {
+        start_seconds: *start_seconds,
+        duration_seconds: *duration_seconds,
+    })
+    .collect::<Vec<_>>();
+    let mix = shoot::emit_edited_mix(
+        &mut truth,
+        &dir,
+        "produced-edit",
+        &cuts,
+        Codec::Wav,
+        &sidecar.ffmpeg,
+    )
+    .expect("emit edited mix");
+
+    let request = sundaysync_core::SyncRequest {
+        cache_dir: Some(dir.join("cache")),
+        ..sundaysync_core::SyncRequest::new(vec![dir.clone()])
+    };
+    let result = sundaysync_core::sync(&request, &NoProgress, &CancelToken::new()).expect("sync");
+
+    // The recorder feed is still the longest file, so the edit must not have stolen the
+    // reference — if it had, this test would be measuring the wrong thing entirely.
+    let reference = result.reference.as_ref().expect("a reference");
+    assert!(
+        reference.file.to_string_lossy().contains("recorder"),
+        "expected the recorder feed as reference, got {:?}",
+        reference.file
+    );
+
+    assert!(
+        !result
+            .placements
+            .iter()
+            .any(|p| p.file.file_name().is_some_and(|n| n == mix.as_str())),
+        "a produced edit was placed on the timeline — D-045's exact failure mode"
+    );
+
+    let refused = result
+        .unsynced
+        .iter()
+        .find(|u| u.file.file_name().is_some_and(|n| n == mix.as_str()))
+        .expect("the produced edit must be reported as unsynced");
+    assert_eq!(
+        refused.reason,
+        sundaysync_core::result::UnsyncedReason::LowConfidence
+    );
+
+    let ev = refused
+        .evidence
+        .expect("D-098: a measured refusal must carry its measurement");
+    println!(
+        "produced edit: psr={:.2} segments={} required={:?} offset={:.3}s",
+        ev.psr, ev.segments, ev.required_psr, ev.offset_seconds
+    );
+    assert!(
+        ev.segments >= 3,
+        "the fixture must be long enough to segment, got {} segments — \
+         without segments this test proves nothing about the credibility gate",
+        ev.segments
+    );
+    assert_eq!(
+        ev.required_psr, None,
+        "the edit must be refused by the credibility gate (no PSR is enough), not by the \
+         PSR floor — it scored {:.2} on material that genuinely is the event",
+        ev.psr
+    );
+}

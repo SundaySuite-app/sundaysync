@@ -1750,10 +1750,10 @@ mod tests {
                     projected_end_error_ms: 20.0,
                 }],
             }],
-            unsynced: vec![Unsynced {
-                file: PathBuf::from("/Users/kari/Opptak/gudstjeneste-broken.mp4"),
-                reason: UnsyncedReason::DecodeError,
-            }],
+            unsynced: vec![Unsynced::new(
+                PathBuf::from("/Users/kari/Opptak/gudstjeneste-broken.mp4"),
+                UnsyncedReason::DecodeError,
+            )],
             sequence: Sequence {
                 fps: Rational::new(25, 1).unwrap(),
                 duration_seconds: 4200.0, // 70 min service

@@ -63,7 +63,7 @@ proptest! {
             .map(|i| placement(&format!("/f{i}.mp4"), "cam", f64::from(*i as u32)))
             .collect();
         let us: Vec<Unsynced> = refused.iter()
-            .map(|i| Unsynced { file: PathBuf::from(format!("/f{i}.mp4")), reason: UnsyncedReason::LowConfidence })
+            .map(|i| Unsynced { file: PathBuf::from(format!("/f{i}.mp4")), reason: UnsyncedReason::LowConfidence, evidence: None })
             .collect();
 
         let mut inputs: Vec<PathBuf> = placed.iter().chain(refused.iter())
@@ -84,6 +84,7 @@ proptest! {
         let us = vec![Unsynced {
             file: PathBuf::from("/f0.mp4"),
             reason: UnsyncedReason::DecodeError,
+            evidence: None,
         }];
         let inputs: Vec<PathBuf> = (0..n).map(|i| PathBuf::from(format!("/f{i}.mp4"))).collect();
 

@@ -170,10 +170,12 @@ pub fn sync_with_durations(
                 });
             }
             // A file that probed fine but would not decode is still a decode failure.
-            Err(_) => unsynced.push(Unsynced {
-                file: entry.file.clone(),
-                reason: UnsyncedReason::DecodeError,
-            }),
+            Err(_) => {
+                unsynced.push(Unsynced::new(
+                    entry.file.clone(),
+                    UnsyncedReason::DecodeError,
+                ));
+            }
         }
     }
 
