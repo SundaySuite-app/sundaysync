@@ -5142,7 +5142,7 @@ API-navn.
 med `skip_serializing_if = "Option::is_none"`. Fraværende felt, ikke `null`, og grunnen er
 konkret: **hver eneste utgitte versjon av denne appen er eldre enn mekanismen.** Feeden
 serverer akkurat nå v0.6.0-beta.5, hvis notat er den gamle standardteksten — og den
-inneholder `**stjerner**, fordi den ble skrevet da feltet var pynt ingen leste. En
+inneholder `**stjerner**`, fordi den ble skrevet da feltet var pynt ingen leste. En
 installasjon som kjører denne koden mot dagens beta-ring må derfor oppføre seg nøyaktig
 som før: ingen overskrift, ingen tom boks, ingenting. Det er den vanlige tilstanden en god
 stund til, ikke kanttilfellet.
