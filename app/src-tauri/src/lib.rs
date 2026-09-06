@@ -2458,10 +2458,10 @@ mod tests {
                 chain: vec!["reference".into()],
                 warnings: vec![],
             }],
-            unsynced: vec![Unsynced {
-                file: PathBuf::from("/Users/kari/Opptak/broken.mp4"),
-                reason: UnsyncedReason::DecodeError,
-            }],
+            unsynced: vec![Unsynced::new(
+                PathBuf::from("/Users/kari/Opptak/broken.mp4"),
+                UnsyncedReason::DecodeError,
+            )],
             sequence: Sequence {
                 fps: Rational::new(25, 1).unwrap(),
                 duration_seconds: 92.0,
