@@ -1,6 +1,6 @@
 # Changelog
 
-## Ikke sluppet ennå
+## v0.6.0-beta.6
 
 - **Oppdateringen sier hva den er.** Appen har lastet ned releasenotatet ved hver eneste
   sjekk siden slutten av august — og kastet det. Alt du fikk se var «Ny versjon
