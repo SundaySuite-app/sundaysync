@@ -193,28 +193,49 @@ What is left, honestly:
   all: `MIN_WAVEFORM_PX` is 24 px (D-072), which at the floor is a 40-minute clip. Pinned in
   `waveformDraw.test.ts`.
 
-## Unsynced files are listed, not drawn in their own row (v0.6)
+## The unplaced files are pills, and a pill is smaller than a touch target (F)
 
-What the engine refused to place is a list behind the strip's problem chip — filename, reason, a
-device selector and a ✕ — and the same chip counts the files the *scan* could not read, because
-from where the operator stands «er noe galt?» is one question (D-079).
+**Done as of F (D-096), and this section is what it left behind.** A device the run would not place
+files on carries one extra row at the bottom of its own track: grey numbered pills in filename
+order, each one a button that marks its file, so «which of my six cameras is the problem» is
+answered by looking at the row. The problem popover stays as the complete list — a 700 px strip
+cannot hold forty — and as the home of the *scan's* own refusals, which never reached a device row
+at all.
 
-What the room actually wants is the unplaced clip **in its own device row**, at the timeline's left
-edge, numbered, so «which of my six cameras is the problem» is answered by looking at the row rather
-than by reading filenames. That is real timeline work — a lane that is not a time axis, hit-testing,
-the hop's arithmetic — and it is priced as its own stage rather than smuggled into a polish round.
+What remains true is the size. `UNSYNCED_ROW_PX` is 16 and a pill is 14 px tall, which is well under
+the ~24 px a pointer target ought to be. That is deliberate rather than overlooked: the approved
+form is a **mark** on a row, not a control to aim at, and the same files are one click away in the
+popover with full-size controls beside each of them. The pills are reachable and operable by
+keyboard, and each carries its whole sentence — which file, and why the run refused it — on
+`aria-label` and `title`. If the row is ever given more height, the pills should take it.
 
-## The «Kilder» popover lists files; the timeline does not scroll to one (v0.6)
+The strip scrolls sideways rather than wrapping. A device with thirty refusals shows the first
+handful and the rest are a scroll (or the popover) away; a strip that grew a second line would be a
+row whose height the hop's arithmetic does not know about, which is the one failure `trackHeightFor`
+exists to make impossible.
 
-Clicking a filename in the «Kilder» panel marks that clip and fills the inspector with it — the
-picture, the facts, the three decisions. It does **not** pan or zoom the timeline to bring the clip
-into view. On a wedding-sized drop at Fit the clip is three pixels wide and probably on screen
-somewhere; at any real zoom it very often is not, and the operator is then looking at a full
-inspector with no box highlighted anywhere they can see.
+## The «Kilder» popover takes you to the clip; a click on the clip itself does not (F)
 
-Deliberate for now: "scroll the timeline to the selection" is a viewport write, and every gesture in
-this view has been read-mostly since D-051. It is the obvious next thing for the list to do and it
-needs a decision about whether the zoom changes too, which is a design question rather than a fix.
+**Done as of F (D-096).** Picking a filename in «Kilder» now pans the timeline to that clip, zooms
+in if the clip is drawn narrower than 24 px (to at least 48), scrolls the tracks column to the
+device's row, and pulses the box once — about 250 ms of travel, instant under
+`prefers-reduced-motion`.
+
+What is *deliberately* still true is the other half: **a click on a clip moves nothing.** The
+operator is already looking at the box they clicked, and a timeline that panned under that click
+would move the one thing their eye is on. Only a file chosen by name, from a list, with no idea
+where it is, is worth a journey. If that ever feels inconsistent, the fix is not to make clip
+clicks travel — it is a separate «go to selection» control.
+
+Two smaller honesties about the reveal:
+
+- **At the ends of the content it cannot keep its breathing room.** Nothing may scroll past the
+  content (`clampScroll`, which every gesture in this view obeys), so the last clip of the day lands
+  flush against the right edge rather than 24 px inside it. «As close to comfortable as the end of
+  the timeline allows» is the promise; a reveal that scrolled further would be inventing timeline.
+- **A file with no duration is panned to, not zoomed to.** An outcome that carries no duration for a
+  file gives it a zero-width box (`clip--nodur`), and there is no zoom that makes zero wide. The pan
+  does the whole job and the box stays a hairline, honestly.
 
 ## The 12 kHz playback note is a tooltip, not a caption (v0.6)
 

@@ -100,6 +100,9 @@ export const nb = {
   timelineAria: "Tidslinje",
   trackAria: (name: string) => `Spor: ${name}`,
   subTrackAria: (n: number) => `Underspor ${n}`,
+  // F (D-096): stripa med pillene nederst i enhetens spor. Bevisst IKKE «Underspor»: et
+  // underspor er en bane på tidsaksen, og ingenting på denne stripa har en posisjon i tid.
+  unsyncedRowAria: (name: string) => `Ikke plassert på ${name}`,
   // V06-R2b (D-083): sporhodet er enhetens hjem, og prikken på andre linje er enhetens egen
   // tilstand. Fargen sier det til øyet fra andre siden av rommet; disse tre sier det med ord
   // til skjermleseren og til den som holder musepekeren i ro. «Enheten», ikke «filene»:
@@ -544,6 +547,8 @@ export const en: Strings = {
   timelineAria: "Timeline",
   trackAria: (name: string) => `Track: ${name}`,
   subTrackAria: (n: number) => `Sub-track ${n}`,
+  // F (D-096) — see the nb comment above.
+  unsyncedRowAria: (name: string) => `Not placed on ${name}`,
   // V06-R2b (D-083) — see the nb comments above.
   trackAnalysing: "Analysing the audio",
   trackAnalysisFailed: "Audio not analysed",

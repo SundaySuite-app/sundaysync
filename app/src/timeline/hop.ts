@@ -95,6 +95,40 @@ export function laneHeightFor(rows: number, availablePx: number): number {
   return Math.min(LANE_MAX_PX, Math.max(LANE_MIN_PX, fair));
 }
 
+/**
+ * The strip of numbered pills a device's unplaced files live on (F, D-096) — one extra row
+ * at the bottom of that device's track, and only on the devices that have any.
+ *
+ * 16 px, and it is deliberately not a lane: nothing on it is a position in time, so it must
+ * not be as tall as a row that is. It is the height of one pill (11 px type in a 999-radius
+ * capsule) plus the hairline above it, which is as small as a row can be and still be a row.
+ *
+ * **A track's height is {@link trackHeightFor} and nothing else.** This constant exists so
+ * that function can add it once; nothing may add it a second time.
+ */
+export const UNSYNCED_ROW_PX = 16;
+
+/**
+ * How tall one device's track is — **the single producer, exactly as `laneHeightFor` is for
+ * the pitch** (D-091, extended by D-096).
+ *
+ * `Track.tsx` writes this into the track's `height`, and {@link clipBoxes} sums this to step
+ * from one track's top to the next. That is the whole of the D-083 invariant restated for the
+ * row R2c adds: a second constant added in one of the two places and forgotten in the other
+ * would put every clip below the first device with unplaced files onto a row it is not in —
+ * silently, and only on the drops that have refusals, which are the drops nobody has a
+ * reproducible fixture for.
+ *
+ * A device with nothing on it still occupies one lane (§7.5), which is the `max(1, …)`.
+ */
+export function trackHeightFor(
+  rows: number,
+  hasUnsynced: boolean,
+  laneHeightPx: number,
+): number {
+  return Math.max(1, rows) * laneHeightPx + (hasUnsynced ? UNSYNCED_ROW_PX : 0);
+}
+
 /** `.track`'s hairline (`.track + .track { border-top }`). Inside the box, since the sheet
  *  is `border-box` throughout — so it does not add to a track's height, it only pushes the
  *  lanes down by a pixel inside it. Every content track has one (the ruler track precedes
@@ -145,6 +179,16 @@ export const HAIRLINE_WIDTH_PX = 2;
  */
 export interface HopTrack {
   rows: readonly (readonly ClipSpan[])[];
+  /**
+   * This device draws the unplaced-files strip (F, D-096) — the ONE thing besides the row
+   * count that changes how tall its track is.
+   *
+   * A boolean rather than the list, for the same reason `rows` is counted rather than read:
+   * the vertical arithmetic depends on whether the strip is there and on nothing about what
+   * is in it. Optional so every existing caller and every existing test keeps meaning what
+   * it meant — absent is "no strip", which is what every layout before D-096 was.
+   */
+  unsynced?: boolean;
 }
 
 /** How one clip's box is drawn horizontally — the answer {@link clipDrawing} gives, and the
@@ -260,9 +304,11 @@ export function clipBoxes(
         boxes.set(span.file, { x: msToX(span.startMs, view), y, ...draw });
       }
     }
-    // A device with nothing on it still occupies one lane (§7.5's "a camera that synced
-    // nothing must be visible"), which is why this is `max(1, …)` and not `rows.length`.
-    trackTop += Math.max(1, track.rows.length) * laneHeightPx;
+    // Through `trackHeightFor` and never by restating the sum here (D-091, D-096): this is
+    // one of that function's exactly two callers, and the other is the component that writes
+    // the number into the DOM. A device with unplaced files carries one extra strip at the
+    // bottom of its track, and every track below it starts that much further down.
+    trackTop += trackHeightFor(track.rows.length, track.unsynced === true, laneHeightPx);
   }
   return boxes;
 }

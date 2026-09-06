@@ -5210,3 +5210,109 @@ Bannerlinja som møter deg ved oppstart («Ny versjon 0.6.0-beta.6 er tilgjengel
 Innstillinger → System …») viser fortsatt bare versjonsnummeret. Det er med vilje: banneret
 er én linje over tidslinja, og et notat der ville dekket arbeidsflata. Den peker til stedet
 notatet nå faktisk står.
+
+## D-096 — F: «Kilder» finner klippet, og de uplasserte filene bor i sin egen enhets rad
+
+To løfter som `KNOWN_LIMITATIONS.md` har skrevet ned og utsatt hver sin gang, og som viste seg å
+være to halvdeler av samme setning: **hvor er fila?** Den ene besvarer den for en fil du kan navnet
+på, den andre for en fil du ikke visste var et problem.
+
+### ① Å klikke en fil i «Kilder» tar deg til den
+
+Siden D-077 har en rad i «Kilder»-lista markert klippet — inspektøren fylles med bildet, faktaene
+og de tre avgjørelsene — og tidslinja har stått bom stille. På eierens bryllup med 386 klipp er et
+klipp tre piksler bredt og som oftest ikke på skjermen i det hele tatt, så lista svarte «hvilken
+fil er dette?» og lot «hvor er den?» stå ubesvart, med en full inspektør som beskrev en boks ingen
+kunne se. Verre enn ubesvart: virtualiseringsvinduet gir ikke et klipp utenfor synsfeltet en
+DOM-node engang, så det fantes ikke noe sted på skjermen der markeringa var synlig.
+
+Nå reiser utsikta. Regnestykket ligger i `src/timeline/reveal.ts` — rent, uten DOM, enhetstestet,
+akkurat som `geometry.ts` og `viewport.ts` — og de tre skrivingene det produserer ligger i
+`useReveal.ts`:
+
+- **Panorering og zoom** er én interpolert rAF på ~250 ms, i formen `useHop`s avsluttende
+  «fit» allerede etablerte: zoomen beveger seg GEOMETRISK (den er et forhold; en lineær rampe
+  kryper i den ene enden og rykker i den andre), panoreringa lineært, begge på samme ease-out.
+  Er klippet smalere enn 24 px zoomes det til minst 48 — å peke på et to-pikslers merke blant 385
+  andre to-pikslers merker er ikke et svar. Er klippet bredere enn vinduet venstrestilles det:
+  å sentrere et to timer langt klipp legger STARTEN utenfor venstre kant, og starten er det
+  operatøren leter etter.
+- **Loddrett** er `.timeline__scroll`s eget `scrollTop`, skrevet som et tall.
+  **`scrollIntoView` er forbudt her**, og suiten har arret: den scroller *hver eneste* scrollbar
+  forfar, så «hold denne raden synlig» inni en tidslinje flytter sida, scena og alt annet med en
+  overflow mellom raden og dokumentet. Sporet finnes i DOM-en også når klippet ikke gjør det
+  (`data-device`), så en fil som er nektet plassert — eller som ligger utenfor
+  virtualiseringsvinduet — får likevel raden sin fram.
+- **Et gullpuls** på 600 ms på boksen når utsikta har lagt seg, som er det eneste øyeblikket noden
+  garantert finnes.
+
+Under `prefers-reduced-motion` er den første én tilordning og den tredje skjer ikke. Pulsen er
+pynt; svaret på «hvor er den?» er at klippet ER der.
+
+**Regelen er at BARE popoveren spør.** `requestReveal` har nøyaktig én kaller i hele appen
+(`SourcesPopover.pick`), og det er hele designet: et klikk på et KLIPP må aldri flytte utsikta,
+fordi operatøren allerede ser på boksen de klikket og en tidslinje som panorerte under det klikket
+ville flytte akkurat det øyet hviler på. Det som gjør «Kilder» annerledes er at fila ble valgt VED
+NAVN, fra en alfabetisk liste, uten anelse om hvor den er — å nå fram er hele ærendet.
+`finn-klippet.spec.ts` holder begge halvdelene: at popoveren flytter utsikta, og at et direkte
+klipp-klikk ikke rører `scrollMs` med en piksel.
+
+**Sidefunn, og det var et hull:** markeringa har vært et ekte faktum siden D-070 og hadde ikke noe
+merke på tidslinja i det hele tatt. Panelet fyltes og ingen boks på skjermen sa hvilken den handlet
+om. Det var til å leve med så lenge et klikk var eneste måte å markere på — operatørens egen finger
+var merket — og sluttet å være det i samme sekund «Kilder» kunne markere et klipp operatøren aldri
+har sett. `clip--selected` er en RING og ikke et fyll: hver farge et klipp kan bære er en påstand
+appen gjør om fila, og en markering er ikke en av dem.
+
+### ② R2c: de uplasserte filene som nummererte piller i enhetens egen rad
+
+Utsatt to ganger (D-079 skrev det ned som «ekte tidslinjearbeid, priset som sin egen etappe»).
+Det motoren nektet å plassere var en liste bak problem-brikka på stripa og ingenting annet, så
+«hvilket av de seks kameraene er problemet» kunne bare besvares ved å lese filnavn.
+
+Nå får en enhet med nektede filer én ekstra rad nederst i sitt eget spor: grå, nummererte piller i
+filnavnrekkefølge, hver av dem en knapp som markerer fila si. Nummeret er det som gjør spørsmålet
+besvarbart i et blikk; hele setninga — hvilken fil, og hvorfor — ligger på `aria-label` og `title`,
+der en 14 px kapsel aldri kunne båret den. Rekkefølgen er `compareNatural`, den samme
+sammenlikninga et utidsstemplet kort legges ut i, fordi en rekkefølge appen tildeler må være en
+operatøren kan forutsi.
+
+Bevisst IKKE en bane: ingenting på stripa har en posisjon i tid, og den sier det i sitt eget
+tilgjengelige navn (`unsyncedRowAria`) i stedet for å melde seg som enda et «Underspor».
+
+**Hylla blir.** Popoveren er ikke erstattet av pillene: den er den komplette lista (en 700 px strip
+rommer ikke førti), den bærer bulk-affordansene (flytt til enhet, ✕), og den er der SKANNENS egne
+nektelser bor — filer som aldri nådde en enhetsrad i det hele tatt. To visninger av to
+overlappende, men ulike, lister.
+
+**Inspektøren sier nå hva kjøringa gjorde av fila.** D-077 #8 gjorde det med vilje mulig å markere
+en nektet fil — nettopp så operatøren kunne åpne den fila problem-brikka handlet om — og
+synk-halvdelen sto tom for den. Motoren visste hvorfor; inspektøren operatøren åpnet VED å klikke
+fila sa det ikke. En plassering og en nektelse er de to formene én kjørings dom over én fil kan ta,
+så de deler halvdel av panelet (`preview__unsynced`). `v06-seams.spec.ts`' påstand om at
+`.preview__sync` er tom er RE-UTTRYKT, ikke slettet (D-085): den var feil om andre halvdel, ikke om
+første.
+
+### ③ Høyden på et spor har nøyaktig én produsent
+
+Den ekstra raden endrer hvor høyt et spor er, og det er nøyaktig den typen endring D-083 og D-091
+har brukt to runder på å gjøre trygg. Hoppets y-regnestykke (`clipBoxes`) summerer sporhøyder for å
+finne hvor hvert klipp ER; skriver komponenten én høyde inn i DOM-en og summerer regnestykket en
+annen, flyr hvert eneste klipp under den første enheten med nektede filer til en rad det ikke er
+i — stille, og bare på de dropene som HAR nektelser, som er nøyaktig de dropene ingen har en
+reproduserbar fixture for.
+
+Så høyden er `trackHeightFor(rows, hasUnsynced, laneHeight)`, med nøyaktig to kallere: `Track.tsx`,
+som skriver den inn i DOM-en, og `clipBoxes`, som summerer den. Aldri en andre konstant, aldri en
+`min-height` i arket. `UNSYNCED_ROW_PX` trekkes òg fra før banene deler resten av scena, så
+`laneHeightFor`s løfte fortsatt holder: den gir aldri mer enn radene kan ha uten at scena må
+scrolle. `hop.test.ts` fester begge halvdelene, inkludert saken funksjonen faktisk produserer — en
+enhet som FÅR en stripe når kjøringa lander, og alle sporene under den som må starte hoppet sitt
+16 px høyere.
+
+### Prisen
+
+Pillene er små. En 16 px rad rommer en 14 px kapsel, og det er under det en berøringsflate burde
+være — bevisst, fordi den godkjente formen er et MERKE på en rad og ikke en kontroll å sikte på:
+hele lista, med kontroller i full størrelse, er én klikk unna i popoveren, og pillene er tastaturnåbare.
+Skrevet ned i `KNOWN_LIMITATIONS.md`.

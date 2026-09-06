@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import type { Strings } from "../../i18n";
 import { formatDuration } from "../../i18n";
+import { requestReveal } from "../../timeline/reveal";
 import { basename } from "../../types";
 import type { ScanManifest } from "../../types";
 import { CameraIcon, MicIcon } from "../icons";
@@ -63,6 +64,16 @@ export function SourcesPopover({
 
   const pick = (file: string) => {
     onSelect(file);
+    // …and the view goes there (F, D-096). **This is the only caller of `requestReveal` in
+    // the app, and that is the whole rule**: a click on a CLIP must never move the timeline,
+    // because the operator is already looking at the box they clicked and a pan under that
+    // click would move the one thing their eye is on. What makes this path different is that
+    // the file was chosen BY NAME, from an alphabetical list, with no idea where it is —
+    // reaching it is the errand, and marking it was only ever half of it.
+    //
+    // After `onSelect`, so the two halves land in one commit rather than the reveal running
+    // against a selection that has not been made yet.
+    requestReveal(file);
     // Marking a clip is the end of the errand this popover exists for; leaving it open would
     // cover the inspector column the operator just filled.
     if (ref.current) ref.current.open = false;

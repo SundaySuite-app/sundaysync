@@ -1,8 +1,9 @@
 import { useRef } from "react";
 import type { Strings } from "../../i18n";
 import { basename } from "../../types";
-import type { Unsynced, UnsyncedReason } from "../../types";
+import type { Unsynced } from "../../types";
 import { UnsyncedShelf } from "../timeline/UnsyncedShelf";
+import { reasonText } from "../timeline/warnings";
 import { usePopoverDismiss } from "./usePopoverDismiss";
 
 /**
@@ -46,13 +47,6 @@ export function ProblemsPopover({
   const ref = useRef<HTMLDetailsElement>(null);
   usePopoverDismiss(ref);
 
-  const reasonText: Record<UnsyncedReason, string> = {
-    low_confidence: t.reasonLowConfidence,
-    no_audio: t.reasonNoAudio,
-    decode_error: t.reasonDecodeError,
-    device_overlap: t.reasonDeviceOverlap,
-  };
-
   const total = scanned.length + shelved.length;
   if (total === 0) return null;
 
@@ -72,7 +66,7 @@ export function ProblemsPopover({
             <span className="filerow__name" title={u.file}>
               {basename(u.file)}
             </span>
-            <span className="badge badge--problem">{reasonText[u.reason]}</span>
+            <span className="badge badge--problem">{reasonText(t, u.reason)}</span>
             <span />
             <button
               type="button"

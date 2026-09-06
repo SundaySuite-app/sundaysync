@@ -2,13 +2,15 @@ import { memo, useMemo } from "react";
 import type { Strings } from "../../i18n";
 import { formatDuration } from "../../i18n";
 import { visibleClips, type TimelineView } from "../../timeline/geometry";
-import { roomBeforeNext } from "../../timeline/hop";
+import { roomBeforeNext, trackHeightFor, UNSYNCED_ROW_PX } from "../../timeline/hop";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import type { PrewarmStatus } from "../../state";
 import type { TimeSource } from "../../timeline/recordingTime";
-import type { Device, Placement } from "../../types";
+import { basename } from "../../types";
+import type { Device, Placement, Unsynced } from "../../types";
 import { CameraIcon, MicIcon } from "../icons";
 import { Clip } from "./Clip";
+import { reasonText } from "./warnings";
 
 /**
  * One device: a fixed gutter naming it, and to its right the stacked sub-track
@@ -52,6 +54,23 @@ import { Clip } from "./Clip";
  * the dot's state out of `prewarm` plus whether there are placements at all. No new props,
  * because a count App computed and Track drew would be a second place that can disagree
  * with the lane beside it.
+ *
+ * ## The strip of refusals (F, D-096)
+ *
+ * A device whose files the run would not place gets ONE extra row under its lanes: grey
+ * numbered pills, in filename order, each one a button that marks its file. Not a lane —
+ * nothing on it is a position in time, and it says so in its own accessible name rather than
+ * announcing itself as another `subTrackAria`.
+ *
+ * It exists because «hvilket av de seks kameraene er problemet» is a question about a ROW, and
+ * until now it could only be answered by opening a popover and reading filenames. The popover
+ * stays: it is the complete list, it carries the bulk affordances, and it is where the SCAN's
+ * own refusals live — files that never reached a device row at all.
+ *
+ * **The height is `trackHeightFor` and nowhere else** — the same rule D-091 wrote for the
+ * pitch, applied to the one thing that changes a track's height besides the row count. That
+ * function is what `clipBoxes` sums for the hop, so a strip added here and forgotten there
+ * would send every clip below this device to a row it is not in.
  */
 export const Track = memo(function Track({
   t,
@@ -67,6 +86,8 @@ export const Track = memo(function Track({
   outsideWindow,
   prewarm,
   laneHeight,
+  unsynced,
+  selected,
   onSelect,
   muted,
   soloed,
@@ -99,6 +120,17 @@ export const Track = memo(function Track({
    *  `clipBoxes` sums for the hop's y-arithmetic — one computation, two consumers, which is
    *  what D-083's constant was protecting and what a divergence here would break silently. */
   laneHeight: number;
+  /**
+   * What the run refused to place on THIS device (F, D-096), already in filename order and
+   * already filtered by the exclusion set. Empty in every phase but `result`, and empty on
+   * every device that placed everything — an empty strip on each clean row would be a row of
+   * nothing the eye has to learn to ignore.
+   */
+  unsynced: readonly Unsynced[];
+  /** The marked file, so this row's clip — or its pill — can wear the gold. A path rather
+   *  than a boolean per box: `Track` is not `memo`ised per clip, and the one thing that
+   *  changes on a selection is which single box in the whole timeline is marked. */
+  selected: string | null;
   /** Mark a clip — by FILE since D-070, so a pre-sync clip can be marked too. */
   onSelect: (file: string) => void;
   muted: boolean;
@@ -111,7 +143,7 @@ export const Track = memo(function Track({
   onToggleSolo: (device: string) => void;
 }) {
   const name = t.deviceLabel(device.id, device.label);
-  const height = Math.max(1, rows.length) * laneHeight;
+  const height = trackHeightFor(rows.length, unsynced.length > 0, laneHeight);
   const meta = useTrackMeta(rows, placements, prewarm);
   const dotLabel =
     meta.state === "placed"
@@ -123,7 +155,16 @@ export const Track = memo(function Track({
           : t.trackAnalysing;
 
   return (
-    <div className="track" role="group" aria-label={t.trackAria(name)} style={{ height: `${height}px` }}>
+    <div
+      className="track"
+      role="group"
+      aria-label={t.trackAria(name)}
+      // The row's identity in the DOM (F, D-096). `useReveal` needs to scroll to a device's
+      // row for a file that may have no clip node at all — refused, or outside the
+      // virtualization window — and the row is the thing that is always drawn.
+      data-device={device.id}
+      style={{ height: `${height}px` }}
+    >
       <div className="track__gutter">
         <span className="track__ident">
           {device.kind === "video" ? <CameraIcon /> : <MicIcon />}
@@ -241,12 +282,52 @@ export const Track = memo(function Track({
                     timeSource={timeSource.get(item.file) ?? null}
                     offSession={outsideWindow.has(item.file)}
                     analysisStatus={prewarm[item.file] ?? null}
+                    selected={selected === item.file}
                     onSelect={onSelect}
                   />
                 );
               })}
             </div>
           ))
+        )}
+        {/* The refusals (F, D-096). Inside `.track__lanes`, under the last lane, so it is a
+            row of this device's own track and not a band across the room — which is what
+            makes «Ett rom» hold: the strip appearing changes nothing outside this track's
+            own height.
+
+            Its own name, and it is deliberately not `subTrackAria`: a sub-track is a lane of
+            the time axis, and nothing on this strip has a position in time. A screen reader
+            that heard «Underspor 2» here would be told this row means something it does
+            not. */}
+        {unsynced.length > 0 && (
+          <div
+            className="track__unsynced"
+            role="group"
+            aria-label={t.unsyncedRowAria(name)}
+            style={{ height: `${UNSYNCED_ROW_PX}px` }}
+          >
+            {unsynced.map((u, i) => {
+              // The number alone says nothing, so the whole sentence rides on the control:
+              // which file, and why the run would not use it. Same words the popover prints
+              // — `reasonText` is the one producer of them (see `warnings.ts`).
+              const sentence = `${basename(u.file)} — ${reasonText(t, u.reason)}`;
+              return (
+                <button
+                  key={u.file}
+                  type="button"
+                  className={`pill pill--unsynced${selected === u.file ? " pill--selected" : ""}`}
+                  // The same identity a clip carries, for the same two readers: the reveal's
+                  // pulse, and anything that has to find one box among four hundred.
+                  data-file={u.file}
+                  aria-label={sentence}
+                  title={sentence}
+                  onClick={() => onSelect(u.file)}
+                >
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

@@ -194,8 +194,21 @@ test.describe("«Kilder» can open every file it lists", () => {
     // «move to device» that is D-027's own advice for a clip that would not place.
     await expect(page.locator(".preview__name")).toHaveText("C0001.MP4");
     await expect(page.locator(".inspector").getByLabel(`${en.removeFile}: C0001.MP4`)).toBeVisible();
-    // …and no engine detail, because there is none.
-    await expect(page.locator(".preview__sync")).toBeEmpty();
+    // …and, since F (D-096), the run's own answer about it.
+    //
+    // This assertion used to read «no engine detail, because there is none», and it was
+    // wrong about the second half rather than the first: there is no PLACEMENT, and the
+    // engine most certainly had something to say — it had a reason, and it was the reason the
+    // operator opened this file to find out. The sync half is the place a run's verdict about
+    // one file goes, and a refusal is that verdict with the other answer, so it goes there.
+    // (Re-expressed, not deleted — D-085. The claim that the file is not on the timeline, two
+    // assertions up, is the half that was always right and is untouched.)
+    await expect(page.locator(".preview__unsynced")).toHaveText(
+      `${en.unsyncedTitle}: ${en.reasonLowConfidence}`,
+    );
+    // Still no placement detail: the offset/confidence/PSR grid describes a position, and
+    // this file has none.
+    await expect(page.locator(".preview__sync .detail-grid")).toHaveCount(0);
   });
 
   test("a file the operator removed still empties the panel", async ({ page }) => {

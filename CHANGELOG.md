@@ -11,6 +11,31 @@
   før en gudstjeneste. Utgivelser fra før notatene ble innført har ingen tekst å vise, og
   da vises det ingenting — ingen tom ramme (D-095).
 
+- **Klikker du en fil i «Kilder», tar tidslinja deg til den.** Lista har markert klippet siden
+  forrige runde, og bildet sto helt stille: på et bryllup med 386 filer er et klipp tre piksler
+  bredt og som oftest ikke på skjermen i det hele tatt, så du satt igjen med en full inspektør som
+  beskrev en boks du ikke kunne se noe sted. Nå reiser utsikta dit — den panorerer, den zoomer inn
+  hvis klippet er for smalt til å se på (under 24 piksler blir til minst 48), sporkolonnen ruller
+  til enhetens egen rad, og boksen blinker gull én gang når den har landet. Et kvart sekund, og
+  umiddelbart hvis du har slått av bevegelse i systemet. **Et klikk på selve klippet flytter
+  fortsatt ingenting** — du ser jo allerede på den boksen, og en tidslinje som panorerte under det
+  klikket ville flytte akkurat det øyet ditt hviler på (D-096).
+- **Det markerte klippet bærer en gullring.** Markeringa har vært et ekte faktum lenge og hadde
+  ikke noe merke på tidslinja i det hele tatt — panelet fyltes, og ingen boks på skjermen sa hvilken
+  den handlet om. Det gikk så lenge et klikk var eneste måte å markere på; det gikk ikke lenger den
+  dagen «Kilder» kunne markere et klipp du aldri har sett. En ring, ikke et fyll: klippet beholder
+  fargen sin — grønn, blå, amber — innenfor den (D-096).
+- **De uplasserte filene bor i sin egen enhets rad.** Det synken ikke fikk til var en liste bak den
+  røde brikka på stripa, og ingenting annet — så «hvilket av de seks kameraene er problemet?» kunne
+  bare besvares ved å lese filnavn. Nå får hver enhet med nektede filer én ekstra rad nederst i sitt
+  eget spor: grå, nummererte piller i filnavnrekkefølge. Trykk på en, og fila havner i inspektøren
+  med hele historien — hvilken fil, hvorfor kjøringa ikke ville bruke den, og de to knappene som
+  hjelper (flytt til enhet, eller fjern den). Lista bak brikka blir: den er den komplette oversikta,
+  og den er der filene *skanninga* ikke kunne lese hører hjemme (D-096).
+- **Inspektøren sier nå hva kjøringa gjorde av en fil den ikke ville bruke.** Du kunne allerede
+  klikke deg inn på en nektet fil — det var meninga — og synk-halvdelen av panelet sto tom for den.
+  Motoren visste hvorfor. Panelet du åpnet nettopp for å få vite det, sa det ikke (D-096).
+
 ## v0.6.0-beta.4
 
 

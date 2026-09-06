@@ -66,6 +66,7 @@ export const Clip = memo(function Clip({
   timeSource = null,
   offSession = false,
   analysisStatus = null,
+  selected = false,
   onSelect,
 }: {
   t: Strings;
@@ -93,6 +94,20 @@ export const Clip = memo(function Clip({
    *  `memo`ised, and a map would hand every clip a fresh prop on every `prewarm:file`
    *  event, re-rendering the entire timeline once per decoded file. */
   analysisStatus?: PrewarmStatus | null;
+  /**
+   * This is the marked clip (F, D-096) — the one the inspector column is describing.
+   *
+   * The selection has been a real fact since D-070 and had no mark on the timeline at all:
+   * the panel filled and no box on screen said which one it was about. That was survivable
+   * while a click was the only way to select — the operator's own finger was the mark — and
+   * it stopped being survivable the moment «Kilder» could mark a clip the operator has never
+   * seen, which is the whole of the other half of D-096.
+   *
+   * A boolean rather than the selected path, because this component is `memo`ised: a path
+   * would hand all 386 clips a changed prop on every selection, where a boolean changes for
+   * exactly the two that are entering and leaving the state.
+   */
+  selected?: boolean;
   /** Mark this clip. The argument is the FILE (D-070): the preview panel is about the file,
    *  and there is a file in every phase where there may not yet be a placement. */
   onSelect: (file: string) => void;
@@ -180,6 +195,12 @@ export const Clip = memo(function Clip({
     estimated ? "clip--est" : "",
     sequential ? "clip--seq" : "",
     offSession ? "clip--offsession" : "",
+    // Last, because it is the only class here that is about the OPERATOR rather than about
+    // the file: every state above is something the app knows, and this is which one of them
+    // is being looked at. The gold is the app's one word for «denne» — the same colour the
+    // reference star and the pills' selection wear — so it must not be a fourth state
+    // colour: it is a ring around the box, and the box keeps its own colour inside it.
+    selected ? "clip--selected" : "",
   ]
     .filter(Boolean)
     .join(" ");

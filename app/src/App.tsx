@@ -579,6 +579,22 @@ export function App() {
         : null,
     [outcome, selected],
   );
+  /**
+   * …and the other shape a run's verdict about the marked file can take (F, D-096).
+   *
+   * Derived here beside `selectedPlacement` and from the same object, because they are one
+   * question with two answers and a second component asking it would be a second place that
+   * can disagree about whether this file was placed. Excluded files are deliberately NOT
+   * filtered out: the timeline's own pruning effect un-marks a file the operator has removed,
+   * so a selection that survives to here is a file that is still in the run.
+   */
+  const selectedUnsynced = useMemo(
+    () =>
+      outcome !== null && selected !== null
+        ? (outcome.result.unsynced.find((u) => u.file === selected)?.reason ?? null)
+        : null,
+    [outcome, selected],
+  );
   const selectedEntry =
     selected !== null ? (manifest?.files.find((f) => f.file === selected) ?? null) : null;
   const recorded = useMemo(() => (manifest ? recordingTimes(manifest.files) : null), [manifest]);
@@ -883,6 +899,7 @@ export function App() {
           file={selected}
           entry={selectedEntry}
           placement={selectedPlacement}
+          unsyncedReason={selectedUnsynced}
           minPsr={outcome?.result.parameters.min_psr ?? null}
           recorded={selected !== null ? (recorded?.get(selected) ?? null) : null}
           actions={
