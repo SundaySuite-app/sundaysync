@@ -1,5 +1,5 @@
 import type { Strings } from "../../i18n";
-import type { Warning } from "../../types";
+import type { UnsyncedReason, Warning } from "../../types";
 
 /**
  * A §5 `Warning` as the operator's own language. Lifted unchanged out of the old
@@ -20,5 +20,28 @@ export function warningText(t: Strings, w: Warning): string {
       return t.mixedFps;
     case "frame_snap_residual":
       return t.frameSnap;
+  }
+}
+
+/**
+ * Why the engine (or the scan) would not use a file, in the operator's own language.
+ *
+ * The same four sentences were written out as a `Record<UnsyncedReason, string>` in
+ * `ProblemsPopover` and again in `UnsyncedShelf`, and F needed them in two more places (the
+ * pill's accessible name, and the inspector's line for a refused file). Four copies of one
+ * mapping is four places for a new reason to be forgotten, so it lives beside `warningText`
+ * for exactly the same stated purpose: the exhaustive switch makes a missing string a type
+ * error rather than a blank line in the UI.
+ */
+export function reasonText(t: Strings, reason: UnsyncedReason): string {
+  switch (reason) {
+    case "low_confidence":
+      return t.reasonLowConfidence;
+    case "no_audio":
+      return t.reasonNoAudio;
+    case "decode_error":
+      return t.reasonDecodeError;
+    case "device_overlap":
+      return t.reasonDeviceOverlap;
   }
 }

@@ -10,8 +10,9 @@ import {
   zoomAround,
   type TimelineView as View,
 } from "../../timeline/geometry";
-import { laneHeightFor } from "../../timeline/hop";
+import { laneHeightFor, UNSYNCED_ROW_PX, type HopTrack } from "../../timeline/hop";
 import { stackClips, type ClipSpan } from "../../timeline/laneLayout";
+import { compareNatural } from "../../timeline/naturalSort";
 import { getPlayheadMs, publishPlayheadMs } from "../../timeline/playhead";
 import { type TimeSource } from "../../timeline/recordingTime";
 import { sourceSpans } from "../../timeline/sourceLayout";
@@ -25,7 +26,15 @@ import {
   thumbOffsetFracToScrollMs,
 } from "../../timeline/viewport";
 import type { PrewarmStatus } from "../../state";
-import type { Device, Placement, ScanManifest, SyncOutcome, Warning } from "../../types";
+import { basename } from "../../types";
+import type {
+  Device,
+  Placement,
+  ScanManifest,
+  SyncOutcome,
+  Unsynced,
+  Warning,
+} from "../../types";
 import { InfoIcon } from "../icons";
 import { usePopoverDismiss } from "../shell/usePopoverDismiss";
 import { PlayheadLine } from "./PlayheadLine";
@@ -33,6 +42,7 @@ import { Ruler } from "./Ruler";
 import { Track } from "./Track";
 import { Transport } from "./Transport";
 import { useHop } from "./useHop";
+import { useReveal } from "./useReveal";
 import { warningText } from "./warnings";
 
 /**
@@ -90,13 +100,26 @@ const NO_FILES: ReadonlySet<string> = new Set();
 /** No file has a pre-sync time source — the result phase, where the engine answered. */
 const NO_SOURCES: ReadonlyMap<string, TimeSource> = new Map();
 const NO_DAYS: readonly number[] = [];
+/** No device has refusals — every phase but `result`, and every clean device inside it.
+ *  One shared empty array so a `Track` that has nothing to draw here is not handed a fresh
+ *  prop identity on every render (F, D-096). */
+const NO_UNSYNCED: Unsynced[] = [];
 
 /** Which of the app's phases this timeline is drawing. */
 export type TimelinePhase = "sources" | "syncing" | "result";
 
 /** Everything the tracks are drawn from, whichever phase produced it. */
 interface TimelineContent {
-  tracks: { device: Device; rows: ClipSpan[][] }[];
+  /**
+   * One entry per device: who it is, the clips packed into sub-track rows, and — since F
+   * (D-096) — what the run refused to place on it.
+   *
+   * `unsynced` is part of the CONTENT rather than a separate map keyed by device, because it
+   * is drawn as a row of the device's own track and changes that track's height. A second
+   * structure would be a second thing to keep in step with `tracks`, and the height is the
+   * one number the hop's arithmetic cannot afford to disagree with the DOM about.
+   */
+  tracks: { device: Device; rows: ClipSpan[][]; unsynced: Unsynced[] }[];
   /** How many clips are drawn in total. Only used to tell "some files have no usable
    *  recording time" from "NONE of them do", which are two different sentences. */
   clipCount: number;
@@ -265,11 +288,30 @@ export function TimelineView({
       byDevice.set(device, list);
     }
 
+    // What the run refused, per device (F, D-096). Read off `result.devices[].files` — the
+    // engine's own record of which card a file came from — rather than off the manifest's
+    // grouping: the manifest can be a scan the operator has since dropped more into, and
+    // this is a claim about the RUN. Under the same exclusion filter as everything else, so
+    // a ✕ takes a pill out exactly as it takes a clip out. Filename order, by the same
+    // comparison an untimed card is laid out in, because the number on a pill has to be one
+    // the operator can predict.
+    const refused = new Map<string, Unsynced>();
+    for (const u of result.unsynced) if (!excluded.has(u.file)) refused.set(u.file, u);
+    const unsyncedByDevice = new Map<string, Unsynced[]>();
+    for (const device of result.devices) {
+      const list = device.files
+        .map((file) => refused.get(file))
+        .filter((u): u is Unsynced => u !== undefined)
+        .sort((a, b) => compareNatural(basename(a.file), basename(b.file)));
+      if (list.length > 0) unsyncedByDevice.set(device.id, list);
+    }
+
     // `result.devices` order is preserved, and a device with no placements keeps
     // its (empty) track — §7.5.
     const tracks = result.devices.map((device) => ({
       device,
       rows: stackClips(byDevice.get(device.id) ?? []),
+      unsynced: unsyncedByDevice.get(device.id) ?? NO_UNSYNCED,
     }));
 
     // What playback plays (D-055). Deliberately built from the SAME origin the boxes are
@@ -321,6 +363,11 @@ export function TimelineView({
       rows: stackClips(
         spans.map((s) => ({ ...s, startMs: s.startMs - originMs, endMs: s.endMs - originMs })),
       ),
+      // Nothing has been refused yet: the pills are the RUN's answer, and before a sync
+      // there is no run. What the SCAN could not read is a different list and stays where it
+      // is, in the problem popover — those files never reached a device row at all, so there
+      // is no row to put them in.
+      unsynced: NO_UNSYNCED,
     }));
     // Pre-sync the reference is whatever the operator starred, under the same override
     // overlay the grouping uses — so the badge follows a file that has been moved.
@@ -414,13 +461,39 @@ export function TimelineView({
     () => tracks.reduce((n, { rows }) => n + Math.max(1, rows.length), 0),
     [tracks],
   );
-  const laneHeight = useMemo(() => laneHeightFor(rowCount, stagePx), [rowCount, stagePx]);
+  /** How much of the stage the pills' strips have already claimed (F, D-096). Taken off
+   *  before the lanes divide what is left, so `laneHeightFor`'s promise still holds: it
+   *  never returns more than the rows can have without the stage having to scroll, and a
+   *  strip is part of "what the rows do not get". Never a second constant — the same
+   *  `UNSYNCED_ROW_PX` `trackHeightFor` adds. */
+  const unsyncedRows = useMemo(
+    () => tracks.reduce((n, { unsynced }) => n + (unsynced.length > 0 ? 1 : 0), 0),
+    [tracks],
+  );
+  const laneHeight = useMemo(
+    () => laneHeightFor(rowCount, Math.max(0, stagePx - unsyncedRows * UNSYNCED_ROW_PX)),
+    [rowCount, stagePx, unsyncedRows],
+  );
+
+  /**
+   * The layout as the hop's arithmetic needs it: row counts, and whether the track carries a
+   * strip (D-091, extended by D-096).
+   *
+   * Narrowed here rather than handing `useHop` the content tracks whole, because `clipBoxes`
+   * depends on the row COUNTS and the strip's presence and on nothing else — a module that
+   * cannot see the device or the refusals cannot start caring which they are. `unsynced` is
+   * the boolean and not the list for exactly that reason.
+   */
+  const hopTracks = useMemo<readonly HopTrack[]>(
+    () => tracks.map(({ rows, unsynced }) => ({ rows, unsynced: unsynced.length > 0 })),
+    [tracks],
+  );
 
   // The hop (v0.4, D-063). Declared ABOVE the measure effect on purpose: React runs a
   // component's layout effects in declaration order, and `hop.frozen` has to be set on the
   // outcome's own commit before the fit below reads it.
   const hop = useHop({
-    tracks,
+    tracks: hopTracks,
     view,
     laneHeight,
     outcome,
@@ -432,6 +505,40 @@ export function TimelineView({
     fittedSpan,
     onSettled: onHopSettled,
   });
+
+  /**
+   * «Kilder» finds the clip (F, D-096) — the second thing allowed to move this view under its
+   * own power, and the only one the operator asks for directly.
+   *
+   * It gets the CONTENT tracks rather than `hopTracks`: a reveal has to find the file, which
+   * means it needs the spans and the device and the refusals, where the hop needs only the
+   * shape of the stack. Two consumers, two narrowings, one source.
+   */
+  const reveal = useReveal({
+    tracks,
+    view,
+    contentSpanMs,
+    sectionRef,
+    stageRef,
+    bodyRef,
+    setView,
+    cancelHop: hop.cancel,
+  });
+
+  /**
+   * The view is the operator's the moment they reach for it.
+   *
+   * Every gesture that takes the view calls this first, and it is one call rather than two
+   * because there are now two things that can be moving it — a hop describes a journey
+   * between two positions on a stationary canvas, and a reveal is a journey ACROSS the
+   * canvas, and both stop describing anything the instant the operator moves it themselves.
+   * A gesture that cancelled only one of them would leave the other writing `scrollMs` under
+   * the hand that was panning.
+   */
+  const takeView = useCallback(() => {
+    hop.cancel();
+    reveal.cancel();
+  }, [hop, reveal]);
 
   // Measure the lane column and fit the content into it. The fit re-runs whenever
   // the content changes (a new sync outcome) — but NOT on every resize, or the
@@ -610,23 +717,23 @@ export function TimelineView({
   // their true positions and leaves the view exactly where it was put.
   const zoomBy = useCallback(
     (factor: number, anchorX?: number) => {
-      hop.cancel();
+      takeView();
       setView((v) => {
         const z = zoomAround(v, factor, anchorX ?? v.widthPx / 2);
         return { ...z, scrollMs: clampS(z.scrollMs, z.pxPerMs, v.widthPx) };
       });
     },
-    [clampS, hop],
+    [clampS, takeView],
   );
 
   const fit = useCallback(() => {
-    hop.cancel();
+    takeView();
     setView((v) => ({
       ...v,
       pxPerMs: fitPxPerMs(contentSpanMs, v.widthPx),
       scrollMs: 0,
     }));
-  }, [contentSpanMs, hop]);
+  }, [contentSpanMs, takeView]);
 
   // Wheel is bound natively, not through React's synthetic handler, because React
   // registers `wheel` on the root as PASSIVE — `preventDefault()` there is a no-op,
@@ -659,7 +766,7 @@ export function TimelineView({
       const horizontal = e.deltaX !== 0 || e.shiftKey;
       if (!horizontal) return;
       e.preventDefault();
-      hop.cancel();
+      takeView();
       const delta = e.deltaX || e.deltaY;
       setView((v) => ({
         ...v,
@@ -668,7 +775,7 @@ export function TimelineView({
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomBy, clampS, hop]);
+  }, [zoomBy, clampS, takeView]);
 
   // ---- Background drag = pan ----
   const pan = useRef<{ x: number; scrollMs: number } | null>(null);
@@ -687,7 +794,7 @@ export function TimelineView({
     // than a few pixels pans, a clean click selects — not making the clip inert again.
     const target = e.target as HTMLElement;
     if (target.closest("button, select, label, .timeline__ruler")) return;
-    hop.cancel();
+    takeView();
     pan.current = { x: e.clientX, scrollMs: view.scrollMs };
     e.currentTarget.setPointerCapture(e.pointerId);
   }
@@ -735,7 +842,7 @@ export function TimelineView({
   function onScrollbarDown(e: React.PointerEvent<HTMLDivElement>) {
     const frac = troughFrac(e);
     if (frac === null) return;
-    hop.cancel();
+    takeView();
     e.currentTarget.setPointerCapture(e.pointerId);
 
     if (frac >= bar.offsetFrac && frac <= bar.offsetFrac + bar.thumbFrac) {
@@ -773,7 +880,7 @@ export function TimelineView({
    *  keyboard user cannot reach a scroll a pointer could not. */
   function onScrollbarKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    hop.cancel();
+    takeView();
     setView((v) => {
       const visibleMs = v.widthPx / v.pxPerMs;
       const step = visibleMs * SCROLL_STEP_FRACTION;
@@ -940,12 +1047,14 @@ export function TimelineView({
               </div>
             </div>
 
-            {tracks.map(({ device, rows }) => (
+            {tracks.map(({ device, rows, unsynced }) => (
               <Track
                 key={device.id}
                 t={t}
                 device={device}
                 rows={rows}
+                unsynced={unsynced}
+                selected={selected}
                 placements={placements}
                 view={view}
                 visStart={visStart}

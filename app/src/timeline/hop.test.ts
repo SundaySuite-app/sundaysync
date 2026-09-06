@@ -11,6 +11,7 @@ import {
   HOP_TRAVEL_MS,
   LANE_MAX_PX,
   LANE_MIN_PX,
+  UNSYNCED_ROW_PX,
   clipBoxes,
   clipDrawing,
   clipHeightFor,
@@ -19,6 +20,7 @@ import {
   hopExits,
   laneHeightFor,
   roomBeforeNext,
+  trackHeightFor,
   type HopTrack,
 } from "./hop";
 
@@ -38,6 +40,13 @@ function track(...rows: { file: string; startMs: number; endMs: number }[][]): H
 
 function clip(file: string, startMs: number, lengthMs = 100) {
   return { file, startMs, endMs: startMs + lengthMs };
+}
+
+/** …and the same track, drawing the strip of refusals under its lanes (F, D-096). */
+function trackWithRefusals(
+  ...rows: { file: string; startMs: number; endMs: number }[][]
+): HopTrack {
+  return { rows, unsynced: true };
 }
 
 describe("clipBoxes", () => {
@@ -134,6 +143,87 @@ describe("clipBoxes", () => {
       expect(clipHeightFor(lane)).toBe(lane - 1 - 2 * 3);
     }
   });
+
+  // ── The strip of refusals shifts everything under it (F, D-096) ────────────────────────
+  //
+  // This is the D-083/D-091 failure arriving through a new door: a track's height gains a
+  // term, and if the arithmetic here does not gain it too, every clip below the first device
+  // with unplaced files hops to a row it is not in — silently, and only on drops that HAVE
+  // refusals, which are exactly the drops nobody has a reproducible fixture for.
+
+  it("pushes the next track down by the strip as well as by the lanes", () => {
+    const boxes = clipBoxes(
+      [trackWithRefusals([clip("a", 0)]), track([clip("b", 0)])],
+      VIEW,
+      LANE,
+    );
+    expect(boxes.get("a")!.y).toBe(5);
+    // One lane AND the strip — not one lane, and not "one lane plus something the sheet
+    // happened to add".
+    expect(boxes.get("b")!.y).toBe(5 + LANE + UNSYNCED_ROW_PX);
+  });
+
+  it("adds the strip once per track that has one, however many rows it has", () => {
+    const boxes = clipBoxes(
+      [
+        trackWithRefusals([clip("a", 0)], [clip("b", 0)]),
+        track([clip("c", 0)]),
+        trackWithRefusals([clip("d", 0)]),
+        track([clip("e", 0)]),
+      ],
+      VIEW,
+      LANE,
+    );
+    expect(boxes.get("b")!.y).toBe(5 + LANE);
+    // Two lanes and ONE strip: the strip is a property of the track, not of each row in it.
+    expect(boxes.get("c")!.y).toBe(5 + 2 * LANE + UNSYNCED_ROW_PX);
+    expect(boxes.get("d")!.y).toBe(5 + 3 * LANE + UNSYNCED_ROW_PX);
+    expect(boxes.get("e")!.y).toBe(5 + 4 * LANE + 2 * UNSYNCED_ROW_PX);
+  });
+
+  it("leaves a layout with no refusals exactly where it was", () => {
+    // Absent `unsynced` is "no strip", so every caller and every layout from before D-096
+    // still means what it meant. Stated rather than assumed: the field is optional, and an
+    // optional field that quietly defaulted the other way would rewrite the whole timeline.
+    const rows = [track([clip("a", 0)]), track([clip("b", 0)])];
+    const explicit: HopTrack[] = [
+      { rows: rows[0].rows, unsynced: false },
+      { rows: rows[1].rows, unsynced: false },
+    ];
+    expect(clipBoxes(rows, VIEW, LANE)).toEqual(clipBoxes(explicit, VIEW, LANE));
+  });
+
+  it("is the SAME height `Track` writes into the DOM", () => {
+    // The whole point of `trackHeightFor` having exactly two callers. If this ever needed a
+    // second expression to state, the invariant would already be broken.
+    for (const lane of [LANE_MIN_PX, 63, LANE_MAX_PX]) {
+      const boxes = clipBoxes(
+        [trackWithRefusals([clip("a", 0)], [clip("b", 0)]), track([clip("c", 0)])],
+        VIEW,
+        lane,
+      );
+      expect(boxes.get("c")!.y - boxes.get("a")!.y).toBe(trackHeightFor(2, true, lane));
+    }
+  });
+});
+
+describe("trackHeightFor — the one producer of a track's height", () => {
+  it("is the rows times the pitch when there is nothing refused", () => {
+    expect(trackHeightFor(2, false, LANE)).toBe(2 * LANE);
+    expect(trackHeightFor(5, false, 70)).toBe(350);
+  });
+
+  it("adds the strip exactly once when there is", () => {
+    expect(trackHeightFor(2, true, LANE)).toBe(2 * LANE + UNSYNCED_ROW_PX);
+  });
+
+  it("keeps §7.5's empty device a full row tall, strip or no strip", () => {
+    // «A camera that synced nothing must be visible» — and a camera that synced nothing is
+    // very often exactly the camera with a strip full of refusals, so the two rules meet on
+    // the same track more often than they miss.
+    expect(trackHeightFor(0, false, LANE)).toBe(LANE);
+    expect(trackHeightFor(0, true, LANE)).toBe(LANE + UNSYNCED_ROW_PX);
+  });
 });
 
 describe("hopDeltas", () => {
@@ -200,6 +290,26 @@ describe("hopDeltas", () => {
     // Same timeline position, half the zoom: the box is drawn at 500 instead of 1000, so
     // it would have to start 500 px to the right of its new home.
     expect(hopDeltas(before, VIEW, LANE, after, zoomedOut, LANE).get("a")).toEqual({ dx: 500, dy: 0 });
+  });
+
+  it("hops the tracks below a device that GAINED a strip of refusals (F, D-096)", () => {
+    // The case the feature actually produces: pre-sync no device has a strip, and the run
+    // lands with the first device carrying three files it would not place. Everything under
+    // that device is now `UNSYNCED_ROW_PX` further down, so every one of those clips has to
+    // start its hop that much higher — otherwise the whole lower half of the timeline
+    // arrives at its new home by teleporting rather than by travelling.
+    const before = [track([clip("a", 0)]), track([clip("b", 0)]), track([clip("c", 0)])];
+    const after = [
+      trackWithRefusals([clip("a", 0)]),
+      track([clip("b", 0)]),
+      track([clip("c", 0)]),
+    ];
+    const deltas = hopDeltas(before, VIEW, LANE, after, VIEW, LANE);
+    // The device WITH the strip does not move: the strip is under its lanes, not above them.
+    expect(deltas.get("a")).toEqual({ dx: 0, dy: 0 });
+    expect(deltas.get("b")).toEqual({ dx: 0, dy: -UNSYNCED_ROW_PX });
+    // …and it is one strip's worth, not two: the second device did not gain one.
+    expect(deltas.get("c")).toEqual({ dx: 0, dy: -UNSYNCED_ROW_PX });
   });
 });
 

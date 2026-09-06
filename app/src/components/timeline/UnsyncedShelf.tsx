@@ -1,6 +1,7 @@
 import type { Strings } from "../../i18n";
 import { basename } from "../../types";
-import type { Unsynced, UnsyncedReason } from "../../types";
+import type { Unsynced } from "../../types";
+import { reasonText } from "./warnings";
 
 /**
  * The red shelf (§9.4): what the engine refused to place, in plain language,
@@ -38,20 +39,13 @@ export function UnsyncedShelf({
   onOverride: (file: string, device: string) => void;
   onExclude: (file: string) => void;
 }) {
-  const reasonText: Record<UnsyncedReason, string> = {
-    low_confidence: t.reasonLowConfidence,
-    no_audio: t.reasonNoAudio,
-    decode_error: t.reasonDecodeError,
-    device_overlap: t.reasonDeviceOverlap,
-  };
-
   return (
     <div className="shelf">
       {heading && <h2 className="shelf__title">{t.unsyncedTitle}</h2>}
       {unsynced.map((u) => (
         <div key={u.file} className="shelf__row">
           <span>{basename(u.file)}</span>
-          <span className="shelf__reason">— {reasonText[u.reason]}</span>
+          <span className="shelf__reason">— {reasonText(t, u.reason)}</span>
           {/* The device_overlap fix path: move the clip and re-sync (D-027). */}
           <label>
             <span className="visually-hidden">

@@ -9,8 +9,8 @@ import {
 } from "../../timeline/frameStore";
 import type { RecordingTime } from "../../timeline/recordingTime";
 import { basename } from "../../types";
-import type { FileEntry, Placement } from "../../types";
-import { warningText } from "./warnings";
+import type { FileEntry, Placement, UnsyncedReason } from "../../types";
+import { reasonText, warningText } from "./warnings";
 
 /**
  * One panel: the marked clip's picture, the file it is, and — once a sync has placed it —
@@ -57,6 +57,7 @@ export function PreviewPanel({
   file,
   entry,
   placement,
+  unsyncedReason,
   minPsr,
   recorded,
   actions,
@@ -71,6 +72,18 @@ export function PreviewPanel({
   entry: FileEntry | null;
   /** The engine's answer for this file, once there is one. */
   placement: Placement | null;
+  /**
+   * …and the engine's answer when the answer was NO (F, D-096).
+   *
+   * A placement and a refusal are the two shapes one run's verdict about one file can take,
+   * and they are mutually exclusive by construction — §7.3's rule that every input is
+   * accounted for, seen from the one file's side. Until F only the first was drawn, so
+   * marking a refused file — which D-077 #8 had deliberately made possible, precisely so the
+   * operator could open the file the problem chip was about — filled the panel with the
+   * picture and the facts and left the sync half BLANK. The run knew why it would not use
+   * the file; the inspector the operator opened BY clicking that file did not say.
+   */
+  unsyncedReason: UnsyncedReason | null;
   /** `SyncResult.parameters.min_psr`, for the "PSR vs threshold" line. */
   minPsr: number | null;
   /** Which rung of the recording-time ladder produced this file's start (D-067), and the
@@ -97,6 +110,17 @@ export function PreviewPanel({
           {actions}
           <div className="preview__sync">
             {placement !== null && <SyncDetail t={t} clip={placement} minPsr={minPsr ?? 0} />}
+            {/* The refusal, in the same half of the panel the placement would have used —
+                because it is the same question ("what did the run make of this file?") with
+                the other answer, and putting it anywhere else would be inviting the eye to
+                look in two places for one thing. One line: the heading the whole list
+                already carries, and the reason. No controls, because the two that help are
+                four lines up in the action row, where they are for every other marked file. */}
+            {placement === null && unsyncedReason !== null && (
+              <p className="preview__unsynced">
+                {t.unsyncedTitle}: {reasonText(t, unsyncedReason)}
+              </p>
+            )}
           </div>
         </>
       )}

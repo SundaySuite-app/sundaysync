@@ -1317,6 +1317,61 @@ select:hover, input:hover { border-color: var(--accent-border); }
 .track__lane--empty { background: none; display: flex; align-items: center; }
 .lane__empty { color: var(--text4); font-size: 0.75rem; padding-left: 0.5rem; }
 
+/* ── The strip of refusals (F, D-096) ──────────────────────────────────────────────────
+   One row at the bottom of a device's track, drawn only on the devices that have unplaced
+   files. `UNSYNCED_ROW_PX` in `src/timeline/hop.ts` is the height, written inline by
+   `Track.tsx` — deliberately NOT restated here, for the same reason no lane carries a
+   `min-height`: the height is summed by `clipBoxes` for the hop's y-arithmetic, and a second
+   opinion about it in the sheet would send every clip below this device to a row it is not
+   in. What the sheet owns is everything inside the box.
+
+   Deliberately not a lane: it is quieter (`--surface`, a step off the lane's `--bg`), it has
+   no time axis, and nothing in it is positioned. It scrolls sideways rather than wrapping —
+   a strip that grew a second line would be a row whose height the arithmetic above does not
+   know about. `scrollbar-width: none` because a 16 px row cannot hold a scrollbar; the pills
+   are also all reachable by keyboard, and the complete list is in the problem popover. */
+.track__unsynced {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 0.4rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.track__unsynced::-webkit-scrollbar { display: none; }
+
+/* Grey, numbered, and small on purpose. It is a MARK saying «this row has a problem, and it
+   is this many» — the number is what makes «hvilket av de seks kameraene er problemet»
+   answerable at a glance, and the sentence behind it (which file, and why) is on the control
+   as `aria-label` and `title`, where a 14 px capsule could never have carried it. */
+.pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 14px;
+  padding: 0 4px;
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  background: var(--surface3);
+  color: var(--text2);
+  font-size: 0.5625rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.pill:hover { border-color: var(--accent-border); color: var(--text); }
+.pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The same gold a marked clip wears, because it is the same word: «denne». */
+.pill--selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .timeline__ruler {
   position: relative;
   height: 100%;
@@ -1544,6 +1599,38 @@ select:hover, input:hover { border-color: var(--accent-border); }
   border: 1px dashed var(--orange);
   color: var(--orange);
 }
+/* ── «Denne» (F, D-096) ─────────────────────────────────────────────────────────────────
+   The marked clip. The selection has been a real fact since D-070 and had no mark on the
+   timeline at all: the inspector filled and no box on screen said which one it was about.
+   Survivable while a click was the only way to select — the operator's own finger was the
+   mark — and not survivable the moment «Kilder» can mark a clip nobody has seen.
+
+   A RING and not a fill: every colour a clip can wear is a claim the app is making about
+   the file (green placed, blue analysed, amber something to say, dashed provenance), and a
+   selection is not one of those claims. The gold goes around the box and the box keeps
+   whatever it was saying inside it — the same gold, and the same word, as the reference
+   star and the pills.
+
+   `z-index` because clips are absolutely-positioned siblings and a 2 px ring drawn outside
+   the border box would otherwise be painted over by the next clip along; still below the
+   sticky ruler (2) and the playhead overlay, which both have to stay on top. */
+.clip--selected {
+  z-index: 1;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* «Here it is» — 600 ms once, when the view has finished travelling to a clip picked out of
+   «Kilder» (F, D-096). A pulse rather than a state: it answers a question the operator asked
+   two seconds ago and then gets out of the way, leaving `clip--selected` to say which box is
+   marked for as long as it is. The global `prefers-reduced-motion` rule at the top of this
+   sheet kills the animation; `useReveal` also declines to apply the class at all there, so
+   nothing is left wearing a keyframe that will never run. */
+@keyframes reveal-found {
+  from { box-shadow: 0 0 0 0 rgba(235, 184, 75, 0.7); }
+  to   { box-shadow: 0 0 0 14px rgba(235, 184, 75, 0); }
+}
+.reveal--found { animation: reveal-found 600ms ease-out; }
+
 /* All three provenance marks change the EDGE and nothing else — see the `clip--analysed`
    note. None of them touches `--clip-ink`, deliberately: an analysed off-session clip draws
    a blue waveform inside an amber dashed edge, and both claims stay on screen. `--seq` is
@@ -1926,6 +2013,15 @@ select:hover, input:hover { border-color: var(--accent-border); }
 /* Stacked, not columned: they scroll together with the rest of the inspector, and three
    independent scrollers inside one 300 px column was the shape the band forced. */
 .preview__info, .preview__sync { min-width: 0; }
+/* The run's other answer about this file (F, D-096): it would not place it, and why. In the
+   sync half, because it IS the sync half's content for a refused file — the same question a
+   placement answers, with the other answer. Amber rather than red: this is a fact about the
+   run, not an alarm, and the two fixes for it are the ordinary controls four lines above. */
+.preview__unsynced {
+  color: var(--orange);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
 .preview__name {
   font-size: 0.9375rem;
   font-weight: 600;
