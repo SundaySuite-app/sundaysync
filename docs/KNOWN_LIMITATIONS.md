@@ -115,16 +115,58 @@ Judging the final audio still means exporting and listening in Resolve.
 - **The app has no visual regression tests.** The engine is exhaustively tested; the UI
   is verified by launch, by hand, and — since v0.2 E10 — by Playwright journeys in CI.
   vitest covers the reducer, error mapping, settings logic and every pure timeline module.
-- **One known accessibility violation, accepted deliberately.** The "Rebuild waveform"
-  affordance inside a clip is a `role="button"` span nested inside the clip's own real
-  `<button>` — the shape the `nested-interactive` rule names. Named from reading the code,
-  not measured: **there is no axe (or any other automated a11y checker) in this repo**, so
-  nothing in CI reports this and nothing in CI would report a second one. Both halves are forced: the clip
-  root must stay a `<button>` (the timeline tells a clip click from a background-pan
-  gesture by `target.closest("button, ...")`), and a genuinely nested `<button>` is
-  *un-nested by the HTML parser*, which would break the DOM rather than merely fail a
-  validator. The span is keyboard-operable (`tabIndex`, Enter/Space, `aria-disabled`), so
-  the practical cost is the flagged rule, not a lost control. See D-054/D-055/D-057.
+- **Accessibility is measured now, and six violations are left standing on purpose.**
+  Until D-097 this section claimed one violation — the nested "Rebuild waveform" control —
+  and said axe flagged it. Nothing flagged it: there was no axe, and no other automated
+  checker, anywhere in this repo. `app/e2e/a11y.spec.ts` is that checker, and it runs axe at
+  WCAG 2.1 A + AA over **18 states** (empty, sources, each of the four popovers open, a
+  marked clip, syncing, result, the export receipt, the error banner, the rebuild
+  affordance, Settings at rest, Settings with an update and its release note offered,
+  onboarding steps 1 and 3, the consent card) on every PR. The first
+  measurement found **42 distinct violations, not one**; the claimed one was real and is
+  number 1 below. What is left is exactly this, and nothing is disabled globally:
+
+  1. **`nested-interactive` — the clip's "Rebuild waveform" affordance** (2 nodes).
+     Accepted. It is a `role="button"` span inside the clip's own real `<button>`, and both
+     halves are forced: the clip root must stay a `<button>` (the timeline tells a clip
+     click from a background-pan gesture by `target.closest("button, ...")`), and a
+     genuinely nested `<button>` is *un-nested by the HTML parser*, which would break the
+     DOM rather than merely fail a validator. The span is keyboard-operable (`tabIndex`,
+     Enter/Space, `aria-disabled`) and the D-097 focus walk confirms it is a real tab stop
+     with a visible ring, so the practical cost is the flagged rule, not a lost control.
+     See D-054/D-055/D-057.
+  2. **`color-contrast` — the filename and waveform status drawn inside a clip.** Not
+     accepted, deferred: the ink is `--clip-ink`, which changes with the clip's state and is
+     the same colour the waveform bars are painted in (D-080), so re-inking it is a change
+     to the timeline's colour language. Measured 2.57:1 (`.clip__name`) and 1.94–3.81:1
+     (`.clip__status`).
+  3. **`color-contrast` — the red "N problem files" chip.** Deferred: `--red` on `--red-bg`
+     over `--surface` measures 4.34:1, short of 4.5:1 by 0.16, and short everywhere that
+     pairing is used. The fix is a shared-token change, not a local one.
+  4. **`color-contrast` — the sources cluster while a sync runs.** Not a violation in
+     practice: the cluster is `pointer-events: none` as well as dimmed (D-061), and WCAG
+     1.4.3 exempts inactive components. The same text passes in every phase where it is live.
+  5. **`color-contrast` — the timeline's ticks, gutter meta and zoom while a sync runs.**
+     Real, and deferred. Unlike ④ the timeline is dimmed but *not* inert — panning, zooming
+     and marking all still work during a run — so the exemption does not apply. `opacity:
+     .55` takes text that reads 6.18:1 down to **2.70:1** in the one phase the operator
+     stares at it.
+  6. **`label` — the read-only cache-folder field in Settings → Storage.** A screen reader
+     announces an unnamed edit field showing a path. One `aria-label` fixes it.
+
+  Everything else the first measurement found is fixed: thirteen CSS rules had painted body
+  text in `--text3` (#4a5878 — 2.29–2.66:1, against a 4.5:1 requirement) and now use
+  `--text2`, and the onboarding step counter's `aria-label` sat on a role-less `<div>`,
+  where ARIA prohibits it and the browser drops it — "Step 2 of 3" was announced to nobody.
+  The thirteenth rule is worth its own sentence: the release note's heading (D-095) landed
+  one commit before the gate did, painted in `--text3`, and the gate caught it inside a day.
+  That is the whole argument for having one.
+
+- **The app has never been tried with a real screen reader, and the checker cannot do it
+  for you.** axe is a static rule engine: it finds a missing name, not a confusing one, and
+  it cannot tell you whether the timeline is *navigable* by ear. The keyboard half is
+  measured (every tab stop in five states shows a focus ring, D-097 ⑤); VoiceOver and
+  Narrator remain untested by anyone.
 
 ## The pre-sync timeline shows camera clocks, not the answer (v0.4, extended in v0.5)
 

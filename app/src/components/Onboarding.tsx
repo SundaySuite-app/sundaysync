@@ -95,7 +95,13 @@ export function Onboarding({ t, onDone }: { t: Strings; onDone: () => void }) {
           </>
         )}
 
-        <div className="onboarding__dots" aria-label={t.obStep(step, TOTAL_STEPS)}>
+        {/* A (D-097): `role="img"` is what makes the `aria-label` a NAME. A bare `<div>` has
+            no role, and `aria-label` on a role-less generic is prohibited by ARIA — axe's
+            `aria-prohibited-attr` flags it, and the practical cost is not cosmetic: the label
+            is dropped, so «Step 2 of 3» was announced to nobody and the dots were three
+            unnamed empty spans. The dots ARE a picture of the step count, so the graphic's
+            own role with a text alternative is the honest spelling of what is drawn. */}
+        <div className="onboarding__dots" role="img" aria-label={t.obStep(step, TOTAL_STEPS)}>
           {[1, 2, 3].map((n) => (
             <span
               key={n}

@@ -10,6 +10,31 @@
   for det er der spørsmålet egentlig stilles: hva er det jeg starter opp i, tjue minutter
   før en gudstjeneste. Utgivelser fra før notatene ble innført har ingen tekst å vise, og
   da vises det ingenting — ingen tom ramme (D-095).
+- **Den lille grå teksten er lesbar nå — og vi vet endelig at den ikke var det.**
+  Begrensningsdokumentet har sagt at appen har «én kjent tilgjengelighetsfeil, og axe flagger
+  den». Ingenting flagget den: det fantes ingen axe, og ingen annen automatisk sjekk, noe sted i
+  dette repoet. Setningen var skrevet fra å lese koden. Nå kjøres en ekte sjekk over **18
+  tilstander** av rommet — tomt, kilder, hvert av de fire panelene åpent, et merket klipp, under
+  synkronisering, resultatet, kvitteringa, feilbanneret, innstillinger (både i ro og med en
+  oppdatering tilbudt), onboarding og samtykkekortet — på hver eneste endring, og første måling
+  fant **42 feil, ikke én**. Den
+  største bolken var appens fjerde tekstfarge: #4a5878 gir 2,3–2,7 ganger kontrast mot bakgrunnen
+  sin, der kravet er 4,5. Alt som var malt i den — bildetekster, tidslinjenotatet, tallene i
+  sporhodene, linjalens merker, forklaringene i Innstillinger, samtykkekortets brødtekst — var
+  under grensa, og denne appen brukes på den skjermen pulten bakerst i kirka tilfeldigvis har.
+  Tretten regler flyttet ett hakk opp; fargen selv er urørt og brukes videre på det som ikke er
+  tekst. Den trettende er porten som beviser seg selv: overskrifta over releasenotatet i
+  oppdateringsdialogen ble malt i den samme fargen dagen før sjekken kom, og sjekken fant den. Og onboardingens «Steg 2 av 3» ble annonsert til ingen: etiketten lå på et element som
+  ikke har lov til å bære den, så nettleseren kastet den, og en skjermleser møtte tre navnløse
+  prikker.
+- **Hvert eneste tastestopp viser hvor du står.** 26 kontroller i resultatfasen, 11 i
+  innstillingsdialogen, 3 i hver av de tre første skjermene — alle gått gjennom med Tab, alle
+  med synlig fokusring. Det er slik denne appen faktisk kjøres: fra tastaturet, i et mørkt rom.
+- **Seks funn står igjen med navn og begrunnelse**, tre av dem som en oppgave for en annen
+  runde (klippets eget blekk, den røde problembrikka, og tidslinjas dimming under en synk — den
+  siste er ekte og koster hver bildetekst 45 % av kontrasten i akkurat den fasen du stirrer på
+  den). Ingen regel er skrudd av globalt. `docs/KNOWN_LIMITATIONS.md` sier nå hva som er målt
+  (D-097).
 
 - **Klikker du en fil i «Kilder», tar tidslinja deg til den.** Lista har markert klippet siden
   forrige runde, og bildet sto helt stille: på et bryllup med 386 filer er et klipp tre piksler
