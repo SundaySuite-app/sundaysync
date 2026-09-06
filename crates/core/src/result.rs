@@ -101,10 +101,66 @@ pub struct Placement {
 /// Landing here is a *success* of the design, not a failure: §4.4 and §7.5 make
 /// "honest failure over silent wrongness" the core product promise, so a clip below
 /// threshold must end up in this list rather than being placed hopefully.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// But "honest failure" is only honest if the failure can be read. Until the K corpus round
+/// this struct was the whole story a refused clip told: a path and a word. On the
+/// calibration baseline that word was `low_confidence` 166 times out of 180 files, and
+/// nothing in the output distinguished "this clip is unrelated material" from "this clip
+/// missed the bar by 0.4" — the two cases a user must act on completely differently, and
+/// the two cases an owner needs separated before any threshold can be re-tuned with
+/// numbers. [`RefusedEvidence`] carries the measurement that produced the refusal so both
+/// questions are answerable from the JSON dump alone (D-098).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Unsynced {
     pub file: PathBuf,
     pub reason: UnsyncedReason,
+    /// The best match that was found and rejected, when one was found at all.
+    ///
+    /// `None` for the reasons where no correlation was ever attempted ([`
+    /// UnsyncedReason::NoAudio`], [`UnsyncedReason::DecodeError`]) and for a clip whose
+    /// correlation returned nothing whatsoever.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<RefusedEvidence>,
+}
+
+impl Unsynced {
+    /// A refusal with no measurement behind it — the file never reached the correlator.
+    #[must_use]
+    pub fn new(file: PathBuf, reason: UnsyncedReason) -> Self {
+        Self {
+            file,
+            reason,
+            evidence: None,
+        }
+    }
+}
+
+/// What the engine actually measured before saying no.
+///
+/// The point of `required_psr` is that SundaySync's PSR bar is not one number: §4.3
+/// correlates a clip shorter than
+/// [`crate::correlate::WHOLE_CLIP_LIMIT_SECONDS`] whole, which gives it one segment,
+/// which routes it to the strict [`crate::place::NO_DRIFT_EVIDENCE_PSR_FACTOR`] bar —
+/// `5/3 × min_psr`, i.e. 25 at the default, not the 15 the user set and the docs quote.
+/// Reporting the bar next to the score is what makes that visible without reading the
+/// source (D-098).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RefusedEvidence {
+    /// Peak-to-sidelobe ratio of the rejected match (§4.3 scores a segmented match by its
+    /// *weakest* segment, so this is a minimum, not an average).
+    pub psr: f64,
+    /// Where the rejected match would have placed the clip, in sequence seconds. Reported
+    /// so a refusal that is nonetheless *at the right place* is recognisable as a
+    /// too-tight bar rather than a wrong match.
+    pub offset_seconds: f64,
+    /// How many segments the match had. Below
+    /// [`crate::drift::MIN_SEGMENTS_FOR_DRIFT`] there is no drift evidence to grade on,
+    /// which is what selects the strict bar.
+    pub segments: usize,
+    /// The PSR this match had to clear. `None` means no PSR would have been enough: the
+    /// match had segments enough to check a clock and the check failed, which §7.5 refuses
+    /// outright.
+    pub required_psr: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -284,6 +340,7 @@ mod tests {
             unsynced: vec![Unsynced {
                 file: PathBuf::from("/b.mp4"),
                 reason: UnsyncedReason::NoAudio,
+                evidence: None,
             }],
             sequence: Sequence {
                 fps: Rational::new(25, 1).unwrap(),
@@ -301,12 +358,81 @@ mod tests {
         r.unsynced.push(Unsynced {
             file: PathBuf::from("/a.mp4"),
             reason: UnsyncedReason::NoAudio,
+            evidence: None,
         });
         r.unsynced.push(Unsynced {
             file: PathBuf::from("/b.mp4"),
             reason: UnsyncedReason::NoAudio,
+            evidence: None,
         });
         assert!(!r.accounts_for(&inputs));
+    }
+
+    #[test]
+    fn refusal_evidence_is_additive_in_both_directions() {
+        // D-098 adds a field to the §5 wire contract, which the module header rightly
+        // treats as a serious act. It stays at `SCHEMA_VERSION` 1 because it is additive
+        // *both* ways, and this pins both — the same shape `scan.rs` uses for the manifest.
+
+        // Old JSON (no `evidence`) still reads: `#[serde(default)]` supplies `None`.
+        let old = r#"{"file":"/x/a.MP4","reason":"low_confidence"}"#;
+        let u: Unsynced = serde_json::from_str(old).unwrap();
+        assert_eq!(u.reason, UnsyncedReason::LowConfidence);
+        assert!(u.evidence.is_none());
+
+        // A refusal with no measurement omits the key entirely, so a run that gained
+        // nothing to say produces byte-identical output to before (§13.4 determinism).
+        let json = serde_json::to_string(&Unsynced::new(
+            PathBuf::from("/x/a.MP4"),
+            UnsyncedReason::NoAudio,
+        ))
+        .unwrap();
+        assert_eq!(json, r#"{"file":"/x/a.MP4","reason":"no_audio"}"#);
+
+        // New JSON still reads under a consumer that predates the field.
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct OldUnsynced {
+            file: PathBuf,
+            reason: UnsyncedReason,
+        }
+        let with_evidence = Unsynced {
+            file: PathBuf::from("/x/b.MTS"),
+            reason: UnsyncedReason::LowConfidence,
+            evidence: Some(RefusedEvidence {
+                psr: 19.4,
+                offset_seconds: 1234.5,
+                segments: 1,
+                required_psr: Some(25.0),
+            }),
+        };
+        let json = serde_json::to_string(&with_evidence).unwrap();
+        let old_reader: OldUnsynced = serde_json::from_str(&json).unwrap();
+        assert_eq!(old_reader.reason, UnsyncedReason::LowConfidence);
+
+        // And it round-trips through the new one unchanged.
+        assert_eq!(
+            serde_json::from_str::<Unsynced>(&json).unwrap(),
+            with_evidence
+        );
+
+        // `required_psr: None` is a distinct, meaningful state — "no PSR would have been
+        // enough" — and must survive the trip rather than collapsing into absence.
+        let incredible = Unsynced {
+            file: PathBuf::from("/x/c.MTS"),
+            reason: UnsyncedReason::LowConfidence,
+            evidence: Some(RefusedEvidence {
+                psr: 15.2,
+                offset_seconds: 42.0,
+                segments: 5,
+                required_psr: None,
+            }),
+        };
+        let round = serde_json::to_string(&incredible).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Unsynced>(&round).unwrap(),
+            incredible
+        );
     }
 
     #[test]

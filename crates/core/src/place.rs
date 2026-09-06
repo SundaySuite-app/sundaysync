@@ -13,7 +13,7 @@ use crate::extract::{AnalysisAudio, CachedAudio};
 use crate::probe::Probed;
 use crate::progress::{CancelToken, Progress, ProgressSink, Stage};
 use crate::request::ANALYSIS_RATE;
-use crate::result::{Placement, Unsynced, UnsyncedReason, Warning};
+use crate::result::{Placement, RefusedEvidence, Unsynced, UnsyncedReason, Warning};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -125,6 +125,20 @@ pub const CREDIBLE_EVIDENCE_PSR_FACTOR: f64 = 2.0 / 3.0;
 /// Refusal here lands the clip in `unsynced` as `low_confidence` — which is precisely
 /// what it is.
 fn admissible(m: &crate::correlate::ClipMatch, clip_samples: usize, min_psr: f64) -> bool {
+    match required_psr(m, clip_samples, min_psr) {
+        Some(bar) => m.psr >= bar,
+        None => false,
+    }
+}
+
+/// The PSR bar [`admissible`] will hold `m` to, or `None` when no PSR can clear it.
+///
+/// Split out of `admissible` so the refusal path can *report* the bar it applied
+/// ([`RefusedEvidence::required_psr`]) instead of leaving the user to infer it. Keeping
+/// one function as the sole authority on which bar applies is the point: a second copy of
+/// this decision beside the reporting code is exactly how a gate and its explanation drift
+/// apart (D-098).
+fn required_psr(m: &crate::correlate::ClipMatch, clip_samples: usize, min_psr: f64) -> Option<f64> {
     // Which bar applies is decided by how much evidence *exists*, not by whether reading
     // it happened to succeed. Those are the same question only until they are not: a
     // regression over enough segments can still come back empty (a degenerate fit, a
@@ -132,16 +146,49 @@ fn admissible(m: &crate::correlate::ClipMatch, clip_samples: usize, min_psr: f64
     // possible sign of a bad match — "the segments do not describe a clock at all" — be
     // answered with "then judge it on PSR alone". D-045's whole point is the opposite.
     if m.segments.len() < drift::MIN_SEGMENTS_FOR_DRIFT {
-        return m.psr >= min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR;
+        return Some(min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR);
     }
     match drift::measure(&m.segments, clip_samples) {
         // D-049: with a credible clock vouching for the segments, PSR is corroboration,
         // not the judge — the bar drops to CREDIBLE_EVIDENCE_PSR_FACTOR × min_psr.
-        Some(d) => m.psr >= min_psr * CREDIBLE_EVIDENCE_PSR_FACTOR && d.credible(),
+        Some(d) if d.credible() => Some(min_psr * CREDIBLE_EVIDENCE_PSR_FACTOR),
+        // An incredible clock is not a high bar, it is a refusal: no PSR readmits what
+        // credibility killed.
+        Some(_) => None,
         // Enough segments to check, and the check did not come back: a failed credibility
         // test, not an absent one. §7.5 says refuse.
-        None => false,
+        None => None,
     }
+}
+
+/// Records the evidence behind one rejected match, keeping the strongest seen per clip.
+///
+/// A clip is typically rejected several times — once against the reference in pass 1, then
+/// once per anchor in pass 2 — and the strongest of those is the one worth reporting: it
+/// is the closest the engine ever came to placing the file, so it is the number that says
+/// whether the bar was nearly met or nowhere near.
+fn note_rejection(
+    rejected: &mut HashMap<PathBuf, RefusedEvidence>,
+    path: &Path,
+    m: &crate::correlate::ClipMatch,
+    clip_samples: usize,
+    min_psr: f64,
+    offset_seconds: f64,
+) {
+    let ev = RefusedEvidence {
+        psr: m.psr,
+        offset_seconds,
+        segments: m.segments.len(),
+        required_psr: required_psr(m, clip_samples, min_psr),
+    };
+    rejected
+        .entry(path.to_path_buf())
+        .and_modify(|best| {
+            if ev.psr > best.psr {
+                *best = ev;
+            }
+        })
+        .or_insert(ev);
 }
 
 /// §4.4 reference selection: longest audio, dedicated audio files preferred on ties,
@@ -201,6 +248,11 @@ pub fn place(
     let mut correlator = Correlator::new();
     let mut placements: Vec<Placement> = Vec::new();
     let mut unresolved: Vec<&Candidate> = Vec::new();
+    // D-098: the best match each clip was *refused* on, kept so the refusal can say why.
+    // Keyed by path because a clip can be rejected once against the reference and again
+    // against every anchor in pass 2; the strongest of those is the one worth reporting,
+    // since it is the closest the engine ever came to placing the file.
+    let mut rejected: HashMap<PathBuf, RefusedEvidence> = HashMap::new();
 
     // The reference defines the origin, so it is placed at zero by construction.
     placements.push(Placement {
@@ -245,7 +297,19 @@ pub fn place(
                     fps,
                 }));
             }
-            _ => unresolved.push(candidate),
+            other => {
+                if let Some(m) = other {
+                    note_rejection(
+                        &mut rejected,
+                        candidate.path(),
+                        &m,
+                        audio.len(),
+                        min_psr,
+                        m.offset_samples / f64::from(ANALYSIS_RATE),
+                    );
+                }
+                unresolved.push(candidate);
+            }
         }
     }
 
@@ -326,6 +390,17 @@ pub fn place(
                 // D-045: same gates as pass 1 — an inadmissible anchor match is a
                 // non-match; the next anchor may still produce a real one.
                 if !admissible(&m, audio.len(), min_psr) {
+                    // D-098: still the closest this clip came via this anchor. The offset
+                    // is expressed in sequence time (anchor's own offset plus the lag), so
+                    // a reported near-miss is comparable with the placements around it.
+                    note_rejection(
+                        &mut rejected,
+                        candidate.path(),
+                        &m,
+                        audio.len(),
+                        min_psr,
+                        anchor_offset + m.offset_samples / f64::from(ANALYSIS_RATE),
+                    );
                     continue;
                 }
 
@@ -384,6 +459,9 @@ pub fn place(
         .map(|c| Unsynced {
             file: c.path().to_path_buf(),
             reason: UnsyncedReason::LowConfidence,
+            // D-098: whatever the correlator did see, so "low confidence" is a
+            // measurement the user can check rather than a verdict they must trust.
+            evidence: rejected.get(c.path()).copied(),
         })
         .collect();
 
@@ -548,10 +626,10 @@ fn evict_device_overlaps(
     let mut out = Vec::new();
     for i in evict.into_iter().rev() {
         let p = placements.remove(i);
-        out.push(Unsynced {
-            file: p.file,
-            reason: UnsyncedReason::DeviceOverlap,
-        });
+        // No `evidence`: this clip cleared the gate and was placed. It is here because
+        // another clip from the same device occupied the same time, which is a fact about
+        // the pair, not a measurement that refused this file.
+        out.push(Unsynced::new(p.file, UnsyncedReason::DeviceOverlap));
     }
     out
 }
@@ -1273,6 +1351,145 @@ mod tests {
             x_placed.psr,
             via_a1.psr
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_reported_bar_is_the_bar_that_was_actually_applied() {
+        // D-098. `required_psr` exists so a refusal can state the bar it was held to, which
+        // is only worth printing if it is the *same* bar `admissible` used. The two are one
+        // function precisely so they cannot disagree — this pins that they don't, across
+        // all three shapes, by checking the reported bar predicts the verdict exactly.
+        let min_psr = 15.0;
+        let clip = 1_380 * crate::request::ANALYSIS_RATE as usize;
+        let on_a_line: Vec<(usize, f64)> = (0..5)
+            .map(|i| {
+                let start = i * clip / 5;
+                (start, -31e-6 * start as f64)
+            })
+            .collect();
+        let scattered: Vec<(usize, f64)> =
+            [(0usize, -68.0), (1, 33.0), (2, -95.0), (3, 8.0), (4, -12.0)]
+                .iter()
+                .map(|(i, off_s)| (i * clip / 5, off_s * f64::from(ANALYSIS_RATE)))
+                .collect();
+
+        // Short clip: no drift evidence exists, so the strict 5/3 bar (25) is reported.
+        let short = clip_match(30.0, &[(0, 0.0)]);
+        assert_eq!(
+            required_psr(&short, 3_000, min_psr),
+            Some(min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR),
+            "a single-segment match must report the strict no-evidence bar"
+        );
+
+        // Credible clock: the generous 2/3 bar (10) is reported.
+        let credible = clip_match(13.9, &on_a_line);
+        assert_eq!(
+            required_psr(&credible, clip, min_psr),
+            Some(min_psr * CREDIBLE_EVIDENCE_PSR_FACTOR),
+            "a credible clock must report the lowered bar"
+        );
+
+        // Incredible clock: no bar at all — no PSR readmits what credibility killed.
+        // Reporting `Some(something_huge)` here would be a lie of a different kind: it
+        // would tell the user a louder clip would have been placed, and it would not.
+        let incredible = clip_match(19.0, &scattered);
+        assert_eq!(
+            required_psr(&incredible, clip, min_psr),
+            None,
+            "an impossible clock is a refusal, not a high bar"
+        );
+
+        // And the reported bar predicts `admissible` exactly, which is the whole contract.
+        for (label, m, samples) in [
+            ("short", &short, 3_000),
+            ("credible", &credible, clip),
+            ("incredible", &incredible, clip),
+        ] {
+            let verdict = required_psr(m, samples, min_psr).is_some_and(|bar| m.psr >= bar);
+            assert_eq!(
+                verdict,
+                admissible(m, samples, min_psr),
+                "{label}: the reported bar must predict the verdict"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_clip_carries_the_measurement_that_refused_it() {
+        // D-098, found on the K calibration corpus: the baseline wedding refused 166 of 180
+        // files as `low_confidence`, and the JSON said nothing else about any of them. That
+        // makes the two cases a user must act on differently — "unrelated material" and
+        // "missed the bar by a hair" — indistinguishable, and makes the standing question
+        // of whether the bar is right unanswerable from a run.
+        //
+        // The shoot: a recorder R, and a clip X of entirely unrelated material. X cannot be
+        // placed; the point is what the refusal *says*.
+        let dir = std::env::temp_dir()
+            .join("sundaysync-place")
+            .join("refusal-carries-evidence");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let rate = ANALYSIS_RATE as usize;
+        let r = noise(60 * rate, 11);
+        let x = noise(20 * rate, 22); // unrelated, and short enough to correlate whole
+
+        let candidates = vec![
+            cached_candidate(&dir, "rec.wav", "rec", &r, false),
+            cached_candidate(&dir, "x.mp4", "cam-a", &x, true),
+        ];
+
+        let placed = place(
+            &candidates,
+            None,
+            15.0,
+            crate::correlate::SEGMENT_COUNT,
+            25.0,
+            &crate::progress::NoProgress,
+            &crate::progress::CancelToken::new(),
+        )
+        .unwrap();
+
+        let refused = placed
+            .unsynced
+            .iter()
+            .find(|u| u.file == Path::new("/media/x.mp4"))
+            .expect("unrelated material must be refused, not placed");
+        assert_eq!(refused.reason, UnsyncedReason::LowConfidence);
+
+        let ev = refused
+            .evidence
+            .expect("a refusal the correlator actually measured must carry that measurement");
+        assert!(
+            ev.psr.is_finite() && ev.psr > 0.0,
+            "the rejected match's PSR must be reported, got {}",
+            ev.psr
+        );
+        assert!(
+            ev.psr < 15.0 * NO_DRIFT_EVIDENCE_PSR_FACTOR,
+            "unrelated material must score below the bar it was held to, got {}",
+            ev.psr
+        );
+        // 20 s is under the whole-clip limit, so there is exactly one segment and the
+        // strict bar applies. This is the number the calibration report needed and could
+        // not get: the user set 15, and the clip was actually judged at 25.
+        assert_eq!(ev.segments, 1, "a 20 s clip is correlated whole");
+        assert_eq!(
+            ev.required_psr,
+            Some(15.0 * NO_DRIFT_EVIDENCE_PSR_FACTOR),
+            "the reported bar must be the strict one a whole-clip match is held to"
+        );
+        assert!(
+            ev.offset_seconds.is_finite(),
+            "the rejected offset must be reportable so a near-miss at the right place is visible"
+        );
+
+        // And the reference itself, which was never refused, carries nothing.
+        assert!(placed
+            .unsynced
+            .iter()
+            .all(|u| u.file != Path::new("/media/rec.wav")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
