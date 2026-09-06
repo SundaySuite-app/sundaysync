@@ -1,0 +1,131 @@
+{
+  "schema": 1,
+  "parameters": {
+    "analysis_rate": 12000,
+    "min_psr": 15.0
+  },
+  "reference": {
+    "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik 40 minutt.mp4",
+    "device": "sig-h264-640x480-30000-1001"
+  },
+  "devices": [
+    {
+      "id": "model-apple-iphone-11",
+      "label": "Apple iPhone 11",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/IMG_4420.MOV"
+      ]
+    },
+    {
+      "id": "name-marie-og-fredrik-bryllupsfest-1-av",
+      "label": "MARIE OG FREDRIK BRYLLUPSFEST 1 AV",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik Bryllupsfest 1 av 3.mp4"
+      ]
+    },
+    {
+      "id": "name-marie-og-fredrik-bryllupsfest-2-av",
+      "label": "MARIE OG FREDRIK BRYLLUPSFEST 2 AV",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik Bryllupsfest 2 av 3.mp4"
+      ]
+    },
+    {
+      "id": "name-marie-og-fredrik-bryllupsfest-3-av",
+      "label": "MARIE OG FREDRIK BRYLLUPSFEST 3 AV",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik Bryllupsfest 3 av 3.mp4"
+      ]
+    },
+    {
+      "id": "sig-h264-1920x1080-30-1",
+      "label": "h264 1920x1080 30/1",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Kirken Marie og Fredrik Bryllup.mp4"
+      ]
+    },
+    {
+      "id": "sig-h264-1920x1080-30000-1001",
+      "label": "h264 1920x1080 30000/1001",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Dans.mp4"
+      ]
+    },
+    {
+      "id": "sig-h264-640x480-30000-1001",
+      "label": "h264 640x480 30000/1001",
+      "kind": "video",
+      "files": [
+        "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik 40 minutt.mp4",
+        "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik 40m 30s.mp4",
+        "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik lang film.mp4"
+      ]
+    }
+  ],
+  "placements": [
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik 40 minutt.mp4",
+      "device": "sig-h264-640x480-30000-1001",
+      "offset_seconds": 0.0,
+      "confidence": 1.0,
+      "psr": null,
+      "drift_ppm": null,
+      "projected_end_error_ms": null,
+      "chain": [],
+      "warnings": []
+    }
+  ],
+  "unsynced": [
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Dans.mp4",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/IMG_4420.MOV",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Kirken Marie og Fredrik Bryllup.mp4",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Lyssang - engelsk-  Fredrik og Marie.pdf",
+      "reason": "decode_error"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik 40m 30s.mp4",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik Bryllupsfest 1 av 3.mp4",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik Bryllupsfest 2 av 3.mp4",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik Bryllupsfest 3 av 3.mp4",
+      "reason": "low_confidence"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik lang film.mp4",
+      "reason": "low_confidence"
+    }
+  ],
+  "sequence": {
+    "fps": "30000/1001",
+    "duration_seconds": 2407.571833
+  },
+  "warnings": [
+    {
+      "code": "mixed_fps"
+    }
+  ]
+}

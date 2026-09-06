@@ -242,6 +242,83 @@ pub fn emit_uncorrelated(
     Ok(())
 }
 
+/// Adds a **produced edit** of the event: the wedding film, not the wedding.
+///
+/// This is the single most dangerous shape real material has, and until the K corpus
+/// round it existed in this repo only as hand-written segment lists in `place.rs` and
+/// `drift.rs` unit tests — never as media the whole pipeline had to walk. D-045 found it
+/// the hard way: a 70-minute camera placed against a produced stereo mix at PSR 15.2 and
+/// drift −587,484 ppm, and the exporter then "corrected" the clip by −59 %.
+///
+/// The file is built by concatenating `cuts` of the master **in event order but with
+/// material removed between them**, which is exactly what an editor does. That makes it
+/// pathological rather than merely unrelated: every cut's audio genuinely *is* the event,
+/// at a high PSR, so a correlator that looks only at peak strength is fooled. What it
+/// does not have is a single offset — each cut sits at a different one, so the segments
+/// scatter and the drift regression through them describes no clock that exists. That is
+/// what [`sundaysync_core`]'s credibility gate is for, and what a test using this fixture
+/// pins.
+///
+/// `uncorrelated: true` in the truth carries the same *requirement* it does for
+/// [`emit_uncorrelated`] — the file must land in `unsynced`, and `offset_seconds` is
+/// `NaN` because there is no single true start — even though the reason differs: cut-up
+/// rather than unrelated.
+///
+/// The master is regenerated from `truth`'s own seed and duration, so the cuts are
+/// bit-identical to the material the shoot's clips were cut from. Cuts are clamped to the
+/// master, and an empty `cuts` list is rejected rather than writing a zero-length file.
+///
+/// # Errors
+/// [`EmitError::Io`] / [`EmitError::Encode`] / [`EmitError::Json`] as for [`emit`], and
+/// [`EmitError::Encode`] when `cuts` selects no samples at all.
+pub fn emit_edited_mix(
+    truth: &mut Truth,
+    dir: &Path,
+    name: &str,
+    cuts: &[ClipSpec],
+    codec: Codec,
+    ffmpeg: &Path,
+) -> Result<String, EmitError> {
+    let mut rng = Rng::new(truth.seed);
+    let master = signal::generate_master(&mut rng, truth.duration_seconds, MASTER_RATE);
+
+    let mut audio: Vec<f32> = Vec::new();
+    for cut in cuts {
+        let start = (cut.start_seconds * f64::from(MASTER_RATE)) as usize;
+        let len = (cut.duration_seconds * f64::from(MASTER_RATE)) as usize;
+        let end = (start + len).min(master.len());
+        if let Some(slice) = master.get(start..end) {
+            audio.extend_from_slice(slice);
+        }
+    }
+    if audio.is_empty() {
+        return Err(EmitError::Encode {
+            file: name.to_string(),
+            detail: "cuts selected no samples from the master".into(),
+        });
+    }
+
+    let file = format!("{name}.{}", codec.extension());
+    write_clip(dir, &file, &audio, codec, ffmpeg)?;
+
+    let duration_seconds = audio.len() as f64 / f64::from(MASTER_RATE);
+    truth.clips.push(TruthClip {
+        file: file.clone(),
+        device: "edit".into(),
+        codec,
+        offset_seconds: f64::NAN,
+        duration_seconds,
+        drift_ppm: 0.0,
+        snr_db: None,
+        uncorrelated: true,
+    });
+    truth.clips.sort_by(|a, b| a.file.cmp(&b.file));
+
+    let json = serde_json::to_string_pretty(truth).map_err(EmitError::Json)?;
+    std::fs::write(dir.join("truth.json"), json)?;
+    Ok(file)
+}
+
 fn write_clip(
     dir: &Path,
     name: &str,

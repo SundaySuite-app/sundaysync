@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "parameters": {
+    "analysis_rate": 12000,
+    "min_psr": 15.0
+  },
+  "reference": null,
+  "devices": [],
+  "placements": [],
+  "unsynced": [
+    {
+      "file": "/Volumes/Delt Fossland/LINDLAND 2016/16 Drone Lindland/DJI_0001.MOV",
+      "reason": "no_audio"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINDLAND 2016/16 Drone Lindland/DJI_0002.MOV",
+      "reason": "no_audio"
+    },
+    {
+      "file": "/Volumes/Delt Fossland/LINDLAND 2016/16 Drone Lindland/Drone Lindland 4K.mov",
+      "reason": "no_audio"
+    }
+  ],
+  "sequence": {
+    "fps": "25/1",
+    "duration_seconds": 0.0
+  },
+  "warnings": []
+}
