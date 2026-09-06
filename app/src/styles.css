@@ -19,6 +19,15 @@
   /* Text — four-level hierarchy */
   --text:     #eaeaf6;
   --text2:    #8899bb;
+  /* A: measured, not preferred — `--text3` is NOT a text colour, and `--text4` is even less
+     of one. #4a5878 reads 2.66:1 on `--bg`, 2.50:1 on `--surface` and 2.29:1 on `--surface2`;
+     WCAG 2.1 AA (1.4.3) asks 4.5:1 of normal text, so every caption, tick, meta line and
+     footnote painted in it failed — eighteen of them on the sources screen alone, and this
+     app is read in a dark church backroom on whatever screen the desk has. `--text2` is the
+     quietest ink that passes on all three grounds (6.18 / 6.59 / 5.66), so the captions moved
+     one step up rather than gaining a colour of their own. What is still allowed to use
+     `--text3` is everything that is not text: a scrollbar thumb, a gutter glyph, the ink a
+     waveform's bars are painted in. See D-097; `e2e/a11y.spec.ts` is what keeps it true. */
   --text3:    #4a5878;
   --text4:    #2e3a55;
 
@@ -682,7 +691,7 @@ body {
 .slot__auto-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 .muted  { color: var(--text2); font-size: 0.875rem; }
-.subtle { color: var(--text3); font-size: 0.8125rem; }
+.subtle { color: var(--text2); font-size: 0.8125rem; }
 
 /* ── Buttons ────────────────────────────────────────────────────── */
 
@@ -796,7 +805,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   justify-content: center;
   gap: 0.6rem;
   align-items: center;
-  color: var(--text3);
+  color: var(--text2);
   font-size: 0.8125rem;
   margin-top: 1.25rem;
 }
@@ -911,7 +920,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .device-group__head { padding: 0.4rem 0.75rem; }
 .device-group__name { font-weight: 600; font-size: 0.9rem; }
-.device-group__meta { color: var(--text3); font-size: 0.8125rem; margin-left: auto; }
+.device-group__meta { color: var(--text2); font-size: 0.8125rem; margin-left: auto; }
 
 .filerow {
   display: grid;
@@ -970,7 +979,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .prewarm {
   margin: 0;
   font-size: 0.8125rem;
-  color: var(--text3);
+  color: var(--text2);
 }
 
 .badge {
@@ -1046,7 +1055,7 @@ select:hover, input:hover { border-color: var(--accent-border); }
   gap: 1rem;
   min-width: 0;
   flex: 0 1 auto;
-  color: var(--text3);
+  color: var(--text2);
   font-size: 0.8125rem;
 }
 .result__meta > span {
@@ -1114,7 +1123,7 @@ select:hover, input:hover { border-color: var(--accent-border); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text3);
+  color: var(--text2);
   font-size: 0.8125rem;
 }
 /* The off-session line names a date, and a named date is the one line here the operator may
@@ -1269,7 +1278,7 @@ select:hover, input:hover { border-color: var(--accent-border); }
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
-  color: var(--text3);
+  color: var(--text2);
   font-size: 0.6875rem;
   white-space: nowrap;
   overflow: hidden;
@@ -1387,7 +1396,7 @@ select:hover, input:hover { border-color: var(--accent-border); }
   border-left: 1px solid var(--border2);
   font-size: 0.625rem;
   font-variant-numeric: tabular-nums;
-  color: var(--text3);
+  color: var(--text2);
   white-space: nowrap;
   pointer-events: none;
 }
@@ -1957,7 +1966,7 @@ select:hover, input:hover { border-color: var(--accent-border); }
    label rather than as a sentence, which is exactly what makes it read as chrome. */
 .preview__label {
   flex: 0 0 auto;
-  color: var(--text3);
+  color: var(--text2);
   font-size: 0.6875rem;
   font-weight: 650;
   letter-spacing: 0.09em;
@@ -2004,7 +2013,7 @@ select:hover, input:hover { border-color: var(--accent-border); }
 /* Loading and "no picture" are the same calm weight: neither is a failure, and one of them
    is the normal answer for about one file in twelve (D-069). */
 .preview__nostill {
-  color: var(--text3);
+  color: var(--text2);
   font-size: 0.75rem;
   text-align: center;
   padding: 0 0.5rem;
@@ -2181,7 +2190,10 @@ select:hover, input:hover { border-color: var(--accent-border); }
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--text3);
+  /* A (D-097): `--text3` here read 2.50:1 on `--surface`, and this is 12 px text. It stays
+     quieter than the body by WEIGHT and SIZE, which is what "quiet on purpose" above was
+     actually reaching for — the colour was carrying none of it and cost the AA floor. */
+  color: var(--text2);
   margin-bottom: 0.2rem;
 }
 .relnotes__body {
@@ -2222,7 +2234,7 @@ select:hover, input:hover { border-color: var(--accent-border); }
    lost — the cache-cap row in Settings stacked.) */
 .field--inline { flex-direction: row; align-items: center; gap: 0.5rem; }
 .field--inline > span { color: var(--text2); font-weight: 400; font-size: 0.8125rem; }
-.field small { color: var(--text3); line-height: 1.45; }
+.field small { color: var(--text2); line-height: 1.45; }
 .field__row { display: flex; gap: 0.5rem; align-items: center; }
 .field__error { color: var(--red); font-size: 0.8125rem; }
 .field input[type="text"] { flex: 1; }
@@ -2266,7 +2278,7 @@ hr.sep { border: none; border-top: 1px solid var(--border); }
 }
 .onboarding__status--ok { background: var(--green-bg); color: var(--green); }
 .onboarding__status--missing { background: var(--red-bg); color: var(--red); }
-.onboarding .onboarding__path { color: var(--text3); font-size: 0.8125rem; margin: -0.75rem 0 1.5rem; }
+.onboarding .onboarding__path { color: var(--text2); font-size: 0.8125rem; margin: -0.75rem 0 1.5rem; }
 .onboarding code {
   background: var(--surface3);
   border-radius: var(--rxs);

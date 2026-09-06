@@ -5401,3 +5401,189 @@ usynlig i sin egen rapport. Det er argumentet for ① i én linje.
 Rapporten foreslår, med tall, at den strenge korte-klipp-baren står for høyt, og at rotårsaken
 er at et klipp under 45 s ikke *får lov* til å skaffe seg segmentbevis mot en lang referanse.
 Ingen konstant er endret i denne runden. Se `CALIBRATION-2026-09.md` §4 og §8.
+
+## D-097 — A: en tilgjengelighetsport som faktisk måler, og 42 funn som ingen hadde sett
+
+`docs/KNOWN_LIMITATIONS.md` sa, fram til nå, at axe flagger klippets innebygde
+«Bygg bølgeform på nytt»-kontroll. Setningen var skrevet fra å lese koden. **Det fantes ingen
+axe — ingen tilgjengelighetssjekker i det hele tatt — noe sted i dette repoet**, så ingenting
+hadde noen gang flagget noe, og feil nummer to, eller nummer tretti, ville vært like usynlig.
+Sannhetsrunden i D-094 fant påstanden og kunne ikke etterprøve den. Denne runden er
+etterprøvinga: `app/e2e/a11y.spec.ts` er sjekkeren, og påstanden viser seg å ha vært **ett av
+42 funn**.
+
+Det betyr mer her enn ordet «tilgjengelighetsport» vanligvis gjør. SundaySync kjøres fra
+tastaturet, i et mørkt rom bakerst i en kirke, på den skjermen pulten tilfeldigvis har. Liten
+grå tekst som bare er *stille* på en designers skjerm, er *borte* på en ti år gammel
+delt-med-projektoren-monitor på 30 % lysstyrke.
+
+### ① Hva porten er
+
+`@axe-core/playwright` **4.13.0**, pinnet uten `^`, som `devDependency`. Sjekken kjører i den
+`e2e`-tieren som allerede finnes (E10): ekte Chromium, ekte renderer, Tauri-broa etterlignet av
+`e2e/harness.ts`. Ingen ny infrastruktur, ingen ny CI-jobb — porten er ni prøver i en fil som
+allerede kjøres av `npm run e2e` på hver eneste PR.
+
+Regelsettet er **WCAG 2.1 nivå A og AA** (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`), ikke
+`best-practice`: dette er en port, og en port må være en appen faktisk kan holde grønn på hver
+commit. Skanninga går over **hele dokumentet**, ikke et undertre — `<body>` inneholder `#root`
+inneholder `<main class="app">` og ingenting annet, så det koster ingenting ekstra og kjøper
+sidenivå-reglene et undertre stille ville hoppet over (`html-has-lang`; `App.tsx` skriver
+`document.documentElement.lang` fra språkinnstillinga, og en skjermleser som uttaler hver
+eneste streng feil er en ekte feil).
+
+**18 tilstander** skannes: tomt rom, kilder, hver av de fire nedtrekkspanelene ÅPEN, et merket
+klipp, synkronisering med et stadium meldt, resultat, resultat med merket klipp, eksport­kvittering,
+feilbanner, gjenoppbyggings-affordansen, innstillingsdialogen, innstillingene MED et tilbudt
+oppdateringsnotat, onboarding steg 1 og 3, og samtykkekortet. Et panel som bare er skannet
+lukket, er et panel som aldri er skannet — og en dialog har mer enn én form.
+
+### ② Lisensen
+
+axe-core og `@axe-core/playwright` er **MPL-2.0**. Det er en fil-nivå copyleft-lisens, og den
+er grunnen til å si dette høyt: MPL smitter på *modifiserte filer av verket selv*, ikke på et
+program som bruker det. Her brukes det ikke engang av programmet — det er en `devDependency`
+som aldri importeres av noe under `app/src`, aldri havner i en `vite build`, aldri i en
+Tauri-bunt og aldri på en brukers maskin. Derfor er det **ikke** ført opp i
+`THIRD-PARTY-NOTICES`: den fila er for kode som *distribueres med applikasjonen*, og å legge
+inn en testavhengighet der ville gjort den mindre sann, ikke mer. SundaySync forblir MIT.
+
+### ③ Utelatelseslista, og hvorfor den ikke er en av-bryter
+
+Det finnes **ingen `disableRules()` i fila**. En regel skrudd av globalt skjuler neste
+forekomst av den samme regelen på et annet element — nøyaktig den feilen den innbilte
+begrensningen var en instans av. I stedet er hver utelatelse *én regel på ett navngitt
+element*, med grunn. `within` sjekkes i sida med `closest()` mot det levende elementet, så en
+utelatelse kan aldri unnskylde en node som ikke virkelig ligger inni beholderen den nevner;
+`html` matcher elementets eget merkelapp-oppslag; `states` begrenser til fasen den gjelder.
+
+Seks oppføringer, alle etterprøvd som faktisk utløst av minst én tilstand (en utelatelse for en
+feil som ikke skjer, er verre enn ingen — den leser som dekning):
+
+| # | regel | element | dom |
+|---|-------|---------|-----|
+| 1 | `nested-interactive` | klippets «Bygg bølgeform på nytt» — `role=button`-span inni klippets egen `<button>` | **Akseptert.** D-054/D-055/D-065. Tvunget i begge retninger. |
+| 2 | `color-contrast` | `.clip__name` / `.clip__status` inni klippboksen | **Utsatt til tidslinjas eier.** Fargespråk, ikke en lokal farge. |
+| 3 | `color-contrast` | den røde «N problemfiler»-brikka | **Utsatt til dirigenten.** `--red` er et delt token. |
+| 4 | `color-contrast` | alt i kildeklyngen mens en synk kjører (`.strip__sources--busy`) | **Ikke en feil.** Klyngen er `pointer-events: none`; WCAG 1.4.3 unntar inaktive kontroller. |
+| 5 | `color-contrast` | tidslinjas merker, sporhode-meta og zoom mens en synk kjører (`.timeline--busy`) | **Utsatt til tidslinjas eier — og denne er EKTE.** |
+| 6 | `label` | det skrivebeskyttede buffer-mappe-feltet i Innstillinger | **Utsatt til innstillingenes eier.** Én `aria-label` i en fil dette sporet ikke eier. |
+
+To av dem fortjener setningen sin:
+
+**④ er ikke en feil, ⑤ er det.** Begge er dimmede klynger under en synk, og forskjellen er
+den som avgjør: `.strip__sources--busy` er `opacity: .5` **og** `pointer-events: none` — den
+er *genuint* inaktiv, fordi en overstyring eller en fjerning godtatt nå i stillhet ville
+tilhørt NESTE kjøring (D-061), og 1.4.3 unntar inaktive brukergrensesnitt-komponenter.
+`.timeline--busy` er dimmet, men uttrykkelig **ikke** inert — arket sier det selv: panorering,
+zoom og merking virker fortsatt under en kjøring. Da gjelder ikke unntaket. `opacity: .55`
+koster hver bildetekst i visninga ~45 % av kontrasten sin i akkurat den fasen operatøren står
+og stirrer på den: målt **2,70:1** for tekst som leser 6,18:1 når klassen er av. Fiksen er en
+annen måte å si «ikke et svar ennå» på — en vask, en ramme, et mindre opacity-steg — og det er
+en designendring på D-061s dim, ikke en fargejustering.
+
+**③ er et token, ikke en farge.** `--red` (#ef4444) på `--red-bg` over `--surface` komposit­terer
+til #271c2a og måler **4,34:1** — 0,16 unna AA — og den er kort *overalt* det paret brukes, ikke
+bare her. Fiksen er en lysere `--red` (#f87171 → 5,90:1) i suitens delte token-blokk, og det er
+ikke en endring ett spor kan gjøre alene.
+
+### ④ Funnene
+
+Målt mot `origin/main` (adc2e6c) med utelatelseslista slått av: **192 node-brudd over 17
+tilstander, 42 distinkte (regel, element)-par.** Fordelinga var 38 `color-contrast`,
+2 `nested-interactive`, 1 `aria-prohibited-attr`, 1 `label`.
+
+**`aria-prohibited-attr` — onboardingens prikker.** `<div className="onboarding__dots"
+aria-label={t.obStep(step, TOTAL_STEPS)}>`. En naken `<div>` har ingen rolle, og ARIA forbyr
+`aria-label` på en rolleløs generisk — så etiketten blir **forkastet**. «Steg 2 av 3» ble
+annonsert til ingen, og det en skjermleser møtte var tre navnløse tomme spans. Prikkene *er* et
+bilde av stegtelleren, så `role="img"` med sitt eget tekstalternativ er den ærlige stavemåten
+av det som er tegnet. Kostnaden var aldri kosmetisk: dette er den ene linja i onboardingen som
+sier hvor langt ut i den du er.
+
+**`color-contrast` — `--text3` er ikke en tekstfarge.** #4a5878 leser **2,66:1 på `--bg`,
+2,50:1 på `--surface` og 2,29:1 på `--surface2`. AA (1.4.3) ber om 4,5:1 av normal tekst. Alt
+som var malt i den falt: flyt-hintet i det tomme rommet, forhåndsvisningas kolonnenavn og
+tomme-tilstand, tidslinje-notatet, resultat-metaen, sporhodenes linje to, linjalens merker,
+enhetsgruppenes tellinger, «Innstillinger»-forklaringene under hver kontroll, samtykkekortets
+brødtekst, onboardingens sti-linje. Tolv CSS-regler, atten elementer på kilder-skjermen alene.
+
+Fiksen er **per regel, ikke på tokenet**: de tretten reglene peker nå på `--text2` (#8899bb —
+6,18 / 6,59 / 5,66 på de tre grunnene), og `--text3` beholder heksen sin og alt som *ikke* er
+tekst — et rullefelt-håndtak, et glyf i sporhodet, blekket bølgeformens søyler tegnes i.
+Å endre `--text3`s verdi ville vært en token-endring på tvers av alle spor, og det er ikke
+dette sporets å gjøre. Bildeteksten flyttet ett hakk opp; den fikk ikke sin egen farge.
+
+Resten — de seks i tabellen over — er utelatt med begrunnelse, og tre av dem er en TODO for en
+annen eier, ikke en aksept.
+
+**Og funn nummer 43, som landet mens denne runden pågikk.** D-095 (som ble merget til `main` én
+commit før denne porten) ga oppdateringsdialogen et releasenotat, og notatets overskrift ble malt
+i `--text3` — 2,50:1, på 12 px tekst. Porten fant den fordi den skanner en tilstand D-097 ikke
+hadde hatt fra før: Innstillinger med en oppdatering TILBUDT, som er den formen dialogen har den
+kvelden det betyr noe, tjue minutter før en gudstjeneste. Det er nøyaktig hendelsen dette
+dokumentet er skrevet mot — «feil nummer to ville vært like usynlig» — utspilt fire dager etter
+at påstanden ble skrevet, og fanget innen ett døgn i stedet for aldri. Regelen er den trettende
+som peker på `--text2`; overskrifta er fortsatt roligere enn brødteksten, men av VEKT og STØRRELSE,
+som er det «bevisst rolig» egentlig strakte seg etter.
+
+### ⑤ Halvparten axe ikke kan se
+
+`:focus-visible` er én erklæring på toppen av `styles.css` og en håndfull lokale overstyringer,
+og måten den ryker på er stille: én komponent setter `outline: none` for å rydde en ramme, og
+kontrollen dens blir usynlig for alle som kjører appen fra tastaturet — som, i et mørkt rom med
+en laptop på en stabel salmebøker, er slik denne appen faktisk kjøres.
+
+`walkTabStops()` tabber gjennom tilstanden og krever at hvert stopp maler noe. En «ring» er en
+`outline` **eller** en `box-shadow`, fordi appen bruker begge. Gått i fem tilstander:
+resultat med et merket klipp (**26 stopp** — stripa, tidslinja, sporhodenes M/S, klippene,
+transporten, inspektøren, sporet), innstillingsdialogen (**11**, den ene som er en SYKLUS og
+ikke en linje, fordi fokusfella er der), samtykkekortet (**3**), onboarding steg 1 (**3**) og
+det tomme rommet (**3**). Null uten ring. Tallet er festet som gulv i hvert kall: en tom
+`ringless`-liste er også det en vandring som fant tre av tjueseks kontroller returnerer, så uten
+gulvet kunne den interessante halvdelen av prøven råtnet til ingenting og blitt stående grønn.
+
+Vandringa nullstiller Chromiums sekvensielle fokus-startpunkt før den går (ellers gjenopptar
+den der siste klikk la fokus og ser aldri toppen av rekkefølgen), teller en tur ut i nettleserens
+eget chrome som en *runde* og ikke som slutten, og bryter når en hel runde ikke ga noe nytt —
+en fokusfelle forlater aldri dokumentet, så uten den siste regelen brukte dialog-vandringene
+hele budsjettet sitt på å gå rundt og rundt en ring de allerede hadde målt (11,8 s → 3,2 s).
+
+### ⑥ At porten biter, er sett — ikke antatt
+
+Tre kontrollerte brekk mot den grønne porten, hver reversert etterpå:
+
+1. `aria-label` fjernet fra onboardingens prikker → `[role-img-alt] .onboarding__dots` i
+   «onboarding step 1».
+2. Prikkene satt tilbake til formen fra `main` (naken `<div>` med `aria-label`) →
+   `[aria-prohibited-attr] .onboarding__dots`. Fiksen i ① er altså det porten faktisk krever,
+   ikke en smakssak.
+3. `.subtle` satt tilbake til `--text3` → `[color-contrast] .preview__emptyhint` i to tilstander.
+
+Og ett brekk ingen behøvde å lage: D-095s notat-overskrift var allerede feil på `main` da
+tilstanden ble lagt til, og porten meldte `[color-contrast] #update-notes-title` på første kjøring.
+
+### ⑦ En felle som kostet en halv runde, og som gjelder alle spor
+
+Første kjøring av porten meldte 22 brudd på elementer som **allerede var fikset i arbeidstreet**
+— arket sa `--text2`, axe leste #4a5878. Årsaken er ikke i denne fila: `vite.config.ts` pinner
+port **1420** med `strictPort`, og `playwright.config.ts` har `reuseExistingServer: !CI`. Kjører
+to arbeidstre-r av dette repoet e2e samtidig, tar den første porten, og den andre **måler den
+andres gren** — stille, grønt eller rødt etter hva den grenen inneholder. Ingen advarsel,
+ingen feil, ingen forskjell å se i loggen.
+
+I CI fantes ikke problemet (`reuseExistingServer` var av der). Lokalt, i en runde med flere
+parallelle spor, var det en målefeil som så ut som et funn.
+
+**Fikset på `main` mens denne runden pågikk** (#73, `ops/e2e-port-isolation`) — tre uavhengige
+økter gikk i den samme fella samme døgn. `playwright.config.ts` tar nå `SUNDAYSYNC_E2E_PORT`,
+starter vite på den porten, og gjenbruk er blitt et EKSPLISITT opt-in (`SUNDAYSYNC_E2E_REUSE=1`)
+i stedet for på som standard: en fremmed server på porten feller kjøringa høylytt ved oppstart
+i stedet for å kapre den. Denne fila ble målt om på nytt på en egen port etter at #73 landet, og
+alle tallene over er derfra.
+
+### ⑧ Kostnad
+
+Ni prøver, **16,3 s** samlet prøvetid på en ledig maskin ved én arbeider (34–47 s når de andre
+sporene kjører sitt eget på den samme), av en `e2e`-suite som med dem teller 324. Under
+budsjettet på 60 s selv på det verste målte.
