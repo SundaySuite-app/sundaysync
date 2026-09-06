@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const E2E_PORT = Number(process.env.SUNDAYSYNC_E2E_PORT ?? 1420);
+
 // The BROWSER tier (E10) — mirrors SundayRec's `e2e/` harness (see e2e/harness.ts for
 // the design rationale). Deliberately separate from `npm run test` (vitest, jsdom-only,
 // see vitest.config.ts) and from `npm run build`/`typecheck`: this drives the real
@@ -39,7 +41,7 @@ export default defineConfig({
   reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
 
   use: {
-    baseURL: "http://localhost:1420",
+    baseURL: `http://localhost:${E2E_PORT}`,
     // V05-W3 (D-067): the recording-time ladder reads a BWF's date + clock and a
     // filename's timestamp as LOCAL wall time and a container stamp as UTC, so what a
     // pre-sync clip claims depends on the zone the renderer is in. Pinned here for the
@@ -61,9 +63,17 @@ export default defineConfig({
   // `vite.config.ts` pins port 1420 for exactly this reason), so `npx playwright test`
   // is the whole command; no "remember to start the dev server first".
   webServer: {
-    command: "npm run dev",
-    url: "http://localhost:1420",
-    reuseExistingServer: !process.env.CI,
+    // Port isolation for parallel worktrees. Three separate sessions have now been bitten
+    // by the same trap: vite's own `strictPort` stops a SECOND server from binding 1420,
+    // but `reuseExistingServer` then happily attaches to the FIRST worktree's server — and
+    // every spec runs against a different checkout's code, silently. Green means nothing
+    // and red means nothing. So: the port is overridable per worktree
+    // (`SUNDAYSYNC_E2E_PORT=1437 npx playwright test`), and reuse is EXPLICIT OPT-IN
+    // (`SUNDAYSYNC_E2E_REUSE=1`) instead of the on-by-default it was — a stale server on
+    // the port now fails the run loudly at startup instead of hijacking it.
+    command: `npm run dev -- --port ${E2E_PORT} --strictPort`,
+    url: `http://localhost:${E2E_PORT}`,
+    reuseExistingServer: process.env.SUNDAYSYNC_E2E_REUSE === "1",
     timeout: 60_000,
     stdout: "ignore",
     stderr: "pipe",
