@@ -84,15 +84,33 @@
   "unsynced": [
     {
       "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Dans.mp4",
-      "reason": "low_confidence"
+      "reason": "low_confidence",
+      "evidence": {
+        "psr": 9.720077608976267,
+        "offset_seconds": 5787.122242671138,
+        "segments": 1,
+        "required_psr": 25.0
+      }
     },
     {
       "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/IMG_4420.MOV",
-      "reason": "low_confidence"
+      "reason": "low_confidence",
+      "evidence": {
+        "psr": 10.032869261097511,
+        "offset_seconds": 1640.6309219422085,
+        "segments": 1,
+        "required_psr": 25.0
+      }
     },
     {
       "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Kirken Marie og Fredrik Bryllup.mp4",
-      "reason": "low_confidence"
+      "reason": "low_confidence",
+      "evidence": {
+        "psr": 8.762766845390006,
+        "offset_seconds": 5535.333585209523,
+        "segments": 4,
+        "required_psr": null
+      }
     },
     {
       "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Lyssang - engelsk-  Fredrik og Marie.pdf",
@@ -100,23 +118,53 @@
     },
     {
       "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik 40 minutt.mp4",
-      "reason": "low_confidence"
+      "reason": "low_confidence",
+      "evidence": {
+        "psr": 131.39259614390636,
+        "offset_seconds": 3645.1999999020422,
+        "segments": 5,
+        "required_psr": null
+      }
     },
     {
       "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik 40m 30s.mp4",
-      "reason": "low_confidence"
+      "reason": "low_confidence",
+      "evidence": {
+        "psr": 11.065593268674839,
+        "offset_seconds": 3645.1999999757804,
+        "segments": 5,
+        "required_psr": null
+      }
     },
     {
       "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik Bryllupsfest 1 av 3.mp4",
-      "reason": "low_confidence"
+      "reason": "low_confidence",
+      "evidence": {
+        "psr": 9.510258172604187,
+        "offset_seconds": 1662.4304144700195,
+        "segments": 5,
+        "required_psr": null
+      }
     },
     {
       "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik Bryllupsfest 2 av 3.mp4",
-      "reason": "low_confidence"
+      "reason": "low_confidence",
+      "evidence": {
+        "psr": 8.1619346632939,
+        "offset_seconds": 2812.32683205385,
+        "segments": 5,
+        "required_psr": null
+      }
     },
     {
       "file": "/Volumes/Delt Fossland/Johnny Hansen/Marie og Fredrik/Bryllup/Marie og Fredrik Bryllupsfest 3 av 3.mp4",
-      "reason": "low_confidence"
+      "reason": "low_confidence",
+      "evidence": {
+        "psr": 8.698734722555894,
+        "offset_seconds": 965.6771637274414,
+        "segments": 4,
+        "required_psr": null
+      }
     }
   ],
   "sequence": {

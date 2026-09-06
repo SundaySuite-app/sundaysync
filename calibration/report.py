@@ -62,7 +62,47 @@ def summarise(path):
     un = d.get("unsynced", [])
     print(f"\nunsynced  : {len(un)}  {dict(Counter(u['reason'] for u in un))}")
     for u in un:
-        print(f"  {base(u['file'])[:60]:60s} {u['reason']}")
+        ev = u.get("evidence")
+        if ev:
+            req = ev.get("required_psr")
+            req_s = "none (clock)" if req is None else f"{req:.2f}"
+            print(
+                f"  {base(u['file'])[:44]:44s} {u['reason']:14s}"
+                f" psr={ev['psr']:7.2f} req={req_s:>12s}"
+                f" seg={ev['segments']:2d} off={ev['offset_seconds']:11.3f}"
+            )
+        else:
+            print(f"  {base(u['file'])[:44]:44s} {u['reason']:14s} (no measurement)")
+
+    # D-098: the distribution the calibration round exists to read. A refusal whose PSR
+    # sits just under the bar it was held to is a different animal from one at 3.0, and
+    # until the evidence field existed the two were the same word in this dump.
+    with_ev = [u for u in un if u.get("evidence")]
+    if with_ev:
+        psrs = sorted(u["evidence"]["psr"] for u in with_ev)
+        print(
+            f"\n  refused PSR  n={len(psrs)} min={psrs[0]:.2f}"
+            f" median={statistics.median(psrs):.2f} max={psrs[-1]:.2f}"
+        )
+        by_bar = Counter()
+        for u in with_ev:
+            req = u["evidence"].get("required_psr")
+            by_bar["credibility (no PSR suffices)" if req is None else f"psr bar {req:.2f}"] += 1
+        print(f"  refused by   {dict(by_bar)}")
+        # The band that decides whether the bar is right: scored at or above the
+        # documented floor of 15, yet refused.
+        band = [
+            u for u in with_ev
+            if u["evidence"].get("required_psr") is not None
+            and u["evidence"]["psr"] >= 15.0
+        ]
+        print(f"  psr>=15 but refused on the PSR bar: {len(band)}")
+        for u in sorted(band, key=lambda u: -u["evidence"]["psr"])[:25]:
+            ev = u["evidence"]
+            print(
+                f"     {base(u['file'])[:40]:40s} psr={ev['psr']:6.2f}"
+                f" req={ev['required_psr']:.2f} seg={ev['segments']} off={ev['offset_seconds']:10.3f}"
+            )
     sk = d.get("skipped", [])
     if sk:
         print(f"\nskipped   : {len(sk)}  {dict(Counter(s['reason'] for s in sk))}")

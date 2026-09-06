@@ -80,6 +80,12 @@ first real corpus, where every observed false placement scored between 15 and 19
 honest statement is a split one: the floor is synthetic, the rules built on it are not, and
 a larger real corpus is what would let the floor itself move.
 
+The September 2026 round (D-098) is that larger corpus, and it moved the question rather than
+the floor. The *rules* held: D-045 refused three real produced edits under three different
+forced references, including one scoring **PSR 131.4** that any floor would have placed badly
+wrong. The short-clip bar is the part that now looks too tight. See
+[`CALIBRATION-2026-09.md`](CALIBRATION-2026-09.md) and "Short clips clear a higher bar" below.
+
 ## Playback is the analysis audio, not the mix (v0.3)
 
 The transport plays the **12 kHz mono audio the correlator itself listened to**, read
@@ -365,9 +371,41 @@ sync.
 A clip under ~45 s correlates as a single whole-clip pass, so there are no segments to
 cross-check and PSR is the only evidence. Such matches must clear `min_psr × 5/3`
 (25 at the default) — a provisional calibration from the first real corpus, where every
-observed *false* placement scored between 15 and 19 (D-045, D-015). A genuinely matching
-short clip in the same room scores far above this; a distant, noisy one may now be
-refused where v0.1 would have gambled.
+observed *false* placement scored between 15 and 19 (D-045, D-015).
+
+**This section used to end "a genuinely matching short clip in the same room scores far
+above this". The September 2026 corpus round does not support that** (see
+[`CALIBRATION-2026-09.md`](CALIBRATION-2026-09.md) §4). On a real multicam wedding — 180
+files, every main-camera clip between 3.8 s and 30.7 s, so every one of them judged at 25 —
+the engine placed 8, and the placed PSRs were 25.33, 25.49, 29.95, 30.25, 38.28, 70.64,
+82.77. Two of seven sit within 0.5 of the bar. That is the shape of a threshold cutting
+*into* the population it is meant to separate, not one sitting in a gap between true and
+false matches.
+
+The related structural point: D-049's evidence-graded path (credible drift lowers the bar to
+`× 2/3`) needs ≥ 3 segments, so it is **unreachable for any clip under 45 s** — and it fired
+on none of the 180 files. A whole real wedding was judged on the strictest of the three gates.
+
+Nothing has been re-tuned on that evidence: the numbers are provisional in the same direction
+they always were, and moving them is an owner decision that should be taken on the refused-PSR
+distribution (now measurable via `evidence`, see below), not on this note. The plausible fix
+is upstream of the number anyway — letting a short clip against a long reference be segmented
+at all, so it can earn evidence instead of being judged on one figure.
+
+## A refusal now carries its measurement — but only in the JSON
+
+Since D-098 an `unsynced` entry carries an `evidence` object: the PSR of the best match that
+was rejected, the offset it would have placed at, how many segments it had, and
+`required_psr` — the bar it was actually held to (`null` meaning the credibility gate refused
+it, where no PSR would have been enough). That is what makes "low confidence" auditable
+rather than a verdict you have to trust, and it is what any future re-tuning of the bars will
+be argued from.
+
+Two limits. **The app does not show it yet**: `app/src/types.ts` is hand-written and predates
+the field, so the evidence is in `sundaysync sync --json` output and in a diagnostics dump,
+not in the UI's red shelf. And **it is only present where a correlation actually happened** —
+a `no_audio` or `decode_error` file never reached the correlator and carries nothing, which
+is honest rather than missing.
 
 ## Resolve's Load XML matcher fails on large media unless it is pre-imported
 
