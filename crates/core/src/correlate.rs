@@ -24,6 +24,7 @@
 //! cross-spectrum unit-magnitude in every block, so blocks stay directly comparable and
 //! a peak in block 9 means the same thing as a peak in block 0.
 
+use crate::drift::MIN_SEGMENTS_FOR_DRIFT;
 use crate::extract::worker_count;
 use crate::request::ANALYSIS_RATE;
 use rustfft::num_complex::Complex32;
@@ -40,9 +41,24 @@ pub const SEGMENT_COUNT: usize = 5;
 /// generosity ceiling — beyond it segments overlap heavily on any clip §4.3 would
 /// segment at all, and each extra segment is a full FFT pass over the reference.
 /// Requests outside the range are clamped at the pipeline boundary, not rejected.
+///
+/// Since D-099 the knob applies to the *long* path only: a clip in the tiling regime is
+/// always three segments, because that is the count that keeps them from overlapping. See
+/// [`effective_segment_count`].
 pub const SEGMENT_COUNT_RANGE: std::ops::RangeInclusive<usize> = 2..=15;
 /// ...of this length, spread across the clip.
 pub const SEGMENT_SECONDS: f64 = 20.0;
+/// D-099: the shortest window we are willing to trust to yield an offset estimate.
+///
+/// Below this a segment holds too little audio for its correlation peak to mean anything —
+/// the peak-to-sidelobe statistics thin out, and a window that cannot be believed on its
+/// own does not become believable by being one of three. **Three of these is what makes
+/// the drift regression possible at all** ([`crate::drift::MIN_SEGMENTS_FOR_DRIFT`]), which
+/// is the whole reason the constant has this value and not a smaller one: it sets the
+/// shortest clip that can be tiled, and therefore the shortest clip that can reach D-049's
+/// evidence-graded PSR tier. A clip below `MIN_SEGMENTS_FOR_DRIFT × MIN_SEGMENT_SECONDS`
+/// is still correlated whole and still held to the strict bar.
+pub const MIN_SEGMENT_SECONDS: f64 = 5.0;
 /// §4.3: segment offsets disagreeing by more than this mark the clip inconsistent.
 pub const MAD_LIMIT_MS: f64 = 15.0;
 
@@ -593,29 +609,83 @@ impl Correlator {
     }
 }
 
-/// §4.3: whole clip under the limit, otherwise fixed-length segments.
+/// The number of samples at or above which a clip is tiled rather than correlated whole
+/// (D-099). Three [`MIN_SEGMENT_SECONDS`] windows, exactly.
+fn tiling_floor_samples() -> usize {
+    (MIN_SEGMENTS_FOR_DRIFT as f64 * MIN_SEGMENT_SECONDS * f64::from(ANALYSIS_RATE)) as usize
+}
+
+/// True when `clip_samples` falls in D-099's tiling regime: long enough to hold three
+/// trustworthy windows, short enough that §4.3's fixed 20 s windows do not apply.
+fn is_tiled(clip_samples: usize) -> bool {
+    let limit = (WHOLE_CLIP_LIMIT_SECONDS * f64::from(ANALYSIS_RATE)) as usize;
+    clip_samples <= limit && clip_samples >= tiling_floor_samples()
+}
+
+/// §4.3 + D-099: three regimes, decided by the clip's length alone.
+///
+/// - **Over [`WHOLE_CLIP_LIMIT_SECONDS`]** — [`SEGMENT_SECONDS`] windows, unchanged.
+/// - **At least three [`MIN_SEGMENT_SECONDS`], up to the limit** — the clip is tiled into
+///   exactly [`MIN_SEGMENTS_FOR_DRIFT`] equal, non-overlapping windows (D-099), so the
+///   drift regression has something to read and D-049's evidence-graded PSR tier becomes
+///   reachable at all. Integer division, so the tiles use all of the clip's audio bar at
+///   most one sample per boundary.
+/// - **Below that** — the whole clip, exactly as before. A window under
+///   [`MIN_SEGMENT_SECONDS`] is not evidence, so these clips keep the strict
+///   no-drift-evidence bar. That floor is deliberate; see D-099.
 #[must_use]
 pub fn segment_length(clip_samples: usize) -> usize {
     let limit = (WHOLE_CLIP_LIMIT_SECONDS * f64::from(ANALYSIS_RATE)) as usize;
-    if clip_samples <= limit {
-        clip_samples
-    } else {
-        ((SEGMENT_SECONDS * f64::from(ANALYSIS_RATE)) as usize).min(clip_samples)
+    if clip_samples > limit {
+        return ((SEGMENT_SECONDS * f64::from(ANALYSIS_RATE)) as usize).min(clip_samples);
     }
+    if clip_samples >= tiling_floor_samples() {
+        clip_samples / MIN_SEGMENTS_FOR_DRIFT
+    } else {
+        clip_samples
+    }
+}
+
+/// How many segments [`segment_starts`] will actually produce for this clip.
+///
+/// The single authority on the count, so [`segment_length`] and [`segment_starts`] cannot
+/// drift apart — and so the D-099 rule below is testable on its own rather than only
+/// through a correlation.
+///
+/// In the tiling regime the count is **forced** to [`MIN_SEGMENTS_FOR_DRIFT`] whatever §9's
+/// advanced knob asked for. Honouring a larger request there would mean windows that
+/// overlap: they would share audio, their offset estimates would therefore be correlated,
+/// and correlated estimates make D-045's residual-MAD gate agree with itself for reasons
+/// that have nothing to do with the recording. Weakening the gate is the opposite of the
+/// point. Outside the regime nothing changes — the long path honours the request (with the
+/// pre-existing floor of two), and a whole-clip match is the one segment it has always been.
+#[must_use]
+pub fn effective_segment_count(clip_samples: usize, requested: usize) -> usize {
+    if segment_length(clip_samples) >= clip_samples {
+        return 1;
+    }
+    if is_tiled(clip_samples) {
+        return MIN_SEGMENTS_FOR_DRIFT;
+    }
+    requested.max(2)
 }
 
 /// Segment start positions, "spread evenly across A (always including one near the start
 /// and one near the end)" (§4.3).
 ///
 /// `count` below 2 is treated as 2 — the formula divides by `count - 1`, and a single
-/// mid-clip segment would silently drop the start/end coverage §4.3 requires.
+/// mid-clip segment would silently drop the start/end coverage §4.3 requires. In D-099's
+/// tiling regime the count comes from [`effective_segment_count`] instead, and the evenly
+/// spread formula then lands the three starts on `0`, `seg` and `2 × seg`: the span is
+/// `clip − seg = 2 × seg`, so "spread evenly" and "tile without overlapping" are the same
+/// arithmetic there.
 #[must_use]
 pub fn segment_starts(clip_samples: usize, count: usize) -> Vec<usize> {
     let seg = segment_length(clip_samples);
     if seg >= clip_samples {
         return vec![0];
     }
-    let count = count.max(2);
+    let count = effective_segment_count(clip_samples, count);
     let span = clip_samples - seg;
     (0..count).map(|i| span * i / (count - 1)).collect()
 }
@@ -847,11 +917,27 @@ mod tests {
 
     #[test]
     fn segmentation_follows_the_plan() {
+        // D-099 rewrote the middle of this rule. Three regimes now, not two:
+        //   under 15 s  — one whole-clip segment (unchanged, and deliberately strict);
+        //   15 s … 45 s — three equal tiles, so the clip can earn drift evidence;
+        //   over 45 s   — SEGMENT_COUNT windows of SEGMENT_SECONDS.
         let rate = ANALYSIS_RATE as usize;
-        // Under 45 s: one whole-clip segment.
+
+        // Under 15 s: still one whole-clip segment. Nothing was widened here — a clip
+        // this short cannot hold three windows we would trust, so it keeps the strict
+        // no-drift-evidence bar.
+        let tiny = 10 * rate;
+        assert_eq!(segment_length(tiny), tiny);
+        assert_eq!(segment_starts(tiny, SEGMENT_COUNT), vec![0]);
+
+        // 15 s … 45 s: exactly three tiles, whatever the caller asked for.
         let short = 30 * rate;
-        assert_eq!(segment_length(short), short);
-        assert_eq!(segment_starts(short, SEGMENT_COUNT), vec![0]);
+        assert_eq!(segment_length(short), short / MIN_SEGMENTS_FOR_DRIFT);
+        assert_eq!(
+            segment_starts(short, SEGMENT_COUNT),
+            vec![0, 10 * rate, 20 * rate],
+            "a 30 s clip tiles into three 10 s windows"
+        );
 
         // Over 45 s: five 20 s segments, first at the start and last at the end.
         let long = 120 * rate;
@@ -864,9 +950,132 @@ mod tests {
     }
 
     #[test]
+    fn segmentation_boundaries_are_exact_on_both_sides() {
+        // Both regime edges, ULP-tight in samples, in the spirit of
+        // `the_d045_gates_admit_exactly_at_their_limits`: a rule that is only ever
+        // tested in the middle of its range is a rule nobody has actually pinned.
+        let rate = ANALYSIS_RATE as usize;
+
+        // The 15 s tiling floor is inclusive: exactly 15 s tiles, one sample less does not.
+        let floor = 15 * rate;
+        assert_eq!(segment_length(floor), floor / MIN_SEGMENTS_FOR_DRIFT);
+        assert_eq!(segment_starts(floor, SEGMENT_COUNT).len(), 3);
+        assert_eq!(
+            segment_length(floor - 1),
+            floor - 1,
+            "one sample below tiles not"
+        );
+        assert_eq!(segment_starts(floor - 1, SEGMENT_COUNT), vec![0]);
+
+        // The 45 s whole-clip limit is inclusive of the *tiling* regime: at exactly 45 s
+        // the clip is still tiled into three, and one sample more takes the 20 s windows.
+        let limit = 45 * rate;
+        assert_eq!(segment_length(limit), limit / MIN_SEGMENTS_FOR_DRIFT);
+        assert_eq!(segment_starts(limit, SEGMENT_COUNT).len(), 3);
+        assert_eq!(
+            segment_length(limit + 1),
+            20 * rate,
+            "one sample above the limit takes the fixed-window path"
+        );
+        assert_eq!(
+            segment_starts(limit + 1, SEGMENT_COUNT).len(),
+            SEGMENT_COUNT
+        );
+    }
+
+    #[test]
+    fn tiles_never_overlap_and_use_the_whole_clip() {
+        // D-099's load-bearing property. Overlapping windows would share audio, so their
+        // offset estimates would be correlated — and correlated estimates make the
+        // residual-MAD credibility gate (D-045) agree with itself for the wrong reason.
+        // The tiles must therefore be disjoint, and between them cover the clip.
+        let rate = ANALYSIS_RATE as usize;
+        for seconds in [15.0_f64, 20.0, 30.0, 44.9] {
+            let clip = (seconds * rate as f64) as usize;
+            let seg = segment_length(clip);
+            let starts = segment_starts(clip, SEGMENT_COUNT);
+            assert_eq!(starts.len(), 3, "{seconds} s must tile into three");
+            assert_eq!(starts[0], 0, "{seconds} s: the first tile starts at zero");
+
+            let ends: Vec<usize> = starts.iter().map(|s| (s + seg).min(clip)).collect();
+            for w in 0..starts.len() - 1 {
+                assert!(
+                    ends[w] <= starts[w + 1],
+                    "{seconds} s: tile {w} ends at {} but tile {} starts at {} — they overlap",
+                    ends[w],
+                    w + 1,
+                    starts[w + 1]
+                );
+            }
+            assert_eq!(
+                ends[2], clip,
+                "{seconds} s: the last tile must reach the end of the clip"
+            );
+            // Integer division can leave at most one sample of slack per tile boundary.
+            let covered: usize = starts.iter().zip(&ends).map(|(s, e)| e - s).sum();
+            assert!(
+                clip - covered < MIN_SEGMENTS_FOR_DRIFT,
+                "{seconds} s: {} samples unused, more than integer division can explain",
+                clip - covered
+            );
+        }
+
+        // And the awkward case the round numbers above cannot reach: a clip whose sample
+        // count is not divisible by three still yields disjoint tiles ending at the end.
+        let odd = 15 * rate + 2;
+        let seg = segment_length(odd);
+        let starts = segment_starts(odd, SEGMENT_COUNT);
+        assert_eq!(starts.len(), 3);
+        assert!(starts[0] + seg <= starts[1] && starts[1] + seg <= starts[2]);
+        assert_eq!((starts[2] + seg).min(odd), odd);
+    }
+
+    #[test]
+    fn the_tiling_regime_forces_three_segments_whatever_was_asked() {
+        // §9's advanced segment count is a knob on the *long* path only. Honouring it
+        // under 45 s would mean overlapping tiles — see
+        // `tiles_never_overlap_and_use_the_whole_clip` for why that is not a detail.
+        let rate = ANALYSIS_RATE as usize;
+        let tiled = 24 * rate;
+        for requested in [2, 5, 15] {
+            assert_eq!(
+                effective_segment_count(tiled, requested),
+                MIN_SEGMENTS_FOR_DRIFT,
+                "requested {requested} must be forced to three inside the tiling regime"
+            );
+            assert_eq!(
+                segment_starts(tiled, requested).len(),
+                MIN_SEGMENTS_FOR_DRIFT
+            );
+        }
+
+        // Outside the regime the count is untouched: the long path still honours the
+        // request (with the pre-existing floor of two), and the whole-clip path still
+        // produces its single segment.
+        let long = 120 * rate;
+        for requested in [2, 5, 15] {
+            assert_eq!(effective_segment_count(long, requested), requested);
+            assert_eq!(segment_starts(long, requested).len(), requested);
+        }
+        assert_eq!(
+            effective_segment_count(long, 0),
+            2,
+            "the floor is still two"
+        );
+        assert_eq!(effective_segment_count(long, 1), 2);
+        let tiny = 10 * rate;
+        assert_eq!(
+            effective_segment_count(tiny, 5),
+            1,
+            "a whole-clip match has one segment, and must say so"
+        );
+    }
+
+    #[test]
     fn segment_count_is_configurable_and_spans_the_clip() {
         // §9 advanced: more segments, same coverage guarantee — first at the start,
-        // last at the end, strictly increasing.
+        // last at the end, strictly increasing. D-099 confined this knob to clips over
+        // WHOLE_CLIP_LIMIT_SECONDS, which is the only regime that ever used it in anger.
         let rate = ANALYSIS_RATE as usize;
         let long = 120 * rate;
         for count in [2, 7, 15] {
@@ -883,12 +1092,23 @@ mod tests {
 
     #[test]
     fn match_clip_honours_the_segment_count() {
+        // The clip is 60 s — OVER WHOLE_CLIP_LIMIT_SECONDS, so this is the long path,
+        // where §9's advanced count is still honoured verbatim. That is worth stating
+        // rather than leaving to the reader: after D-099 a request of 3 also *produces*
+        // three segments in the tiling regime, so a shorter fixture here would pass for
+        // the wrong reason and stop testing the knob at all.
         let rate = ANALYSIS_RATE as usize;
         let reference = noise(100 * rate, 21);
         let lag = 4 * rate;
         let clip = &reference[lag..lag + 60 * rate];
+        assert!(clip.len() > (WHOLE_CLIP_LIMIT_SECONDS * f64::from(ANALYSIS_RATE)) as usize);
         let m = Correlator::new().match_clip(clip, &reference, 3).unwrap();
         assert_eq!(m.segments.len(), 3);
+        assert_eq!(
+            segment_length(clip.len()),
+            (SEGMENT_SECONDS * f64::from(ANALYSIS_RATE)) as usize,
+            "and the segments must be the fixed 20 s windows, not thirds of the clip"
+        );
         assert!((m.offset_samples - lag as f64).abs() < 2.0);
     }
 

@@ -138,12 +138,16 @@ impl Unsynced {
 /// What the engine actually measured before saying no.
 ///
 /// The point of `required_psr` is that SundaySync's PSR bar is not one number: §4.3
-/// correlates a clip shorter than
-/// [`crate::correlate::WHOLE_CLIP_LIMIT_SECONDS`] whole, which gives it one segment,
-/// which routes it to the strict [`crate::place::NO_DRIFT_EVIDENCE_PSR_FACTOR`] bar —
-/// `5/3 × min_psr`, i.e. 25 at the default, not the 15 the user set and the docs quote.
-/// Reporting the bar next to the score is what makes that visible without reading the
-/// source (D-098).
+/// correlates a clip shorter than three [`crate::correlate::MIN_SEGMENT_SECONDS`] windows
+/// whole, which gives it one segment, which routes it to the strict
+/// [`crate::place::NO_DRIFT_EVIDENCE_PSR_FACTOR`] bar — `5/3 × min_psr`, i.e. 25 at the
+/// default, not the 15 the user set and the docs quote. Reporting the bar next to the
+/// score is what makes that visible without reading the source (D-098).
+///
+/// D-099 narrowed the band that lands there — a clip from 15 s up to
+/// [`crate::correlate::WHOLE_CLIP_LIMIT_SECONDS`] is now tiled into three and judged on
+/// evidence — but did not remove it, and `required_psr` remains the only honest way to see
+/// which of the three verdicts a given refusal actually received.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct RefusedEvidence {
     /// Peak-to-sidelobe ratio of the rejected match (§4.3 scores a segmented match by its

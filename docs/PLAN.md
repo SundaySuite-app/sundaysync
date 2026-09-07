@@ -112,9 +112,14 @@ confidence score.
 - **Method:** GCC-PHAT (generalized cross-correlation with phase transform) via `rustfft`. PHAT
   whitening makes matching robust to the exact problem we have: the same event captured by a mixer feed
   and a distant camera mic sound completely different (EQ, reverb, gain), but share phase structure.
-- **Segmenting:** for clip A shorter than 45 s, correlate the whole clip. Otherwise take 5 segments of
-  20 s spread evenly across A (always including one near the start and one near the end). Each segment
-  is correlated against B independently.
+- **Segmenting:** three regimes, decided by A's length alone. Over 45 s, take 5 segments of 20 s
+  spread evenly across A (always including one near the start and one near the end). From 15 s up to
+  45 s, tile A into exactly 3 equal, **non-overlapping** windows of `len(A) / 3` — enough for §4.6's
+  drift regression to run, which is what lets D-049's evidence-graded PSR tier apply to a short clip
+  at all (D-099); the advanced segment count does not apply here, because honouring it would mean
+  overlapping windows whose offset estimates are correlated, weakening the very gate the tiling
+  exists to reach. Below 15 s (three windows of the 5 s minimum we trust), correlate the whole clip.
+  Each segment is correlated against B independently.
 - Reference-side FFT of B is computed once and cached in memory per sync run.
 - **Sub-sample precision:** parabolic interpolation of the correlation peak. At 12 kHz one sample =
   0.083 ms, so integer-sample precision already beats one frame by two orders of magnitude;

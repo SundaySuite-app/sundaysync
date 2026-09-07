@@ -5587,3 +5587,125 @@ alle tallene over er derfra.
 Ni prøver, **16,3 s** samlet prøvetid på en ledig maskin ved én arbeider (34–47 s når de andre
 sporene kjører sitt eget på den samme), av en `e2e`-suite som med dem teller 324. Under
 budsjettet på 60 s selv på det verste målte.
+
+## D-099 — Korte klipp tjener sitt eget bevis: tre fliser under 45 s
+
+Eierordre etter kalibreringsrunden. Rapportens §4 og §8 pekte begge på den samme rotårsaken, og
+dette er det ene grepet de foreslo. **Ingen terskelkonstant er endret.**
+
+### ① Funnet: den bevisgraderte tieren var strukturelt uoppnåelig
+
+§4.3 korrelerte ethvert klipp under `WHOLE_CLIP_LIMIT_SECONDS` (45 s) **helt** — `segment_starts`
+returnerte `vec![0]`, ett segment. `required_psr` tok da sin første gren
+(`segments.len() < MIN_SEGMENTS_FOR_DRIFT`) og holdt klippet til `min_psr × 5/3` = **25**.
+
+D-049s lavere bar (`× 2/3` = 10) krever tre segmenter *og* en troverdig klokke. Tre segmenter
+fantes aldri under 45 s. Den bevisgraderte veien — innført nettopp fordi PSR-områdene til sanne og
+falske treff overlapper (D-015: falske på 15,2 / 15,4 / 19,0; sanne ned til 13,3) — var derfor
+**strukturelt utestengt** for hvert eneste korte klipp som finnes. Ikke sjelden brukt. Umulig å nå.
+
+### ② Målingen som gjorde det til et produktproblem
+
+Baseline-bryllupet, 180 filer, hvert hovedkameraklipp mellom 3,8 s og 30,7 s (§4). Åtte plasserte.
+166 avviste med bevis (§8):
+
+```
+avvist PSR:  min 8,21 · median 13,92 · maks 24,96
+histogram 5–10 / 10–15 / 15–20 / 20–25 / ≥25:  24 / 82 / 47 / 13 / 0
+plassert PSR: 25,33  25,49  29,95  30,25  38,28  70,64  82,77     (baren: 25,00)
+```
+
+**Ikke én avvist nådde 25**, og toppen ligger på 24,96. To av sju plasseringer ligger innenfor 0,5
+av baren. Det er formen man ser når en terskel skjærer *langs* populasjonen, ikke når den ligger i
+et tomrom over den. Ingen av de åtte plasseringene hadde målt drift: motoren gikk gjennom hele
+bryllupet på den strengeste av sine tre porter, uten noen gang å fyre den porten som ble bygd for
+å skille sant fra falskt.
+
+### ③ Regelen
+
+`segment_length` har fått en midtgren. Tre regimer, avgjort av klippets lengde alene:
+
+| klippet | segmentering | segmenter |
+|---|---|---|
+| over 45 s | `SEGMENT_SECONDS` (20 s) vinduer | `SEGMENT_COUNT`, som før |
+| 15 s – 45 s | `clip / 3`, heltallsdivisjon | **3 fliser** |
+| under 15 s | hele klippet | 1, som før |
+
+Ny konstant `MIN_SEGMENT_SECONDS = 5.0`: det korteste vinduet vi er villige til å tro på. Gulvet
+for flislegging er `MIN_SEGMENTS_FOR_DRIFT × MIN_SEGMENT_SECONDS` = 15 s.
+
+`effective_segment_count(clip_samples, requested)` er ny og er **eneste autoritet** på hvor mange
+segmenter det faktisk blir, slik at `segment_length` og `segment_starts` ikke kan gli fra hverandre
+— den fella er hele grunnen til at D-098 finnes.
+
+### ④ Hvorfor flisene ikke får overlappe
+
+§9s avanserte segmenttall blir **overstyrt til 3** i flisregimet, uansett hva som ble bedt om. Å
+etterkomme 5 eller 15 der ville gitt vinduer som overlapper. Overlappende vinduer deler lyd, så
+deres forskyvningsestimater blir **korrelerte** — og korrelerte estimater får D-045s residual-MAD-
+port til å være enig med seg selv av grunner som ikke har noe med opptaket å gjøre. Å svekke porten
+er det stikk motsatte av poenget med runden.
+
+Aritmetikken går opp av seg selv: med tre fliser er `span = clip − seg = 2 × seg`, så «spredt
+jevnt» og «flislagt uten overlapp» er samme regnestykke — startene lander på 0, `seg`, `2 × seg`.
+Heltallsdivisjonen kan la inntil ett sample per flisegrense stå ubrukt (0,08 ms); den siste flisa
+slutter alltid nøyaktig ved klippets slutt.
+
+### ⑤ Hvorfor 15 s-gulvet står
+
+Under 15 s får klippet fortsatt hele-klipp-behandlingen og den strenge baren på 25. Det er et valg,
+ikke en forglemmelse: en flis på under fem sekunder har for lite lyd til at toppen betyr noe, og et
+vindu man ikke kan tro på blir ikke troverdig av å være ett av tre. På baseline-bryllupet betyr det
+at klippene mellom 3,8 s og 15 s ikke er hjulpet av denne runden. Det er ærlig, og det er skrevet
+inn i KNOWN_LIMITATIONS.
+
+### ⑥ Hva som IKKE er endret
+
+`NO_DRIFT_EVIDENCE_PSR_FACTOR`, `CREDIBLE_EVIDENCE_PSR_FACTOR`, `MIN_SEGMENTS_FOR_DRIFT`,
+`MAX_CREDIBLE_DRIFT_PPM`, `RESIDUAL_LIMIT_MS`, `DEFAULT_MIN_PSR`, `WHOLE_CLIP_LIMIT_SECONDS` —
+alle urørt. Ingen terskel er senket. Klippet slippes ikke gjennom; det får **lov til å skaffe seg
+bevis**, og blir så dømt av troverdighetsporten.
+
+Merk at `ClipMatch.psr` er **minimum** over segmentene. Et flislagt kort klipp skårer altså som sin
+svakeste flis og kommer gjerne ut *lavere* enn sin egen hele-klipp-PSR. Målt på prøvefikstur:
+hele-klipp 22,48 → flislagt 12,38. Det er ærlig og tilsiktet — der en troverdig klokke finnes, er
+PSR bekreftelse og ikke dommer (D-049) — og det er ikke særbehandlet noe sted.
+
+### ⑦ Porten biter begge veier — og fanget et hull ingen visste om
+
+Motprøven ble skrevet først: en **kort** produsert miks (tre 12 s-kutt fra 30 s, 300 s og 520 s av
+et 600 s-arrangement, 36 s til sammen). Hver flis lander midt i sitt eget kutt og finner et
+*sterkt*, ekte treff — på tre helt forskjellige forskyvninger. PSR-golvet kan ikke avvise dette.
+
+Mot den nye regelen: `psr=300,08 · segments=3 · required=None` — avvist av troverdighetsporten,
+akkurat som den lange miksen i D-098.
+
+Mot den **gamle** regelen, kjørt for å bevise at prøven biter: filen ble **PLASSERT**, på 288,000 s.
+Ett segment, ingen regresjon å bedømme, PSR 300 mot en bar på 25. D-045s eksakte feilmodus, i en
+lengde ingen hadde prøvd den i. Dette er altså ikke bare et gjenfinningsgrep: 45 s-grensen var òg
+et hull der en redigert miks kunne komme seg inn.
+
+### ⑧ Hva dette IKKE beviser
+
+At de 60/142 avviste klippene fra §8 er sanne treff. Det kan bare en korpuskjøring svare på.
+Denne runden gjør dem *dømbare* av D-045 i stedet for utestengt fra den; hva dommen blir på ekte
+materiale er neste måling, ikke denne.
+
+Én egenskap ved porten er verdt å skrive ned samtidig, fordi denne runden gjør den vanlig. Med
+nøyaktig tre segmenter er residual-MAD medianen av tre tall, og residualene fra en minste-kvadraters
+linje gjennom tre jevnt fordelte punkter har alltid formen `(a, −2a, a)` — midtpunktet bærer dobbelt
+så stort avvik som de to ytre. Medianen av tallverdiene er dermed `|a|`, altså **halvparten av det
+største avviket**, så `RESIDUAL_LIMIT_MS` på 15 ms tåler i praksis 30 ms utslag på midtflisa. Dette
+er ikke nytt — det har alltid gjeldt ethvert tresegmentstreff — men før D-099 var tre segmenter
+sjeldent for korte klipp, og nå er det normalen. Det er en faktor to, og avvisningene vi faktisk
+måler bommer med størrelsesordener (kort produsert miks: 74 000 ms; urelatert lyd: 8 150 ms), så
+ingenting er justert på det. Fordelinga av residualer er noe neste korpuskjøring bør lese.
+
+### ⑨ Kostnad
+
+`cargo test --workspace` grønn. Full nøyaktighetssuite (`--ignored`) grønn: Port 1 (null falske
+plasseringer) og Port 2 (urelatert aldri plassert) uendret — de sju ekte klippene er alle over
+45 s og måler bit for bit som før, mens `unrelated.wav` (25 s) nå flislegges og faller fra PSR 9,2
+til **8,1** med 8150 ms residualspredning. Vernet ble strammere, ikke løsere. Minneporten: 2,383 GB
+→ **2,304 GB** topp-RSS mot det uendrede 4 GB-taket, og synkroniseringen 54,2 s → 47,0 s (kortere
+segmenter = mindre transform).

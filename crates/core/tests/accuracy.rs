@@ -904,3 +904,97 @@ fn a_produced_edit_is_refused_for_its_scatter_not_its_volume() {
         ev.psr
     );
 }
+
+/// D-099's counterpart on real media: the new tiling path must not become a way in.
+///
+/// The test above needs a 130 s edit because before D-099 nothing under 45 s could reach
+/// the credibility gate at all. That is exactly what changed — so the gate must now be
+/// shown to bite on a *short* edit too, which is the shape a real wedding's files actually
+/// have (docs/CALIBRATION-2026-09.md §4: every main-camera clip 3.8–30.7 s).
+///
+/// Three 12 s cuts from widely separated points of a 600 s event, so the mix is 36 s: in
+/// the tiling regime, and tiled such that each 12 s tile lands squarely inside one cut.
+/// Every tile therefore finds a genuine, *strong* peak — at a completely different offset.
+/// The PSR floor cannot refuse this; only the credibility gate can, and it must.
+#[test]
+fn a_short_produced_edit_is_refused_by_the_credibility_gate_it_can_now_reach() {
+    let Some(sidecar) = require_ffmpeg() else {
+        return;
+    };
+    let root = scratch("short-edited-mix");
+    let seed = 29u64;
+    let spec = shoot::full_suite(seed);
+    let dir = shoot::suite_dir(&root, &spec.name, seed);
+    let mut truth = shoot::emit(&spec, &dir, &sidecar.ffmpeg).expect("emit");
+
+    let cuts = [(30.0, 12.0), (300.0, 12.0), (520.0, 12.0)]
+        .iter()
+        .map(|(start_seconds, duration_seconds)| shoot::ClipSpec {
+            start_seconds: *start_seconds,
+            duration_seconds: *duration_seconds,
+        })
+        .collect::<Vec<_>>();
+    let mix = shoot::emit_edited_mix(
+        &mut truth,
+        &dir,
+        "short-produced-edit",
+        &cuts,
+        Codec::Wav,
+        &sidecar.ffmpeg,
+    )
+    .expect("emit short edited mix");
+
+    let request = sundaysync_core::SyncRequest {
+        cache_dir: Some(dir.join("cache")),
+        ..sundaysync_core::SyncRequest::new(vec![dir.clone()])
+    };
+    let result = sundaysync_core::sync(&request, &NoProgress, &CancelToken::new()).expect("sync");
+
+    let reference = result.reference.as_ref().expect("a reference");
+    assert!(
+        reference.file.to_string_lossy().contains("recorder"),
+        "expected the recorder feed as reference, got {:?}",
+        reference.file
+    );
+
+    assert!(
+        !result
+            .placements
+            .iter()
+            .any(|p| p.file.file_name().is_some_and(|n| n == mix.as_str())),
+        "a 36 s produced edit was placed — D-099 must widen the evidence, not the door"
+    );
+
+    let refused = result
+        .unsynced
+        .iter()
+        .find(|u| u.file.file_name().is_some_and(|n| n == mix.as_str()))
+        .expect("the short produced edit must be reported as unsynced");
+    assert_eq!(
+        refused.reason,
+        sundaysync_core::result::UnsyncedReason::LowConfidence
+    );
+
+    let ev = refused
+        .evidence
+        .expect("D-098: a measured refusal must carry its measurement");
+    println!(
+        "short produced edit: psr={:.2} segments={} required={:?} offset={:.3}s",
+        ev.psr, ev.segments, ev.required_psr, ev.offset_seconds
+    );
+    assert_eq!(
+        ev.segments, 3,
+        "D-099: a 36 s clip must be tiled into three, or this test proves nothing"
+    );
+    assert_eq!(
+        ev.required_psr, None,
+        "the short edit must be refused by the credibility gate, not by a PSR floor — it \
+         scored {:.2} on material that genuinely is the event",
+        ev.psr
+    );
+    assert!(
+        ev.psr >= 15.0,
+        "and the point of the fixture is that PSR alone would NOT have refused it: {:.2}",
+        ev.psr
+    );
+}

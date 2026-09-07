@@ -1,5 +1,26 @@
 # Changelog
 
+## Uutgitt
+
+- **Korte klipp får nå lov til å skaffe seg bevis.** Et klipp under 45 sekunder ble
+  korrelert i ett stykke, og da fantes det ingen driftregresjon å bedømme det på — så det
+  ble holdt til den strengeste av motorens tre porter, 25 i stedet for de 15 du selv har
+  satt. Den lave, bevisgraderte baren krevde tre segmenter og var dermed *umulig å nå* for
+  ethvert kort klipp som finnes. På et ekte bryllup — 180 filer, hvert kameraklipp mellom
+  3,8 og 30,7 sekunder — ble 8 plassert, og av de 166 avvisningene med måling nådde ikke
+  én eneste 25, mens fordelinga gikk kontinuerlig helt opp til 24,96. Terskelen skar langs
+  populasjonen, ikke i et tomrom over den. Nå deles et klipp mellom 15 og 45 sekunder i tre
+  like, ikke-overlappende fliser, slik at klokka kan måles og troverdighetsporten faktisk
+  får uttale seg. **Ingen terskel er senket** — klippet slippes ikke gjennom, det får lov
+  til å tjene seg fram til å bli dømt på bevis. Klipp under 15 sekunder er ikke hjulpet:
+  en flis kortere enn fem sekunder er ikke bevis, og de møter fortsatt 25 (D-099).
+- **Og porten biter hardere enn før, ikke løsere.** Motprøven avdekket et hull ingen visste
+  om: en *kort* produsert miks — tre kutt fra tre steder i arrangementet, 36 sekunder til
+  sammen — ble tidligere PLASSERT, med et kjempesterkt treff på 288 sekunder, fordi ett
+  segment ikke gir noe å motsi det med. Det er nøyaktig den feilmodusen motoren har et vern
+  mot, i en lengde vernet aldri fikk se. Nå avvises den. Det samme gjelder urelatert lyd:
+  den syntetiske `unrelated.wav` faller fra PSR 9,2 til 8,1.
+
 ## v0.6.0
 
 Første stabile utgave. Innholdet er v0.6.0-beta.1 → beta.6 samlet; se
