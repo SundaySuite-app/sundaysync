@@ -67,9 +67,9 @@ pub fn confidence_from_psr(psr: f64, min_psr: f64) -> f64 {
 
 /// D-045: the stricter PSR bar for matches that carry no consistency evidence.
 ///
-/// A clip short enough to correlate as a single whole-clip pass (under
-/// [`crate::correlate::WHOLE_CLIP_LIMIT_SECONDS`], or with fewer than
-/// [`drift::MIN_SEGMENTS_FOR_DRIFT`] segments for any reason) gives the credibility gate
+/// A clip short enough to correlate as a single whole-clip pass (since D-099, under
+/// `MIN_SEGMENTS_FOR_DRIFT × `[`crate::correlate::MIN_SEGMENT_SECONDS`] — or with fewer
+/// than [`drift::MIN_SEGMENTS_FOR_DRIFT`] segments for any reason) gives the credibility gate
 /// nothing to check: one peak, no segments to agree or disagree. Its PSR is the *only*
 /// evidence, so it must clear a higher bar. The factor is multiplicative so §9's
 /// `min_psr` knob keeps its meaning: at the default 15 the effective floor is 25.
@@ -1416,6 +1416,116 @@ mod tests {
     }
 
     #[test]
+    fn a_short_true_match_now_earns_the_graded_tier() {
+        // D-099, and the whole point of it. Before this rule a clip under 45 s was one
+        // whole-clip segment, so `required_psr` took its first branch and held the clip to
+        // min_psr × 5/3 = 25. D-049's evidence-graded bar (× 2/3 = 10) needs three
+        // segments and was therefore unreachable for every short clip that exists — on the
+        // September calibration wedding, 166 refusals with evidence and not one of them
+        // reached 25, while the population ran right up to 24.96
+        // (docs/CALIBRATION-2026-09.md §4, §8).
+        //
+        // The fixture: a 24 s clip that genuinely is a stretch of the reference, buried
+        // deep enough in independent noise that its whole-clip PSR lands *below* the old
+        // strict bar. Under the old rule that is a refusal. Under D-099 it is three tiles,
+        // a credible clock, and a placement judged on evidence.
+        let rate = ANALYSIS_RATE as usize;
+        let min_psr = 15.0;
+        let reference = noise(600 * rate, 77);
+        let lag = 137 * rate;
+        let interference = noise(24 * rate, 9_001);
+        let clip: Vec<f32> = reference[lag..lag + 24 * rate]
+            .iter()
+            .zip(interference.iter())
+            .map(|(a, b)| a + 20.0 * b)
+            .collect();
+
+        let mut correlator = crate::correlate::Correlator::new();
+
+        // (a) The old rule, measured rather than asserted from memory: the whole-clip
+        // correlation — which is exactly what `segment_length` used to return here —
+        // scores between the user's own threshold and the strict no-evidence bar. It
+        // would have been refused, and the user would never have learned why.
+        let whole = correlator
+            .find(&clip, &reference)
+            .expect("the whole-clip correlation must still find the match");
+        assert!(
+            whole.psr >= min_psr && whole.psr < min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR,
+            "the fixture must sit in the band the old rule refused: got psr {:.2}, needed \
+             {min_psr} ≤ psr < {}",
+            whole.psr,
+            min_psr * NO_DRIFT_EVIDENCE_PSR_FACTOR
+        );
+
+        // (b) The new rule: three tiles, a credible clock, the graded bar.
+        let m = correlator
+            .match_clip(&clip, &reference, crate::correlate::SEGMENT_COUNT)
+            .expect("a true match must correlate");
+        assert_eq!(
+            m.segments.len(),
+            crate::drift::MIN_SEGMENTS_FOR_DRIFT,
+            "a 24 s clip must arrive at the gate with three segments"
+        );
+        let d = crate::drift::measure(&m.segments, clip.len())
+            .expect("three tiles of one rigid recording must yield a regression");
+        assert!(d.credible(), "the clock must be credible: {d:?}");
+        assert_eq!(
+            required_psr(&m, clip.len(), min_psr),
+            Some(min_psr * CREDIBLE_EVIDENCE_PSR_FACTOR),
+            "the applied bar must be D-049's graded one, not the no-evidence one"
+        );
+        assert!(
+            admissible(&m, clip.len(), min_psr),
+            "psr {:.2} against a bar of {} must place",
+            m.psr,
+            min_psr * CREDIBLE_EVIDENCE_PSR_FACTOR
+        );
+        assert!(
+            (m.offset_samples - lag as f64).abs() < 2.0,
+            "and it must place in the RIGHT spot: got {}, truth {lag}",
+            m.offset_samples
+        );
+
+        // (c) Honesty about the number that moved. `ClipMatch.psr` is the *minimum* over
+        // segments, so a tiled short clip's PSR is its weakest tile — here it comes out
+        // LOWER than the whole-clip figure in (a), and below the user's own min_psr. That
+        // is not a loophole, it is D-049 working as written: where a credible clock exists,
+        // PSR is corroboration rather than the judge. No constant was changed to get here.
+        assert!(
+            m.psr < whole.psr,
+            "tiling is expected to LOWER the reported psr ({:.2} vs {:.2}) — if it ever \
+             raises it, the reasoning in D-099 needs re-reading",
+            m.psr,
+            whole.psr
+        );
+    }
+
+    #[test]
+    fn a_short_clip_that_is_not_a_true_match_is_still_refused_by_credibility() {
+        // The counterpart, and the reason D-099 is safe to ship: the new path must not be
+        // a way in. Unrelated audio of exactly the same length takes exactly the same
+        // tiling, and must be refused — by the credibility gate (no PSR is enough), not by
+        // squeaking under a lowered floor.
+        let rate = ANALYSIS_RATE as usize;
+        let min_psr = 15.0;
+        let reference = noise(600 * rate, 77);
+        let clip = noise(24 * rate, 4_242);
+
+        let m = crate::correlate::Correlator::new()
+            .match_clip(&clip, &reference, crate::correlate::SEGMENT_COUNT)
+            .expect("the correlator answers; the gate is what refuses");
+        assert_eq!(m.segments.len(), crate::drift::MIN_SEGMENTS_FOR_DRIFT);
+        assert_eq!(
+            required_psr(&m, clip.len(), min_psr),
+            None,
+            "three tiles of unrelated audio land on three unrelated peaks — no clock joins \
+             them, so no PSR readmits the clip (psr was {:.2})",
+            m.psr
+        );
+        assert!(!admissible(&m, clip.len(), min_psr));
+    }
+
+    #[test]
     fn a_refused_clip_carries_the_measurement_that_refused_it() {
         // D-098, found on the K calibration corpus: the baseline wedding refused 166 of 180
         // files as `low_confidence`, and the JSON said nothing else about any of them. That
@@ -1433,7 +1543,11 @@ mod tests {
 
         let rate = ANALYSIS_RATE as usize;
         let r = noise(60 * rate, 11);
-        let x = noise(20 * rate, 22); // unrelated, and short enough to correlate whole
+        // Unrelated material, 20 s. Since D-099 that is the *tiling* regime, not the
+        // whole-clip one — so this clip now arrives at the gate carrying three segments,
+        // and the assertions below check that the extra evidence made the refusal
+        // stronger rather than looser.
+        let x = noise(20 * rate, 22);
 
         let candidates = vec![
             cached_candidate(&dir, "rec.wav", "rec", &r, false),
@@ -1471,14 +1585,24 @@ mod tests {
             "unrelated material must score below the bar it was held to, got {}",
             ev.psr
         );
-        // 20 s is under the whole-clip limit, so there is exactly one segment and the
-        // strict bar applies. This is the number the calibration report needed and could
-        // not get: the user set 15, and the clip was actually judged at 25.
-        assert_eq!(ev.segments, 1, "a 20 s clip is correlated whole");
+        // D-099: 20 s is between MIN_SEGMENTS_FOR_DRIFT × MIN_SEGMENT_SECONDS and
+        // WHOLE_CLIP_LIMIT_SECONDS, so the clip is tiled into three and the evidence says
+        // three. Before D-099 this read `1` and the reported bar was the strict 25 — which
+        // is exactly the number the calibration report needed and could not get.
         assert_eq!(
-            ev.required_psr,
-            Some(15.0 * NO_DRIFT_EVIDENCE_PSR_FACTOR),
-            "the reported bar must be the strict one a whole-clip match is held to"
+            ev.segments,
+            crate::drift::MIN_SEGMENTS_FOR_DRIFT,
+            "a 20 s clip is tiled, not correlated whole"
+        );
+        // And the bar it reports is the one the D-045 credibility gate actually applied:
+        // three tiles of unrelated noise land on three unrelated peaks, which no clock can
+        // join, so there is no PSR that would have placed this. Reporting the strict 25
+        // here would tell the user a louder clip would have been placed. It would not.
+        assert_eq!(
+            ev.required_psr, None,
+            "unrelated material must be refused by the credibility gate it can now reach, \
+             not by a PSR floor — it scored {:.2} on three tiles",
+            ev.psr
         );
         assert!(
             ev.offset_seconds.is_finite(),

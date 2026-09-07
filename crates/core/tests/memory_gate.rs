@@ -23,9 +23,10 @@
 //! (D-039: the long-reference stress case streams rather than caches), so this gate keeps to
 //! a long reference with FEW clips to stay tractable in a normal session. It instead isolates the
 //! MEMORY dimension: `Extractor::load()`'s double-allocation is a function of the
-//! reference's length alone, so a long reference with few, short (`<45 s`, so each
-//! correlates as a single whole-clip pass rather than 5 segments — `WHOLE_CLIP_LIMIT_
-//! SECONDS`) clips reproduces the memory finding without paying the correlation-time cost
+//! reference's length alone, so a long reference with few, short (`<45 s`, so each takes
+//! D-099's tiling path — three windows of a third of the clip, rather than the 5 fixed 20 s
+//! segments a clip over `WHOLE_CLIP_LIMIT_SECONDS` would get) clips reproduces the memory
+//! finding without paying the correlation-time cost
 //! §7.7's literal 200-file figure would. See `sundaysync_fixturegen::day`'s module doc for
 //! the same reasoning applied to the fixture generator itself (index-based, bounded-memory
 //! generation, so the generator's own footprint never confounds this measurement).
@@ -49,8 +50,21 @@ const RSS_CEILING_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// not the literal 20 h target.
 const REFERENCE_HOURS: f64 = 14.0;
 /// Few, and short — see the module doc's "Why this is a long reference with FEW clips"
-/// section. Each is well under `WHOLE_CLIP_LIMIT_SECONDS` (45 s), so pass 1 correlates
-/// each as a single whole-clip pass rather than 5 segments.
+/// section. Each is well under `WHOLE_CLIP_LIMIT_SECONDS` (45 s) and at or above
+/// `MIN_SEGMENTS_FOR_DRIFT × MIN_SEGMENT_SECONDS` (15 s), so pass 1 puts every one of them
+/// on D-099's tiling path: three windows of `clip / 3` rather than one whole-clip pass.
+///
+/// **These bounds are unchanged, and the gate's intent is unchanged** — bounded peak RSS on
+/// a long reference — but D-099 did change what they exercise, and in the direction that
+/// makes this measurement *more* honest rather than less. A whole-clip segment of up to
+/// 40 s forces its own large FFT (`4 × seg_len`, rounded up to a power of two) and, being
+/// larger than the segment geometry the spectra cache is budgeted for, streams the
+/// reference a block at a time. A third of that clip forces a smaller transform. So the
+/// tiled path is the cheaper of the two per clip, and the ceiling below is being asserted
+/// against a *lighter* correlation than before while the dominant term — `Extractor::
+/// load()`'s transient double-allocation on a 14 h reference — is untouched by any of it.
+/// Measured either side of D-099 on the same machine, same seed: peak RSS **2.383 GB
+/// before, 2.304 GB after** (sync 54.2 s → 47.0 s), against the unchanged 4 GB ceiling.
 const CLIP_COUNT: usize = 4;
 const CLIP_SECONDS_MIN: f64 = 15.0;
 const CLIP_SECONDS_MAX: f64 = 40.0;

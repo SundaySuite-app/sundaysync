@@ -408,31 +408,50 @@ clip as `low_confidence` instead of placing it wrongly. Choose a raw recorder fi
 the longest camera as the reference; the produced mix belongs in the edit, not in the
 sync.
 
-## Short clips clear a higher bar
+## Clips under 15 s clear a higher bar
 
-A clip under ~45 s correlates as a single whole-clip pass, so there are no segments to
+A clip under 15 s correlates as a single whole-clip pass, so there are no segments to
 cross-check and PSR is the only evidence. Such matches must clear `min_psr × 5/3`
 (25 at the default) — a provisional calibration from the first real corpus, where every
 observed *false* placement scored between 15 and 19 (D-045, D-015).
 
-**This section used to end "a genuinely matching short clip in the same room scores far
-above this". The September 2026 corpus round does not support that** (see
+**This section used to say the same about every clip under 45 s, and used to end "a
+genuinely matching short clip in the same room scores far above this". The September 2026
+corpus round does not support that** (see
 [`CALIBRATION-2026-09.md`](CALIBRATION-2026-09.md) §4). On a real multicam wedding — 180
 files, every main-camera clip between 3.8 s and 30.7 s, so every one of them judged at 25 —
 the engine placed 8, and the placed PSRs were 25.33, 25.49, 29.95, 30.25, 38.28, 70.64,
 82.77. Two of seven sit within 0.5 of the bar. That is the shape of a threshold cutting
 *into* the population it is meant to separate, not one sitting in a gap between true and
-false matches.
+false matches. Of the 166 refusals carrying evidence, not one reached 25 while the
+population ran continuously up to 24.96 (§8).
 
-The related structural point: D-049's evidence-graded path (credible drift lowers the bar to
-`× 2/3`) needs ≥ 3 segments, so it is **unreachable for any clip under 45 s** — and it fired
-on none of the 180 files. A whole real wedding was judged on the strictest of the three gates.
+The structural half of that finding has since been fixed. D-049's evidence-graded path
+(a credible drift measurement lowers the bar to `× 2/3`) needs ≥ 3 segments, and under the
+old rule no clip under 45 s ever had them — the graded tier was **unreachable**, and it
+fired on none of the 180 files. Since **D-099** a clip from 15 s up to 45 s is tiled into
+three equal, non-overlapping windows, so the drift regression can run and the credibility
+gate can pass judgement. No threshold constant was changed to do it: the clip is not let
+through, it is allowed to *earn* its way to the graded tier and then judged on evidence.
 
-Nothing has been re-tuned on that evidence: the numbers are provisional in the same direction
-they always were, and moving them is an owner decision that should be taken on the refused-PSR
-distribution (now measurable via `evidence`, see below), not on this note. The plausible fix
-is upstream of the number anyway — letting a short clip against a long reference be segmented
-at all, so it can earn evidence instead of being judged on one figure.
+**Two honest consequences.**
+
+Clips under 15 s are not helped. Three windows of the 5 s minimum we trust is what tiling
+costs, so anything shorter still gets one whole-clip pass and still faces 25. On the wedding
+above, that is every file between 3.8 s and 15 s. This is a deliberate floor, not an
+oversight: a window too short to believe on its own does not become believable by being one
+of three.
+
+A tiled clip's reported PSR usually goes *down*. §4.3 scores a match by its **weakest**
+segment, so a short clip's three tiles score worse than the one long pass they replace
+(measured on a synthetic true match: 22.48 whole, 12.38 tiled). That is D-049 working as
+written — where a credible clock exists, PSR is corroboration rather than the judge — but it
+does mean a placed short clip can now show a PSR below the `min_psr` you set. Read the
+`drift_ppm` next to it: a placement carrying a measured clock was admitted on that evidence.
+
+What none of this establishes is that the previously refused clips are true matches. Only a
+corpus run can say that; the change makes them *judgeable* by D-045 rather than shut out
+from it.
 
 ## A refusal now carries its measurement — but only in the JSON
 
