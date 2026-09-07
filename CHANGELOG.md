@@ -1,7 +1,6 @@
 # Changelog
 
-## Uutgitt
-
+## v0.7.0
 - **Korte klipp får nå lov til å skaffe seg bevis.** Et klipp under 45 sekunder ble
   korrelert i ett stykke, og da fantes det ingen driftregresjon å bedømme det på — så det
   ble holdt til den strengeste av motorens tre porter, 25 i stedet for de 15 du selv har
