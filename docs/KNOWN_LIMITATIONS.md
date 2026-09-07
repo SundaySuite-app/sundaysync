@@ -449,6 +449,18 @@ written — where a credible clock exists, PSR is corroboration rather than the 
 does mean a placed short clip can now show a PSR below the `min_psr` you set. Read the
 `drift_ppm` next to it: a placement carrying a measured clock was admitted on that evidence.
 
+**And a third, about the gate itself.** With exactly three segments the residual MAD is a
+median of three numbers, and the residuals of a least-squares line through three evenly
+spaced points always have the shape `(a, −2a, a)` — the middle point carries twice the
+deviation of the outer two. The median of their magnitudes is therefore `|a|`, i.e. **half
+the worst deviation**, so `RESIDUAL_LIMIT_MS` (15 ms) effectively tolerates a 30 ms
+excursion on the middle tile. This is not new — it has always been true of any 3-segment
+match — but D-099 turns the 3-segment case from rare into the normal one for short clips,
+so it is worth naming. It is a factor of two, and the refusals actually observed miss by
+orders of magnitude (a short produced mix scattered by 74 000 ms, unrelated audio by
+8 150 ms), so nothing was re-tuned on it. Widening the observed distribution of *residuals*
+is one of the things the next corpus run should look at.
+
 What none of this establishes is that the previously refused clips are true matches. Only a
 corpus run can say that; the change makes them *judgeable* by D-045 rather than shut out
 from it.

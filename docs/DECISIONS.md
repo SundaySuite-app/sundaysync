@@ -5691,6 +5691,16 @@ At de 60/142 avviste klippene fra §8 er sanne treff. Det kan bare en korpuskjø
 Denne runden gjør dem *dømbare* av D-045 i stedet for utestengt fra den; hva dommen blir på ekte
 materiale er neste måling, ikke denne.
 
+Én egenskap ved porten er verdt å skrive ned samtidig, fordi denne runden gjør den vanlig. Med
+nøyaktig tre segmenter er residual-MAD medianen av tre tall, og residualene fra en minste-kvadraters
+linje gjennom tre jevnt fordelte punkter har alltid formen `(a, −2a, a)` — midtpunktet bærer dobbelt
+så stort avvik som de to ytre. Medianen av tallverdiene er dermed `|a|`, altså **halvparten av det
+største avviket**, så `RESIDUAL_LIMIT_MS` på 15 ms tåler i praksis 30 ms utslag på midtflisa. Dette
+er ikke nytt — det har alltid gjeldt ethvert tresegmentstreff — men før D-099 var tre segmenter
+sjeldent for korte klipp, og nå er det normalen. Det er en faktor to, og avvisningene vi faktisk
+måler bommer med størrelsesordener (kort produsert miks: 74 000 ms; urelatert lyd: 8 150 ms), så
+ingenting er justert på det. Fordelinga av residualer er noe neste korpuskjøring bør lese.
+
 ### ⑨ Kostnad
 
 `cargo test --workspace` grønn. Full nøyaktighetssuite (`--ignored`) grønn: Port 1 (null falske
