@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.0
+
+Første stabile utgave. Innholdet er v0.6.0-beta.1 → beta.6 samlet; se
+oppføringene under. Ingen kodeendring mellom beta.6 og denne — kun
+versjonsbumpen, slik at stabilringen kan serveres for første gang.
+
 ## v0.6.0-beta.6
 
 - **Oppdateringen sier hva den er.** Appen har lastet ned releasenotatet ved hver eneste
