@@ -5709,3 +5709,44 @@ plasseringer) og Port 2 (urelatert aldri plassert) uendret — de sju ekte klipp
 til **8,1** med 8150 ms residualspredning. Vernet ble strammere, ikke løsere. Minneporten: 2,383 GB
 → **2,304 GB** topp-RSS mot det uendrede 4 GB-taket, og synkroniseringen 54,2 s → 47,0 s (kortere
 segmenter = mindre transform).
+
+## D-100 — Beta-ringen følger stabil: rene tagg kan promoteres til begge ringer
+
+Eierordre 17.09: «Oppdater både stabil og beta til å kjøre samme, slik at ikke beta ligger bak.»
+Beslutningen tas i den delte Worker-en (sunday-telemetry #11) og gjelder alle appene. Her står den
+for Sync, fordi D-044 beskriver den gamle regelen.
+
+### ① Funnet: beta-testerne kjørte eldre bygg enn flåten
+
+Beta-ringen sto på `v0.6.0-beta.6` mens stabil serverte `v0.7.0`. Regelen fra D-044, som Worker-en
+håndhevet, lot et rent `vX.Y.Z`-tagg gå bare til `stable`. Den eneste lovlige måten å rette
+etterslepet på var å kutte et beta-bygg ingen trengte. Worker-ens lag-sjekk målte i tillegg hver
+ring bare mot sin egen taggform, så beta sto som «à jour» hele tiden.
+
+### ② Regelen nå (sunday-telemetry #11, deployet 17.09)
+
+| Tagg | Før | Nå |
+|---|---|---|
+| `vX.Y.Z-beta.N` | kun `beta` | kun `beta` |
+| `vX.Y.Z` | kun `stable` | `stable` **og** `beta` |
+
+Vernet som betyr noe står: et beta-bygg når aldri flåten, og Worker-en avviser det med
+`channel_tag_mismatch` og `allowedChannels: ["beta"]`. `GET /v1/admin/channels` måler nå beta som
+bakpå mot den nyeste av beta- og stabil-tagg. En beta av en senere versjon regnes fortsatt som à jour.
+
+### ③ Slik slippes en offisiell versjon
+
+Samme tagg promoteres til begge ringer. Sync har ikke eget promote-skript, så kallet er
+`POST https://telemetry.sundaysuite.app/v1/admin/promote` med
+`{"app":"sundaysync","channel":"stable","tag":"vX.Y.Z"}` og deretter `"channel":"beta"`, med
+admin-nøkkelen i `x-admin-key`. Etterpå: les tilbake begge ringer, og byte-verifiser begge feeds
+(`/v1/update/sundaysync/stable` og `/beta`) mot tagget sitt `latest.json`. En dårlig offisiell
+versjon rulles tilbake på begge ringer.
+
+NSIS-only på `-beta.`-tagger (D-044) er uendret. En beta-installasjon er alltid NSIS, og det
+stabile manifestet har `windows-x86_64-nsis`, så oppdatereren henter riktig installer.
+
+### ④ Utført 18.09
+
+Beta ble promotert til `v0.7.0`. Begge ringer serverer nå `v0.7.0`, og beta-feeden er byte-identisk
+med stabil-feeden og GitHub-manifestet.
