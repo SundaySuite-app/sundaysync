@@ -76,7 +76,11 @@ export interface PlanOptions extends ScheduleOptions {
  * clips, but "plan more than can be held" is how a cache starts thrashing, and thrashing
  * sounds like dropouts nobody can explain.
  */
-export function planChunks(clips: PlacedClip[], tSec: number, opts: PlanOptions): ChunkRef[] {
+export function planChunks(
+  clips: PlacedClip[],
+  tSec: number,
+  opts: PlanOptions,
+): ChunkRef[] {
   const ahead = opts.aheadSec ?? AHEAD_SEC;
   const behind = opts.behindSec ?? BEHIND_SEC;
   const from = tSec - behind;
@@ -110,7 +114,11 @@ export function planChunks(clips: PlacedClip[], tSec: number, opts: PlanOptions)
 }
 
 /** 0 inside the span, otherwise the gap to its nearest edge. */
-export function distanceToSpan(tSec: number, startSec: number, endSec: number): number {
+export function distanceToSpan(
+  tSec: number,
+  startSec: number,
+  endSec: number,
+): number {
   if (tSec < startSec) return startSec - tSec;
   if (tSec > endSec) return tSec - endSec;
   return 0;
@@ -159,8 +167,12 @@ export function chooseEvictions(
 
   // Room must be left for the chunks that are planned but not yet here, or the store
   // fetches them and immediately blows the budget it was supposed to respect.
-  const residentKeys = new Set(resident.map((c) => chunkKey(c.file, c.chunkIndex)));
-  const incoming = keep.filter((r) => !residentKeys.has(chunkKey(r.file, r.chunkIndex))).length;
+  const residentKeys = new Set(
+    resident.map((c) => chunkKey(c.file, c.chunkIndex)),
+  );
+  const incoming = keep.filter(
+    (r) => !residentKeys.has(chunkKey(r.file, r.chunkIndex)),
+  ).length;
   const target = budgetBytes - incoming * CHUNK_BYTES;
 
   if (held <= target) return [];

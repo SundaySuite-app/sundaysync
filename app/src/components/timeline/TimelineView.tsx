@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createPortal } from "react-dom";
 import type { PlacedClip } from "../../audio/schedulePlan";
 import { getPlaybackEngine } from "../../audio/scheduler";
@@ -10,7 +18,11 @@ import {
   zoomAround,
   type TimelineView as View,
 } from "../../timeline/geometry";
-import { laneHeightFor, UNSYNCED_ROW_PX, type HopTrack } from "../../timeline/hop";
+import {
+  laneHeightFor,
+  UNSYNCED_ROW_PX,
+  type HopTrack,
+} from "../../timeline/hop";
 import { stackClips, type ClipSpan } from "../../timeline/laneLayout";
 import { compareNatural } from "../../timeline/naturalSort";
 import { getPlayheadMs, publishPlayheadMs } from "../../timeline/playhead";
@@ -275,7 +287,11 @@ export function TimelineView({
 
     const spans: ClipSpan[] = placed.map((p) => {
       const startMs = p.offset_seconds * 1000;
-      return { file: p.file, startMs, endMs: startMs + (durations[p.file] ?? 0) * 1000 };
+      return {
+        file: p.file,
+        startMs,
+        endMs: startMs + (durations[p.file] ?? 0) * 1000,
+      };
     });
     const { originMs, spanMs } = contentBounds(spans);
 
@@ -284,7 +300,11 @@ export function TimelineView({
       const device = placements.get(span.file)?.device;
       if (device === undefined) continue;
       const list = byDevice.get(device) ?? [];
-      list.push({ ...span, startMs: span.startMs - originMs, endMs: span.endMs - originMs });
+      list.push({
+        ...span,
+        startMs: span.startMs - originMs,
+        endMs: span.endMs - originMs,
+      });
       byDevice.set(device, list);
     }
 
@@ -296,7 +316,8 @@ export function TimelineView({
     // comparison an untimed card is laid out in, because the number on a pill has to be one
     // the operator can predict.
     const refused = new Map<string, Unsynced>();
-    for (const u of result.unsynced) if (!excluded.has(u.file)) refused.set(u.file, u);
+    for (const u of result.unsynced)
+      if (!excluded.has(u.file)) refused.set(u.file, u);
     const unsyncedByDevice = new Map<string, Unsynced[]>();
     for (const device of result.devices) {
       const list = device.files
@@ -354,14 +375,23 @@ export function TimelineView({
       // the whole drop, and removing it should move the picture, not just delete a box.
       excluded.size === 0
         ? manifest
-        : { ...manifest, files: manifest.files.filter((f) => !excluded.has(f.file)) },
+        : {
+            ...manifest,
+            files: manifest.files.filter((f) => !excluded.has(f.file)),
+          },
       overrides,
     );
-    const { originMs, spanMs } = contentBounds(layout.tracks.flatMap((s) => s.spans));
+    const { originMs, spanMs } = contentBounds(
+      layout.tracks.flatMap((s) => s.spans),
+    );
     const tracks = layout.tracks.map(({ device, spans }) => ({
       device,
       rows: stackClips(
-        spans.map((s) => ({ ...s, startMs: s.startMs - originMs, endMs: s.endMs - originMs })),
+        spans.map((s) => ({
+          ...s,
+          startMs: s.startMs - originMs,
+          endMs: s.endMs - originMs,
+        })),
       ),
       // Nothing has been refused yet: the pills are the RUN's answer, and before a sync
       // there is no run. What the SCAN could not read is a different list and stays where it
@@ -392,7 +422,8 @@ export function TimelineView({
       // `contentBounds` then shifted the spans by on top of it (0 in practice, since
       // `sourceSpans` already puts the earliest placed clip at zero — added rather than
       // assumed, because the ruler and the boxes must share a zero by construction).
-      originEpochMs: layout.originMs === null ? null : layout.originMs + originMs,
+      originEpochMs:
+        layout.originMs === null ? null : layout.originMs + originMs,
     };
   }, [outcome, manifest, overrides, reference, excluded]);
 
@@ -467,11 +498,16 @@ export function TimelineView({
    *  strip is part of "what the rows do not get". Never a second constant — the same
    *  `UNSYNCED_ROW_PX` `trackHeightFor` adds. */
   const unsyncedRows = useMemo(
-    () => tracks.reduce((n, { unsynced }) => n + (unsynced.length > 0 ? 1 : 0), 0),
+    () =>
+      tracks.reduce((n, { unsynced }) => n + (unsynced.length > 0 ? 1 : 0), 0),
     [tracks],
   );
   const laneHeight = useMemo(
-    () => laneHeightFor(rowCount, Math.max(0, stagePx - unsyncedRows * UNSYNCED_ROW_PX)),
+    () =>
+      laneHeightFor(
+        rowCount,
+        Math.max(0, stagePx - unsyncedRows * UNSYNCED_ROW_PX),
+      ),
     [rowCount, stagePx, unsyncedRows],
   );
 
@@ -485,7 +521,11 @@ export function TimelineView({
    * the boolean and not the list for exactly that reason.
    */
   const hopTracks = useMemo<readonly HopTrack[]>(
-    () => tracks.map(({ rows, unsynced }) => ({ rows, unsynced: unsynced.length > 0 })),
+    () =>
+      tracks.map(({ rows, unsynced }) => ({
+        rows,
+        unsynced: unsynced.length > 0,
+      })),
     [tracks],
   );
 
@@ -558,9 +598,17 @@ export function TimelineView({
         if (hop.frozen.current) return { ...v, widthPx };
         if (fittedSpan.current !== contentSpanMs) {
           fittedSpan.current = contentSpanMs;
-          return { widthPx, pxPerMs: fitPxPerMs(contentSpanMs, widthPx), scrollMs: 0 };
+          return {
+            widthPx,
+            pxPerMs: fitPxPerMs(contentSpanMs, widthPx),
+            scrollMs: 0,
+          };
         }
-        return { ...v, widthPx, scrollMs: clampS(v.scrollMs, v.pxPerMs, widthPx) };
+        return {
+          ...v,
+          widthPx,
+          scrollMs: clampS(v.scrollMs, v.pxPerMs, widthPx),
+        };
       });
     };
     measure();
@@ -592,7 +640,9 @@ export function TimelineView({
     const el = stageRef.current;
     if (!el) return;
     const measure = () => {
-      const ruler = parseFloat(getComputedStyle(el).getPropertyValue("--tl-ruler-h"));
+      const ruler = parseFloat(
+        getComputedStyle(el).getPropertyValue("--tl-ruler-h"),
+      );
       const available = el.clientHeight - (Number.isFinite(ruler) ? ruler : 0);
       setStagePx(available > 0 ? available : 0);
     };
@@ -636,9 +686,11 @@ export function TimelineView({
   // is only knowable here, and one predicate in one place is the whole point of D-070.
   const selectableFiles = useMemo(() => {
     const files = new Set<string>();
-    for (const { rows } of tracks) for (const row of rows) for (const span of row) files.add(span.file);
+    for (const { rows } of tracks)
+      for (const row of rows) for (const span of row) files.add(span.file);
     if (manifest) {
-      for (const entry of manifest.files) if (!excluded.has(entry.file)) files.add(entry.file);
+      for (const entry of manifest.files)
+        if (!excluded.has(entry.file)) files.add(entry.file);
     }
     return files;
   }, [tracks, manifest, excluded]);
@@ -660,7 +712,9 @@ export function TimelineView({
   const fps = useMemo(() => {
     if (!result) return undefined;
     const [num, den] = result.sequence.fps.split("/").map(Number);
-    return Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : undefined;
+    return Number.isFinite(num) && Number.isFinite(den) && den > 0
+      ? num / den
+      : undefined;
   }, [result]);
 
   /**
@@ -675,7 +729,10 @@ export function TimelineView({
    * (V04-U5).
    */
   const metaSentence = result
-    ? t.sequenceMeta(result.sequence.fps, formatDuration(result.sequence.duration_seconds))
+    ? t.sequenceMeta(
+        result.sequence.fps,
+        formatDuration(result.sequence.duration_seconds),
+      )
     : clipCount > 0 && legend.placed + legend.estimated === 0
       ? t.presyncMetaNoClock
       : t.presyncMeta;
@@ -707,8 +764,14 @@ export function TimelineView({
   // and in a room whose timeline fills the stage there is no row under it to put a red box in.
   // App owns the list and the two callbacks now; `excluded` is still read here, by the spans.)
 
-  const toggleMute = useCallback((id: string) => engine.toggleMute(id), [engine]);
-  const toggleSolo = useCallback((id: string) => engine.toggleSolo(id), [engine]);
+  const toggleMute = useCallback(
+    (id: string) => engine.toggleMute(id),
+    [engine],
+  );
+  const toggleSolo = useCallback(
+    (id: string) => engine.toggleSolo(id),
+    [engine],
+  );
   const showSolo = (result?.devices.length ?? 0) > 1;
 
   // Every gesture that takes the view calls `hop.cancel()` first (D-063): a hop describes
@@ -804,7 +867,11 @@ export function TimelineView({
     if (!start) return;
     setView((v) => ({
       ...v,
-      scrollMs: clampS(start.scrollMs - (e.clientX - start.x) / v.pxPerMs, v.pxPerMs, v.widthPx),
+      scrollMs: clampS(
+        start.scrollMs - (e.clientX - start.x) / v.pxPerMs,
+        v.pxPerMs,
+        v.widthPx,
+      ),
     }));
   }
 
@@ -854,7 +921,10 @@ export function TimelineView({
     // lands where the eye expects. From then on the drag behaves as if the thumb had been
     // grabbed by its middle, which is where it now is.
     grabDelta.current = bar.thumbFrac / 2;
-    setView((v) => ({ ...v, scrollMs: scrollbarFracToScrollMs(frac, v, contentSpanMs) }));
+    setView((v) => ({
+      ...v,
+      scrollMs: scrollbarFracToScrollMs(frac, v, contentSpanMs),
+    }));
   }
 
   function onScrollbarMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -910,7 +980,9 @@ export function TimelineView({
       return { ...v, scrollMs: clampS(next, v.pxPerMs, v.widthPx) };
     });
     if (
-      ["ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"].includes(e.key)
+      ["ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"].includes(
+        e.key,
+      )
     ) {
       e.preventDefault();
       // The section's own handler maps Home and the arrows to the PLAYHEAD. While the
@@ -924,10 +996,14 @@ export function TimelineView({
   // playing, moving the playhead has to rebuild the audio schedule too, and the engine is
   // the only thing that knows whether it is playing.
   const seekMs = useCallback(
-    (ms: number) => engine.seekTo(Math.min(Math.max(0, ms), contentSpanMs) / 1000),
+    (ms: number) =>
+      engine.seekTo(Math.min(Math.max(0, ms), contentSpanMs) / 1000),
     [engine, contentSpanMs],
   );
-  const seek = useCallback((x: number) => seekMs(xToMs(x, view)), [seekMs, view]);
+  const seek = useCallback(
+    (x: number) => seekMs(xToMs(x, view)),
+    [seekMs, view],
+  );
 
   // ---- Keyboard ----
   function onKeyDown(e: React.KeyboardEvent<HTMLElement>) {
@@ -1026,13 +1102,28 @@ export function TimelineView({
                   the specs that click by name both survive. */}
               <div className="track__gutter">
                 <div className="timeline__zoom">
-                  <button type="button" className="ghost" onClick={() => zoomBy(1 / BUTTON_FACTOR)} aria-label={t.zoomOut}>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => zoomBy(1 / BUTTON_FACTOR)}
+                    aria-label={t.zoomOut}
+                  >
                     −
                   </button>
-                  <button type="button" className="ghost" onClick={() => zoomBy(BUTTON_FACTOR)} aria-label={t.zoomIn}>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => zoomBy(BUTTON_FACTOR)}
+                    aria-label={t.zoomIn}
+                  >
                     +
                   </button>
-                  <button type="button" className="ghost" onClick={fit} aria-label={t.zoomFitAria}>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={fit}
+                    aria-label={t.zoomFitAria}
+                  >
                     {t.zoomFit}
                   </button>
                 </div>
@@ -1081,7 +1172,11 @@ export function TimelineView({
                 from the top by the ruler and from the left by the gutter, so it shares the
                 lane column's origin — the same origin `timeline/hop.ts` measures in.
                 Populated imperatively and only during a hop; empty the rest of the time. */}
-            <div className="timeline__ghosts" ref={ghostRef} aria-hidden="true" />
+            <div
+              className="timeline__ghosts"
+              ref={ghostRef}
+              aria-hidden="true"
+            />
 
             {/* The playhead is the transport's marker; before a sync there is nothing to
                 play and no schedule for it to point into. */}
@@ -1119,7 +1214,10 @@ export function TimelineView({
             >
               <div
                 className="timeline__thumb"
-                style={{ left: `${bar.offsetFrac * 100}%`, width: `${bar.thumbFrac * 100}%` }}
+                style={{
+                  left: `${bar.offsetFrac * 100}%`,
+                  width: `${bar.thumbFrac * 100}%`,
+                }}
               />
             </div>
           </div>
@@ -1152,7 +1250,11 @@ export function TimelineView({
                     share one sentence. In the slot it is the counts alone and the whole
                     sentence is its `title` — the four numbers ARE the claim, and 38 px does
                     not hold four clauses beside a transport and a meta line (D-083). */}
-                {legend.placed + legend.estimated + legend.ordered + legend.offSession > 0 && (
+                {legend.placed +
+                  legend.estimated +
+                  legend.ordered +
+                  legend.offSession >
+                  0 && (
                   <p className="timeline__note" title={t.presyncLegend(legend)}>
                     {t.presyncLegendShort(legend)}
                   </p>
@@ -1175,12 +1277,17 @@ export function TimelineView({
                       outsideWindowDays.map(t.presyncDay),
                     )}
                   >
-                    {t.presyncOffSession(outsideWindow.size, outsideWindowDays.map(t.presyncDay))}
+                    {t.presyncOffSession(
+                      outsideWindow.size,
+                      outsideWindowDays.map(t.presyncDay),
+                    )}
                   </p>
                 )}
               </>
             )}
-            <div className={`result__meta${result ? "" : " result__meta--short"}`}>
+            <div
+              className={`result__meta${result ? "" : " result__meta--short"}`}
+            >
               {!result && <InfoIcon />}
               <span title={metaSentence}>{metaShort}</span>
             </div>
@@ -1204,7 +1311,13 @@ export function TimelineView({
  *  (D-078), unchanged: a `<summary>` that is already a control the strip wanted anyway, a
  *  panel that OVERLAYS the room rather than taking space in it, and `usePopoverDismiss` for
  *  the two behaviours `<details>` has no opinion about. */
-function WarningsChip({ t, warnings }: { t: Strings; warnings: readonly Warning[] }) {
+function WarningsChip({
+  t,
+  warnings,
+}: {
+  t: Strings;
+  warnings: readonly Warning[];
+}) {
   const ref = useRef<HTMLDetailsElement>(null);
   usePopoverDismiss(ref);
   const title = t.warningsCount(warnings.length);

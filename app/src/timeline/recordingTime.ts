@@ -141,7 +141,9 @@ function isRealDate({ year, month, day }: CivilDate): boolean {
   if (month < 1 || month > 12 || day < 1 || day > 31) return false;
   const probe = new Date(year, month - 1, day);
   return (
-    probe.getFullYear() === year && probe.getMonth() === month - 1 && probe.getDate() === day
+    probe.getFullYear() === year &&
+    probe.getMonth() === month - 1 &&
+    probe.getDate() === day
   );
 }
 
@@ -152,8 +154,21 @@ function isRealDate({ year, month, day }: CivilDate): boolean {
  * note. Every caller of this function is holding a time somebody read off a recorder's
  * front panel, not a time in UTC.
  */
-function localMs(date: CivilDate, hours: number, minutes: number, seconds: number): number {
-  return new Date(date.year, date.month - 1, date.day, hours, minutes, seconds, 0).getTime();
+function localMs(
+  date: CivilDate,
+  hours: number,
+  minutes: number,
+  seconds: number,
+): number {
+  return new Date(
+    date.year,
+    date.month - 1,
+    date.day,
+    hours,
+    minutes,
+    seconds,
+    0,
+  ).getTime();
 }
 
 /** Maximal runs of digits in a string, with the text between them. */
@@ -165,7 +180,10 @@ function digitRuns(text: string): { digits: string; gapAfter: string }[] {
     const next = pattern.exec(text);
     out.push({
       digits: match[0],
-      gapAfter: text.slice(match.index + match[0].length, next?.index ?? text.length),
+      gapAfter: text.slice(
+        match.index + match[0].length,
+        next?.index ?? text.length,
+      ),
     });
     match = next;
   }
@@ -188,7 +206,10 @@ function digitRuns(text: string): { digits: string; gapAfter: string }[] {
  * has none — in which case there is nothing to disambiguate against and the measured
  * default stands.
  */
-function readSixDigitDate(token: string, referenceDay: number | null): CivilDate | null {
+function readSixDigitDate(
+  token: string,
+  referenceDay: number | null,
+): CivilDate | null {
   const n = (from: number) => Number(token.slice(from, from + 2));
   const yymmdd: CivilDate = { year: 2000 + n(0), month: n(2), day: n(4) };
   const ddmmyy: CivilDate = { year: 2000 + n(4), month: n(2), day: n(0) };
@@ -197,7 +218,8 @@ function readSixDigitDate(token: string, referenceDay: number | null): CivilDate
   if (!yyOk) return ddOk ? ddmmyy : null;
   if (!ddOk) return yymmdd;
   if (referenceDay === null) return yymmdd;
-  const distance = (d: CivilDate) => Math.abs(localMs(d, 0, 0, 0) - referenceDay);
+  const distance = (d: CivilDate) =>
+    Math.abs(localMs(d, 0, 0, 0) - referenceDay);
   // Ties keep the measured reading — the two candidates are the same day, or equally far
   // from it, and there is no evidence to overturn the default with.
   return distance(ddmmyy) < distance(yymmdd) ? ddmmyy : yymmdd;
@@ -214,7 +236,10 @@ function readEightDigitDate(token: string): CivilDate | null {
 }
 
 /** A date token standing alone in one path segment, if there is one. */
-function dateInSegment(segment: string, referenceDay: number | null): CivilDate | null {
+function dateInSegment(
+  segment: string,
+  referenceDay: number | null,
+): CivilDate | null {
   for (const { digits } of digitRuns(segment)) {
     if (digits.length === 8) {
       const eight = readEightDigitDate(digits);
@@ -242,7 +267,10 @@ function pathSegments(path: string): string[] {
  * eight digits. The separator must be exactly one `_` or `-`; anything else is two
  * unrelated numbers that happen to be neighbours.
  */
-function filenameStamp(basename: string, referenceDay: number | null): number | null {
+function filenameStamp(
+  basename: string,
+  referenceDay: number | null,
+): number | null {
   const runs = digitRuns(basename);
   for (let i = 0; i + 1 < runs.length; i++) {
     const left = runs[i];
@@ -312,7 +340,9 @@ interface Rung {
  * wrote nothing has told us nothing, and D-068's sequential layout is the caller's answer
  * to that, not this module's.
  */
-export function recordingTimes(files: readonly FileEntry[]): Map<string, RecordingTime> {
+export function recordingTimes(
+  files: readonly FileEntry[],
+): Map<string, RecordingTime> {
   const out = new Map<string, RecordingTime>();
   const rungs: Rung[] = [];
 
@@ -329,7 +359,12 @@ export function recordingTimes(files: readonly FileEntry[]): Map<string, Recordi
     if (ms === null) continue;
     containerStamps.push(ms);
     containerFiles.add(entry.file);
-    rungs.push({ file: entry.file, device: entry.device, tier: "container", ms });
+    rungs.push({
+      file: entry.file,
+      device: entry.device,
+      tier: "container",
+      ms,
+    });
   }
 
   /** Local midnight of the median container stamp — the drop's "session day". */
@@ -339,7 +374,8 @@ export function recordingTimes(files: readonly FileEntry[]): Map<string, Recordi
   for (const entry of files) {
     if (containerFiles.has(entry.file)) continue;
     const rung = lowerRung(entry, referenceDay);
-    if (rung !== null) rungs.push({ file: entry.file, device: entry.device, ...rung });
+    if (rung !== null)
+      rungs.push({ file: entry.file, device: entry.device, ...rung });
   }
 
   // ---- Midnight rollover, per device, in filename order --------------------------------
@@ -348,7 +384,8 @@ export function recordingTimes(files: readonly FileEntry[]): Map<string, Recordi
   // ---- The session gate, over the LADDER's output rather than over `creation_time` ------
   const admitted = admissible(rungs);
 
-  for (const entry of files) out.set(entry.file, { startMs: null, source: "none" });
+  for (const entry of files)
+    out.set(entry.file, { startMs: null, source: "none" });
   for (const rung of rungs) {
     out.set(
       rung.file,
@@ -401,7 +438,9 @@ function lowerRung(
   // confident wrong answer is worse here than no answer at all.
   const modified = containerMs(entry.modified_time); // absolute UTC, written by the engine
   if (modified !== null) {
-    const duration = Number.isFinite(entry.duration_seconds) ? entry.duration_seconds : 0;
+    const duration = Number.isFinite(entry.duration_seconds)
+      ? entry.duration_seconds
+      : 0;
     return { tier: "modified", ms: modified - Math.max(0, duration) * 1000 };
   }
 
@@ -433,7 +472,11 @@ function bwfDate(
   }
   if (referenceDay !== null) {
     const day = new Date(referenceDay);
-    return { year: day.getFullYear(), month: day.getMonth() + 1, day: day.getDate() };
+    return {
+      year: day.getFullYear(),
+      month: day.getMonth() + 1,
+      day: day.getDate(),
+    };
   }
   return null;
 }
@@ -475,7 +518,10 @@ function applyMidnightRollover(rungs: Rung[]): void {
     let previous: number | null = null;
     for (const rung of list) {
       const raw = rung.ms;
-      if (previous !== null && raw + offset < previous - ROLLOVER_THRESHOLD_MS) {
+      if (
+        previous !== null &&
+        raw + offset < previous - ROLLOVER_THRESHOLD_MS
+      ) {
         offset += DAY_MS;
       }
       rung.ms = raw + offset;

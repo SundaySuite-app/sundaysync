@@ -39,7 +39,8 @@ const META = { totalSamples: 12_000, levels: [{ binSamples: 120, bins: 100 }] };
  * request); WHEN the invoke happens is what the queue deliberately changed.
  */
 async function drain(turns = 4): Promise<void> {
-  for (let i = 0; i < turns; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let i = 0; i < turns; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 beforeEach(() => {
@@ -81,7 +82,9 @@ describe("fetchWaveformMeta", () => {
 
   it("does not cache a rejection — a later call retries against the backend", async () => {
     invokeMock.mockRejectedValueOnce("cache_missing:" + FILE_A);
-    await expect(fetchWaveformMeta(FILE_A)).rejects.toBe("cache_missing:" + FILE_A);
+    await expect(fetchWaveformMeta(FILE_A)).rejects.toBe(
+      "cache_missing:" + FILE_A,
+    );
 
     invokeMock.mockResolvedValueOnce(META);
     await expect(fetchWaveformMeta(FILE_A)).resolves.toEqual(META);
@@ -246,7 +249,10 @@ describe("the meta queue", () => {
   }
 
   function files(count: number): string[] {
-    return Array.from({ length: count }, (_, i) => `/nas/cam/C${String(i).padStart(4, "0")}.MP4`);
+    return Array.from(
+      { length: count },
+      (_, i) => `/nas/cam/C${String(i).padStart(4, "0")}.MP4`,
+    );
   }
 
   it("issues at most META_CONCURRENCY reads at once, however many clips ask", async () => {
@@ -263,7 +269,9 @@ describe("the meta queue", () => {
 
   it("lets the next request through as each one settles, so the queue really drains", async () => {
     const settle: ((value: unknown) => void)[] = [];
-    invokeMock.mockImplementation(() => new Promise((resolve) => settle.push(resolve)));
+    invokeMock.mockImplementation(
+      () => new Promise((resolve) => settle.push(resolve)),
+    );
 
     const all = files(10).map((file) => fetchWaveformMeta(file));
     await drain();
@@ -280,9 +288,13 @@ describe("the meta queue", () => {
 
   it("a rejection releases its slot too — one unreadable file must not stall the rest", async () => {
     invokeMock.mockImplementation((_cmd: string, args: { file: string }) =>
-      args.file.endsWith("C0000.MP4") ? Promise.reject("cache_missing:" + args.file) : Promise.resolve(META),
+      args.file.endsWith("C0000.MP4")
+        ? Promise.reject("cache_missing:" + args.file)
+        : Promise.resolve(META),
     );
-    const all = files(20).map((file) => fetchWaveformMeta(file).catch(() => null));
+    const all = files(20).map((file) =>
+      fetchWaveformMeta(file).catch(() => null),
+    );
     await Promise.all(all);
     expect(invokeMock).toHaveBeenCalledTimes(20);
     expect(metaQueueStateForTest()).toEqual({ queued: 0, inFlight: 0 });
@@ -294,13 +306,20 @@ describe("the meta queue", () => {
     for (const file of queued) void fetchWaveformMeta(file).catch(() => {});
     // Everything past the cap is still in line — the virtualization window recycles and
     // those canvases go away before their turn comes.
-    for (const file of queued.slice(META_CONCURRENCY)) releaseWaveformMeta(file);
+    for (const file of queued.slice(META_CONCURRENCY))
+      releaseWaveformMeta(file);
     await drain();
 
     expect(invokeMock).toHaveBeenCalledTimes(META_CONCURRENCY);
-    expect(metaQueueStateForTest()).toEqual({ queued: 0, inFlight: META_CONCURRENCY });
+    expect(metaQueueStateForTest()).toEqual({
+      queued: 0,
+      inFlight: META_CONCURRENCY,
+    });
     for (const file of queued.slice(META_CONCURRENCY)) {
-      expect(invokeMock).not.toHaveBeenCalledWith("waveform_meta", { file, cacheDir: null });
+      expect(invokeMock).not.toHaveBeenCalledWith("waveform_meta", {
+        file,
+        cacheDir: null,
+      });
     }
   });
 
@@ -385,7 +404,10 @@ describe("classifyWaveformError", () => {
   });
 
   it("maps the other maintenance-busy variant the same way", () => {
-    const err = classifyWaveformError("busy: cache maintenance in progress", nb);
+    const err = classifyWaveformError(
+      "busy: cache maintenance in progress",
+      nb,
+    );
     expect(err.kind).toBe("busy");
   });
 

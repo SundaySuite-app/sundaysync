@@ -120,8 +120,14 @@ export interface ClipTransport {
  * seconds. Skipping this would leave both ends half a drift out: for a 500 ppm, 1000 s
  * clip that is 250 ms at the start, which is not a subtlety, it is an echo.
  */
-export function clipTransport(clip: PlacedClip, opts: ScheduleOptions): ClipTransport {
-  const sourceSamples = Math.max(0, Math.round(clip.durationSec * ANALYSIS_RATE));
+export function clipTransport(
+  clip: PlacedClip,
+  opts: ScheduleOptions,
+): ClipTransport {
+  const sourceSamples = Math.max(
+    0,
+    Math.round(clip.durationSec * ANALYSIS_RATE),
+  );
   const ppm = clip.driftPpm;
   const endErrorMs = clip.projectedEndErrorMs;
 
@@ -302,7 +308,10 @@ export function computeSchedule(
  * *the part that has already passed* and start the remainder at its correct sample.
  * Returns `null` when the whole chunk is behind us.
  */
-export function catchUp(entry: ScheduledSource, lateSec: number): ScheduledSource | null {
+export function catchUp(
+  entry: ScheduledSource,
+  lateSec: number,
+): ScheduledSource | null {
   if (lateSec <= 0) return entry;
   const skipped = lateSec * entry.rate; // source seconds consumed while we waited
   const sourceDurationSec = entry.sourceDurationSec - skipped;
@@ -316,7 +325,10 @@ export function catchUp(entry: ScheduledSource, lateSec: number): ScheduledSourc
 }
 
 /** The timeline length playback should stop at: the last clip's end. */
-export function timelineDurationSec(clips: PlacedClip[], opts: ScheduleOptions): number {
+export function timelineDurationSec(
+  clips: PlacedClip[],
+  opts: ScheduleOptions,
+): number {
   let end = 0;
   for (const clip of clips) {
     const t = clipTransport(clip, opts);

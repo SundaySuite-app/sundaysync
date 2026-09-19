@@ -30,7 +30,9 @@ async function reachSyncing(page: import("@playwright/test").Page) {
     settings: SETTLED_SETTINGS,
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
-  await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: en.sourcesTitle }),
+  ).toBeVisible();
   await page.getByRole("button", { name: en.syncButton }).click();
   await waitForPending(page, "run_sync");
 }
@@ -45,18 +47,30 @@ test.describe("sync progress", () => {
     await expect(page.locator(".progress__label")).toHaveText(en.syncing);
     await expect(page.locator(".progress__fill--indeterminate")).toBeVisible();
 
-    await emit(page, "sync:progress", { stage: "Correlating", completed: 2, total: 5 });
+    await emit(page, "sync:progress", {
+      stage: "Correlating",
+      completed: 2,
+      total: 5,
+    });
 
-    await expect(page.locator(".progress__label")).toContainText(stageLabel(en, "Correlating"));
+    await expect(page.locator(".progress__label")).toContainText(
+      stageLabel(en, "Correlating"),
+    );
     await expect(page.locator(".progress__label")).toContainText("2/5");
     const bar = page.getByRole("progressbar");
     await expect(bar).toHaveAttribute("aria-valuenow", "2");
     await expect(bar).toHaveAttribute("aria-valuemax", "5");
   });
 
-  test("resolving the pending sync lands on the result view", async ({ page }) => {
+  test("resolving the pending sync lands on the result view", async ({
+    page,
+  }) => {
     await reachSyncing(page);
-    await emit(page, "sync:progress", { stage: "Placing", completed: 5, total: 5 });
+    await emit(page, "sync:progress", {
+      stage: "Placing",
+      completed: 5,
+      total: 5,
+    });
     await resolveControlled(page, "run_sync", syncOutcome());
 
     // The result view specifically: since V04-U3 (D-061) the timeline and its `.clip`
@@ -80,7 +94,9 @@ test.describe("cancel", () => {
     const cancelBtn = page.getByRole("button", { name: en.cancel });
     await cancelBtn.click();
 
-    await expect(page.getByRole("button", { name: en.cancelling })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: en.cancelling }),
+    ).toBeDisabled();
   });
 
   test("a cancelled run surfaces as a NOTICE, never the red error banner (D-030)", async ({
@@ -104,8 +120,12 @@ test.describe("cancel", () => {
 
     // Cancel is recoverable — the operator is back on the sources view, sync button
     // reads its normal label again, not stuck mid-run.
-    await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
-    await expect(page.getByRole("button", { name: en.syncButton })).toBeEnabled();
+    await expect(
+      page.getByRole("region", { name: en.sourcesTitle }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.syncButton }),
+    ).toBeEnabled();
   });
 
   test("a genuine engine failure (not a cancel) surfaces as a red error banner", async ({
@@ -114,7 +134,11 @@ test.describe("cancel", () => {
     await reachSyncing(page);
     // The engine's stable Display prefix for a missing/broken ffmpeg — errors.ts maps
     // it to the (very different, very much NOT a notice) sidecar error copy.
-    await rejectControlled(page, "run_sync", "ffmpeg sidecar unavailable: exit status 1");
+    await rejectControlled(
+      page,
+      "run_sync",
+      "ffmpeg sidecar unavailable: exit status 1",
+    );
 
     const banner = page.locator(".banner");
     await expect(banner).toHaveClass(/banner--error/);

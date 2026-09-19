@@ -91,7 +91,12 @@ export function Dialog({
         tabIndex={-1}
       >
         {dismissable && (
-          <button type="button" className="iconbtn dialog__close" onClick={onClose} aria-label={closeLabel}>
+          <button
+            type="button"
+            className="iconbtn dialog__close"
+            onClick={onClose}
+            aria-label={closeLabel}
+          >
             ✕
           </button>
         )}

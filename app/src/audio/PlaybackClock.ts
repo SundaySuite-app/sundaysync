@@ -158,7 +158,8 @@ export class PlaybackClock {
       return;
     }
     const stalled = this.ctx.currentTime - this.stallStartCtxTime;
-    if (stalled > 0 && this.state === "playing") this.playStartCtxTime += stalled;
+    if (stalled > 0 && this.state === "playing")
+      this.playStartCtxTime += stalled;
     this.stallStartCtxTime = null;
   }
 

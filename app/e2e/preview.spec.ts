@@ -71,36 +71,56 @@ function preview(page: Page) {
 }
 
 test.describe("the preview panel", () => {
-  test("is on screen before anything is selected, and says what to do", async ({ page }) => {
+  test("is on screen before anything is selected, and says what to do", async ({
+    page,
+  }) => {
     await reachSources(page);
     await expect(preview(page)).toBeVisible();
     // V06-G3 (D-092 ⑥): the empty state is the filled state with the facts taken out — the
     // column's own label, the same 268×151 frame the still uses (dashed), the sentence, and
     // one line about what will be there. Asserted as its parts rather than as the panel's
     // whole text, which is now four elements rather than one.
-    await expect(preview(page).locator(".preview__label")).toHaveText(en.previewSection);
-    await expect(preview(page).locator(".preview__emptyline")).toHaveText(en.previewEmpty);
-    await expect(preview(page).locator(".preview__emptyhint")).toHaveText(en.previewEmptyHint);
+    await expect(preview(page).locator(".preview__label")).toHaveText(
+      en.previewSection,
+    );
+    await expect(preview(page).locator(".preview__emptyline")).toHaveText(
+      en.previewEmpty,
+    );
+    await expect(preview(page).locator(".preview__emptyhint")).toHaveText(
+      en.previewEmptyHint,
+    );
     await expect(preview(page).locator(".preview__frame--empty")).toBeVisible();
   });
 
-  test("the empty frame is the same box the still lands in", async ({ page }) => {
+  test("the empty frame is the same box the still lands in", async ({
+    page,
+  }) => {
     // The whole point of giving the empty state a frame (D-092 ⑥): marking a clip must change
     // what is IN the boxes, never where they are. A column that re-laid itself out on
     // selection is D-074's promise broken in the one place it was never measured.
     await reachSources(page);
-    const empty = (await preview(page).locator(".preview__frame").boundingBox())!;
-    const labelBefore = (await preview(page).locator(".preview__label").boundingBox())!;
+    const empty = (await preview(page)
+      .locator(".preview__frame")
+      .boundingBox())!;
+    const labelBefore = (await preview(page)
+      .locator(".preview__label")
+      .boundingBox())!;
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
 
-    const filled = (await preview(page).locator(".preview__frame").boundingBox())!;
+    const filled = (await preview(page)
+      .locator(".preview__frame")
+      .boundingBox())!;
     expect(filled.x).toBeCloseTo(empty.x, 0);
     expect(filled.y).toBeCloseTo(empty.y, 0);
     expect(filled.width).toBeCloseTo(empty.width, 0);
     expect(filled.height).toBeCloseTo(empty.height, 0);
-    const labelAfter = (await preview(page).locator(".preview__label").boundingBox())!;
+    const labelAfter = (await preview(page)
+      .locator(".preview__label")
+      .boundingBox())!;
     expect(labelAfter.y).toBeCloseTo(labelBefore.y, 0);
   });
 
@@ -112,20 +132,33 @@ test.describe("the preview panel", () => {
 
     // The file half comes from the scan manifest, which is already in hand — no sync
     // required, and no second IPC to fetch it.
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
-    await expect(preview(page).getByText(en.previewVideoStream("h264", 1920, 1080, "25/1"))).toBeVisible();
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
+    await expect(
+      preview(page).getByText(
+        en.previewVideoStream("h264", 1920, 1080, "25/1"),
+      ),
+    ).toBeVisible();
     await expect(
       preview(page).getByText(en.previewAudioStream("aac", 48000, 2)),
     ).toBeVisible();
     // The picture arrived: a real frame, not the "no picture" copy.
     await expect(preview(page).locator(".preview__canvas")).toBeVisible();
-    await expect(preview(page).locator(".preview__frame")).toHaveAttribute("data-frame", "image");
+    await expect(preview(page).locator(".preview__frame")).toHaveAttribute(
+      "data-frame",
+      "image",
+    );
 
     // …and NOT one word of sync detail, because the engine has not said anything yet.
     // Claiming a position, a confidence or a PSR here would be inventing an answer.
     await expect(preview(page).getByText(en.directMatch)).toHaveCount(0);
-    await expect(preview(page).getByText(en.offsetLabel, { exact: true })).toHaveCount(0);
-    await expect(preview(page).getByText(en.confidence, { exact: true })).toHaveCount(0);
+    await expect(
+      preview(page).getByText(en.offsetLabel, { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      preview(page).getByText(en.confidence, { exact: true }),
+    ).toHaveCount(0);
   });
 
   test("the file's reconstructed start is shown with the rung it came from (D-067)", async ({
@@ -136,7 +169,9 @@ test.describe("the preview panel", () => {
     // Camera A carries a real container `creation_time` — the top rung, a measurement, and
     // therefore NOT dressed up as an estimate.
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(preview(page).getByText(en.presyncSourceModified)).toHaveCount(0);
+    await expect(preview(page).getByText(en.presyncSourceModified)).toHaveCount(
+      0,
+    );
     await expect(preview(page).getByText(en.presyncSourceNone)).toHaveCount(0);
 
     // The WAV carries nothing at all — and the panel reuses W3's own sentence for that
@@ -150,8 +185,14 @@ test.describe("the preview panel", () => {
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
 
     // File facts…
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
-    await expect(preview(page).getByText(en.previewVideoStream("h264", 1920, 1080, "25/1"))).toBeVisible();
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
+    await expect(
+      preview(page).getByText(
+        en.previewVideoStream("h264", 1920, 1080, "25/1"),
+      ),
+    ).toBeVisible();
     // …and the engine's answer, in ClipDetail's own words.
     await expect(preview(page).getByText("4.200 s")).toBeVisible();
     await expect(preview(page).getByText(en.directMatch)).toBeVisible();
@@ -160,40 +201,57 @@ test.describe("the preview panel", () => {
     ).toBeVisible();
   });
 
-  test("a file with no picture in it says so, calmly — it is not an error", async ({ page }) => {
+  test("a file with no picture in it says so, calmly — it is not an error", async ({
+    page,
+  }) => {
     // D-069, measured: `.WAV` and `.HEIC` exit 234 with zero bytes, and 32 of the owner's
     // 386 files are in that class. A red banner on one file in twelve would be the app
     // lying about its own state.
     await reachSources(page, videoFrameNoPicture());
     await page.locator(`.clip[data-file="${WAV}"]`).click();
 
-    await expect(preview(page).locator(".preview__frame")).toHaveAttribute("data-frame", "none");
+    await expect(preview(page).locator(".preview__frame")).toHaveAttribute(
+      "data-frame",
+      "none",
+    );
     await expect(preview(page).getByText(en.previewNoImage)).toBeVisible();
     await expect(preview(page).locator("canvas")).toHaveCount(0);
     // The rest of the panel is unaffected: the file facts are still the point.
-    await expect(preview(page).locator(".preview__name")).toHaveText("ZOOM0001.WAV");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "ZOOM0001.WAV",
+    );
     // Nothing anywhere on screen calls this a failure.
     await expect(page.locator(".banner--error")).toHaveCount(0);
   });
 
-  test("while the frame is being fetched the panel says so", async ({ page }) => {
+  test("while the frame is being fetched the panel says so", async ({
+    page,
+  }) => {
     // Not a theoretical state: measured at 4.4 s for an 816 MB DJI file over SMB (D-069).
-    await reachSources(page, { video_frame: controlled("video_frame"), ...cancelThumbnailSpy() });
+    await reachSources(page, {
+      video_frame: controlled("video_frame"),
+      ...cancelThumbnailSpy(),
+    });
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
 
     await waitForPending(page, "video_frame");
-    await expect(preview(page).locator(".preview__frame")).toHaveAttribute("data-frame", "loading");
+    await expect(preview(page).locator(".preview__frame")).toHaveAttribute(
+      "data-frame",
+      "loading",
+    );
     await expect(preview(page).getByText(en.previewLoading)).toBeVisible();
     // The facts do not wait for the picture — they were in the manifest all along.
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
 
     // An empty answer settles it into the calm "no picture" state, never into an error.
     // Resolved from inside the page: an `ArrayBuffer` does not survive the Node→page
     // argument boundary, and `resolveControlled` would hand the app a `{}`.
     await page.evaluate(() =>
-      (window as unknown as Record<string, any>).__SUNDAYSYNC_PENDING__.video_frame.resolve(
-        new ArrayBuffer(0),
-      ),
+      (
+        window as unknown as Record<string, any>
+      ).__SUNDAYSYNC_PENDING__.video_frame.resolve(new ArrayBuffer(0)),
     );
     await expect(preview(page).getByText(en.previewNoImage)).toBeVisible();
   });
@@ -205,23 +263,36 @@ test.describe("the preview panel", () => {
     // holds one of the shell's two preview permits and a running ffmpeg until it finishes on
     // its own — seconds of it, over a share, in front of the frame the operator is actually
     // waiting for. `cancel_thumbnail` is the only thing that ends it.
-    await reachSources(page, { video_frame: controlled("video_frame"), ...cancelThumbnailSpy() });
+    await reachSources(page, {
+      video_frame: controlled("video_frame"),
+      ...cancelThumbnailSpy(),
+    });
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
     await waitForPending(page, "video_frame");
     expect(
-      await page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_CANCEL_THUMBNAIL__),
+      await page.evaluate(
+        () =>
+          (window as unknown as Record<string, unknown>)
+            .__E2E_CANCEL_THUMBNAIL__,
+      ),
     ).toBeUndefined();
 
     await page.locator(`.clip[data-file="${CAM_B}"]`).click();
     await expect
       .poll(() =>
-        page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_CANCEL_THUMBNAIL__),
+        page.evaluate(
+          () =>
+            (window as unknown as Record<string, unknown>)
+              .__E2E_CANCEL_THUMBNAIL__,
+        ),
       )
       .toBeGreaterThanOrEqual(1);
   });
 
-  test("a clip whose frame is already known costs no second ffmpeg spawn", async ({ page }) => {
+  test("a clip whose frame is already known costs no second ffmpeg spawn", async ({
+    page,
+  }) => {
     // The memo is the whole reason `frameStore` exists: a card of 386 clips clicked through
     // twice must not decode 772 frames.
     await reachSources(page, {
@@ -235,14 +306,22 @@ test.describe("the preview panel", () => {
     });
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
     await page.locator(`.clip[data-file="${CAM_B}"]`).click();
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0002.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0002.MP4",
+    );
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
 
     expect(
-      await page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_FRAMES__),
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).__E2E_FRAMES__,
+      ),
     ).toEqual([CAM_A, CAM_B]);
   });
 
@@ -264,14 +343,23 @@ test.describe("the preview panel", () => {
     await reachSources(page);
 
     const columnBefore = (await page.locator(".inspector").boundingBox())!;
-    const timelineBefore = (await page.locator(".timeline__frame").boundingBox())!;
-    const gutterBefore = (await page.locator(".track__gutter").first().boundingBox())!;
+    const timelineBefore = (await page
+      .locator(".timeline__frame")
+      .boundingBox())!;
+    const gutterBefore = (await page
+      .locator(".track__gutter")
+      .first()
+      .boundingBox())!;
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
 
     // The thing the next click depends on: the timeline's own box, to the pixel.
-    const timelineAfter = (await page.locator(".timeline__frame").boundingBox())!;
+    const timelineAfter = (await page
+      .locator(".timeline__frame")
+      .boundingBox())!;
     expect(timelineAfter.y).toBeCloseTo(timelineBefore.y, 0);
     expect(timelineAfter.x).toBeCloseTo(timelineBefore.x, 0);
     expect(timelineAfter.height).toBeCloseTo(timelineBefore.height, 0);
@@ -281,7 +369,10 @@ test.describe("the preview panel", () => {
     const columnAfter = (await page.locator(".inspector").boundingBox())!;
     expect(columnAfter.x).toBeCloseTo(columnBefore.x, 0);
     expect(columnAfter.width).toBeCloseTo(columnBefore.width, 0);
-    const gutterAfter = (await page.locator(".track__gutter").first().boundingBox())!;
+    const gutterAfter = (await page
+      .locator(".track__gutter")
+      .first()
+      .boundingBox())!;
     expect(gutterAfter.x).toBeCloseTo(gutterBefore.x, 0);
     expect(gutterAfter.width).toBeCloseTo(gutterBefore.width, 0);
   });
@@ -294,15 +385,22 @@ test.describe("the preview panel", () => {
     // Here it is D-062's per-file removal.
     await reachSources(page);
     await page.locator(`.clip[data-file="${CAM_B}"]`).click();
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0002.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0002.MP4",
+    );
 
     // V06-R2a (D-077 #11): the ✕ is the inspector's own now — which makes this scenario more
     // direct rather than less, because the control that removes the file is in the very panel
     // whose emptying is the claim.
-    await page.locator(".inspector").getByLabel(`${en.removeFile}: C0002.MP4`).click();
+    await page
+      .locator(".inspector")
+      .getByLabel(`${en.removeFile}: C0002.MP4`)
+      .click();
 
     await expect(page.locator(`.clip[data-file="${CAM_B}"]`)).toHaveCount(0);
-    await expect(preview(page).locator(".preview__emptyline")).toHaveText(en.previewEmpty);
+    await expect(preview(page).locator(".preview__emptyline")).toHaveText(
+      en.previewEmpty,
+    );
     await expect(preview(page).locator(".preview__name")).toHaveCount(0);
   });
   // ── V05-W5 sweep: the shapes adjacent to the StrictMode bug W4b fixed ────────────────
@@ -312,7 +410,9 @@ test.describe("the preview panel", () => {
   // actually does — a new grab cancels the previous token, and a cancelled run comes back
   // as `cancelled`.
 
-  test("clicking away and straight back shows the picture, not «no image»", async ({ page }) => {
+  test("clicking away and straight back shows the picture, not «no image»", async ({
+    page,
+  }) => {
     // The bug this found. The shell had already killed A's grab when B started; the STORE
     // still handed A's dead promise to the next caller, whose `null` the panel rendered as
     // «ingen bilde» — permanently, because the effect is keyed on the file and never runs
@@ -324,7 +424,9 @@ test.describe("the preview panel", () => {
 
     await page.locator(`.clip[data-file="${CAM_B}"]`).click();
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
 
     // The grab that is outstanding now is A's own second one — settle it and the picture
     // arrives.
@@ -335,7 +437,9 @@ test.describe("the preview panel", () => {
     expect(await frameCalls(page)).toEqual([CAM_A, CAM_B, CAM_A]);
   });
 
-  test("selecting the same clip twice does not restart its grab", async ({ page }) => {
+  test("selecting the same clip twice does not restart its grab", async ({
+    page,
+  }) => {
     await reachSources(page, videoFrameCancellable());
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
@@ -345,7 +449,9 @@ test.describe("the preview panel", () => {
     expect(await frameCalls(page)).toEqual([CAM_A]);
   });
 
-  test("a settled picture survives a trip through two other clips", async ({ page }) => {
+  test("a settled picture survives a trip through two other clips", async ({
+    page,
+  }) => {
     await reachSources(page, videoFrameCancellable());
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
     await resolveFrame(page);
@@ -359,10 +465,14 @@ test.describe("the preview panel", () => {
     // read synchronously (`hasFrame`/`peekFrame`), so no second spawn and no flicker.
     await expect(preview(page).locator(".preview__canvas")).toBeVisible();
     await expect(preview(page).getByText(en.previewLoading)).toHaveCount(0);
-    expect((await frameCalls(page)).filter((f) => f === CAM_A)).toEqual([CAM_A]);
+    expect((await frameCalls(page)).filter((f) => f === CAM_A)).toEqual([
+      CAM_A,
+    ]);
   });
 
-  test("the selection survives a sync and gains the engine's half", async ({ page }) => {
+  test("the selection survives a sync and gains the engine's half", async ({
+    page,
+  }) => {
     // D-070's lifecycle, across the phase boundary that used to destroy the selection
     // entirely (the dialog was result-only). The marked file is the same file before and
     // after; what changes is that there is now something to say about it.
@@ -377,17 +487,23 @@ test.describe("the preview panel", () => {
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
     await expect(preview(page).getByText(en.offsetLabel)).toHaveCount(0);
 
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForResult(page);
 
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
     await expect(preview(page).getByText(en.offsetLabel)).toBeVisible();
   });
 
-  test("a selection made DURING a sync can be read but not acted on", async ({ page }) => {
+  test("a selection made DURING a sync can be read but not acted on", async ({
+    page,
+  }) => {
     // Looking is allowed in every phase (D-061); the reassign `<select>` is a decision, and
     // mid-run there is nothing it could change about the run in flight.
     await boot(page, {
@@ -404,7 +520,9 @@ test.describe("the preview panel", () => {
     await waitForPending(page, "run_sync");
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
     await expect(preview(page).locator("select")).toBeDisabled();
 
     await resolveControlled(page, "run_sync", syncOutcome());
@@ -438,8 +556,12 @@ test.describe("the preview panel", () => {
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForPending(page, "run_sync");
     await rejectControlled(page, "run_sync", "cancelled");
-    await expect(page.getByRole("button", { name: en.exportButton })).toHaveCount(0);
-    await expect(preview(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toHaveCount(0);
+    await expect(preview(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
     await expect(preview(page).getByText(en.offsetLabel)).toHaveCount(0);
   });
 });

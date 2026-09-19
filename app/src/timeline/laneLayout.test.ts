@@ -26,7 +26,10 @@ describe("stackClips", () => {
 
   it("does not stack clips that only touch at an endpoint", () => {
     // b starts exactly when a ends — not an overlap, so it shares a's row.
-    const rows = stackClips([span("a.mov", 0, 1000), span("b.mov", 1000, 2000)]);
+    const rows = stackClips([
+      span("a.mov", 0, 1000),
+      span("b.mov", 1000, 2000),
+    ]);
     expect(rows.length).toBe(1);
     expect(rows[0].map((c) => c.file)).toEqual(["a.mov", "b.mov"]);
   });
@@ -59,7 +62,10 @@ describe("stackClips", () => {
   });
 
   it("sorts input by startMs regardless of input order", () => {
-    const rows = stackClips([span("b.mov", 1000, 2000), span("a.mov", 0, 1000)]);
+    const rows = stackClips([
+      span("b.mov", 1000, 2000),
+      span("a.mov", 0, 1000),
+    ]);
     expect(rows).toEqual([[span("a.mov", 0, 1000), span("b.mov", 1000, 2000)]]);
   });
 
@@ -67,4 +73,3 @@ describe("stackClips", () => {
     expect(stackClips([])).toEqual([]);
   });
 });
-

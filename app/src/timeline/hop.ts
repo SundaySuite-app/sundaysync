@@ -225,7 +225,9 @@ export interface ClipDrawing {
  * which is the bug.
  */
 export function clipDrawing(spanPx: number, roomPx: number): ClipDrawing {
-  const room = Number.isFinite(roomPx) ? Math.max(0, roomPx) : Number.POSITIVE_INFINITY;
+  const room = Number.isFinite(roomPx)
+    ? Math.max(0, roomPx)
+    : Number.POSITIVE_INFINITY;
   // A NaN span (geometry that has not settled) must not smuggle a width through a `Math.min`.
   const natural = Number.isFinite(spanPx) && spanPx > 0 ? spanPx : 0;
   const drawn = Math.min(natural, room);
@@ -234,7 +236,8 @@ export function clipDrawing(spanPx: number, roomPx: number): ClipDrawing {
   // from 6 px to 2 px on the way out is deliberate and is the honest reading: at five pixels
   // a clip's width no longer tells the operator anything about how long it is, and a row of
   // even ticks is countable where a row of ragged five-pixel stubs is not.
-  if (drawn < CLIP_DRAWING_MIN_PX) return { width: Math.min(HAIRLINE_WIDTH_PX, room), hairline: true };
+  if (drawn < CLIP_DRAWING_MIN_PX)
+    return { width: Math.min(HAIRLINE_WIDTH_PX, room), hairline: true };
   return { width: drawn, hairline: false };
 }
 
@@ -290,7 +293,11 @@ export function clipBoxes(
   for (const track of tracks) {
     for (let row = 0; row < track.rows.length; row++) {
       const y =
-        trackTop + TRACK_BORDER_PX + row * laneHeightPx + LANE_BORDER_PX + CLIP_INSET_PX;
+        trackTop +
+        TRACK_BORDER_PX +
+        row * laneHeightPx +
+        LANE_BORDER_PX +
+        CLIP_INSET_PX;
       const spans = track.rows[row];
       for (let i = 0; i < spans.length; i++) {
         const span = spans[i];
@@ -308,7 +315,11 @@ export function clipBoxes(
     // one of that function's exactly two callers, and the other is the component that writes
     // the number into the DOM. A device with unplaced files carries one extra strip at the
     // bottom of its track, and every track below it starts that much further down.
-    trackTop += trackHeightFor(track.rows.length, track.unsynced === true, laneHeightPx);
+    trackTop += trackHeightFor(
+      track.rows.length,
+      track.unsynced === true,
+      laneHeightPx,
+    );
   }
   return boxes;
 }
@@ -364,10 +375,12 @@ export function hopExits(
   const before = clipBoxes(oldTracks, oldView, oldLaneHeightPx);
   const survivors = new Set<string>();
   for (const track of newTracks) {
-    for (const row of track.rows) for (const span of row) survivors.add(span.file);
+    for (const row of track.rows)
+      for (const span of row) survivors.add(span.file);
   }
   const exits = new Map<string, ClipBox>();
-  for (const [file, box] of before) if (!survivors.has(file)) exits.set(file, box);
+  for (const [file, box] of before)
+    if (!survivors.has(file)) exits.set(file, box);
   return exits;
 }
 
@@ -491,10 +504,16 @@ function signedReach(magnitude: number, sign: number, reach: number): number {
  *
  * Pure and seeded: same file, same width, same numbers, forever.
  */
-export function hopChoreography(file: string, widthPx: number): HopChoreography {
+export function hopChoreography(
+  file: string,
+  widthPx: number,
+): HopChoreography {
   const random = mulberry32(hashFile(file));
   const delayMs = Math.round(random() * HOP_MAX_DELAY_MS);
-  const reachX = Math.max(HOP_MIN_JITTER_X_PX, Math.min(HOP_JITTER_X_PX, widthPx));
+  const reachX = Math.max(
+    HOP_MIN_JITTER_X_PX,
+    Math.min(HOP_JITTER_X_PX, widthPx),
+  );
   const jx = signedReach(random(), random(), reachX);
   const jy = signedReach(random(), random(), HOP_JITTER_Y_PX);
   return { delayMs, jx, jy };

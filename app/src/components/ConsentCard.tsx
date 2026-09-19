@@ -44,7 +44,9 @@ export function ConsentCard({
       <p>
         <strong>{t.consentNeverLabel}</strong>
       </p>
-      <ul style={{ margin: "0 0 1rem", paddingLeft: "1.25rem", lineHeight: 1.5 }}>
+      <ul
+        style={{ margin: "0 0 1rem", paddingLeft: "1.25rem", lineHeight: 1.5 }}
+      >
         {t.consentPoints.map((point) => (
           <li key={point}>{point}</li>
         ))}
@@ -60,7 +62,12 @@ export function ConsentCard({
         >
           {t.consentDecline}
         </button>
-        <button type="button" className="primary" disabled={busy} onClick={() => void choose(true)}>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy}
+          onClick={() => void choose(true)}
+        >
           {t.consentAccept}
         </button>
       </div>

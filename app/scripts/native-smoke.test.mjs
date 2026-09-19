@@ -9,7 +9,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { defaultBinary, MIN_ELEMENT_COUNT, validateSmoke } from "./native-smoke.mjs";
+import {
+  defaultBinary,
+  MIN_ELEMENT_COUNT,
+  validateSmoke,
+} from "./native-smoke.mjs";
 
 const MAC_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)";
@@ -52,7 +56,11 @@ describe("validateSmoke", () => {
   });
 
   it("passes a healthy Windows launch", () => {
-    const v = validateSmoke(ready({ os: "windows" }, { userAgent: WIN_UA }), "win32", 0);
+    const v = validateSmoke(
+      ready({ os: "windows" }, { userAgent: WIN_UA }),
+      "win32",
+      0,
+    );
     expect(v.failures).toEqual([]);
     expect(v.notes.join(" ")).toContain("WebView2");
   });
@@ -89,7 +97,11 @@ describe("validateSmoke", () => {
   });
 
   it("fails when the document is a shell rather than the app", () => {
-    const v = validateSmoke(ready({}, { elementCount: MIN_ELEMENT_COUNT - 1 }), "darwin", 0);
+    const v = validateSmoke(
+      ready({}, { elementCount: MIN_ELEMENT_COUNT - 1 }),
+      "darwin",
+      0,
+    );
     expect(v.failures.join(" ")).toContain("did not build its tree");
   });
 
@@ -146,7 +158,10 @@ describe("validateSmoke", () => {
   });
 
   it("ignores unrelated chatter on stdout", () => {
-    expect(validateSmoke(ready(), "darwin", 0, "cache sweep: removed 3 entries\n").ok).toBe(true);
+    expect(
+      validateSmoke(ready(), "darwin", 0, "cache sweep: removed 3 entries\n")
+        .ok,
+    ).toBe(true);
   });
 
   it("fails when the frontend section is missing entirely", () => {

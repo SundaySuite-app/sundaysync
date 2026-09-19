@@ -40,7 +40,10 @@ export function scrubPaths(text: string): string {
   return out;
 }
 
-export function truncateMessage(text: string, max: number = MAX_MESSAGE_LENGTH): string {
+export function truncateMessage(
+  text: string,
+  max: number = MAX_MESSAGE_LENGTH,
+): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}…`;
 }
@@ -65,7 +68,10 @@ export interface ErrorGateState {
   windowHits: number[];
 }
 
-export const initialErrorGateState: ErrorGateState = { seen: {}, windowHits: [] };
+export const initialErrorGateState: ErrorGateState = {
+  seen: {},
+  windowHits: [],
+};
 
 /**
  * Decides whether a shaped (kind, message) pair should actually be sent, and returns the

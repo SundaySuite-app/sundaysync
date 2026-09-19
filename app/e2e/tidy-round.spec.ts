@@ -54,7 +54,9 @@ test.describe("the settings dialog fits the window it opens in", () => {
       // The panel genuinely overflows: this is a scrolling test, not a "it happens to fit
       // today" test, and it must keep being one as the copy changes.
       const body = dialog.locator(".dialog__body");
-      const overflow = await body.evaluate((el) => el.scrollHeight - el.clientHeight);
+      const overflow = await body.evaluate(
+        (el) => el.scrollHeight - el.clientHeight,
+      );
       expect(overflow).toBeGreaterThan(0);
 
       // Reach the LAST control in the panel — the diagnostics button, at the bottom of a
@@ -67,7 +69,9 @@ test.describe("the settings dialog fits the window it opens in", () => {
       // It was the BODY that moved, not the page. (`.dialog` used to be the scroller
       // itself; the page has never scrolled and must not start.)
       expect(await body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-      expect(await page.evaluate(() => document.documentElement.scrollTop)).toBe(0);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollTop),
+      ).toBe(0);
 
       // …and the frame did not go with it. THIS is what failed on main: with the whole
       // dialog scrolling, the absolutely-positioned ✕ and the heading were carried ~750 px
@@ -82,13 +86,27 @@ test.describe("the settings dialog fits the window it opens in", () => {
 
       // Every control is still there — trimming the prose must not have trimmed the panel.
       // (`settings.spec.ts` owns what each of them does.)
-      for (const name of [en.language, en.minPsr, en.segmentCount, en.cacheCap]) {
+      for (const name of [
+        en.language,
+        en.minPsr,
+        en.segmentCount,
+        en.cacheCap,
+      ]) {
         await expect(dialog.getByLabel(name)).toHaveCount(1);
       }
-      for (const name of [en.driftCorrect, en.playbackDriftCorrect, en.betaChannelLabel]) {
+      for (const name of [
+        en.driftCorrect,
+        en.playbackDriftCorrect,
+        en.betaChannelLabel,
+      ]) {
         await expect(dialog.getByRole("checkbox", { name })).toHaveCount(1);
       }
-      for (const name of [en.cachePick, en.updateCheck, en.showOnboarding, en.diagnostics]) {
+      for (const name of [
+        en.cachePick,
+        en.updateCheck,
+        en.showOnboarding,
+        en.diagnostics,
+      ]) {
         await expect(dialog.getByRole("button", { name })).toHaveCount(1);
       }
     });
@@ -147,21 +165,26 @@ test.describe("the gutter shows the device name, not an ellipsis", () => {
 
       // The same fact as a fraction of the name it is trying to show — 0.175 on main, 0.354
       // now. Independent of the gutter's own width, so it survives a re-tuned `--tl-gutter`.
-      const shown = await name.evaluate((el) => el.clientWidth / el.scrollWidth);
-      expect(shown).toBeGreaterThan(0.30);
+      const shown = await name.evaluate(
+        (el) => el.clientWidth / el.scrollWidth,
+      );
+      expect(shown).toBeGreaterThan(0.3);
 
       // Enough of it is actually legible to tell this device from another: the rendered
       // text reaches past the first word. (`scrollWidth > clientWidth` is still true — the
       // name IS longer than any gutter — so this asserts how much shows, not that all does.)
 
-
       // The mark sits on line one, beside the name — not folded into line two's footnote.
       const markBox = (await mark.boundingBox())!;
       expect(markBox.y + markBox.height / 2).toBeGreaterThan(nameBox.y);
-      expect(markBox.y + markBox.height / 2).toBeLessThan(nameBox.y + nameBox.height + 2);
+      expect(markBox.y + markBox.height / 2).toBeLessThan(
+        nameBox.y + nameBox.height + 2,
+      );
       // …and it did not push the name out of the gutter.
       const gutter = (await row.locator(".track__gutter").boundingBox())!;
-      expect(markBox.x + markBox.width).toBeLessThanOrEqual(gutter.x + gutter.width + 1);
+      expect(markBox.x + markBox.width).toBeLessThanOrEqual(
+        gutter.x + gutter.width + 1,
+      );
     });
   }
 });
@@ -193,7 +216,9 @@ test.describe("engine rejections reach the operator in the operator's language",
     await dialog.getByRole("button", { name: en.cacheClear }).click();
 
     const banner = page.locator(".banner");
-    await expect(banner).toContainText(en.errNotACacheDir("/Users/e2e/elsewhere"));
+    await expect(banner).toContainText(
+      en.errNotACacheDir("/Users/e2e/elsewhere"),
+    );
     await expect(banner).not.toContainText("not a SundaySync cache directory");
   });
 
@@ -203,7 +228,8 @@ test.describe("engine rejections reach the operator in the operator's language",
     // §7.5's honesty rule for failures. The engine string is invented on purpose: the point
     // is what happens to one the app has never heard of, which is the case that must not
     // put naked English on screen.
-    const raw = "no common audio: the recorder and the cameras share no overlapping sound";
+    const raw =
+      "no common audio: the recorder and the cameras share no overlapping sound";
     await openSettings(page, {
       cache_status: { dir: "/Users/e2e/cache", entries: 4, bytes: 1000 },
       clear_cache: fn(`() => { throw ${JSON.stringify(raw)}; }`),
@@ -221,7 +247,9 @@ test.describe("engine rejections reach the operator in the operator's language",
     await expect(banner).not.toHaveText(raw);
   });
 
-  test("a scan refused for scale says which mistake it was, in Norwegian", async ({ page }) => {
+  test("a scan refused for scale says which mistake it was, in Norwegian", async ({
+    page,
+  }) => {
     // D-032's mis-drop: a home directory or a whole disk. The most likely engine refusal an
     // operator produces by accident, and on main it read «Noe gikk galt: too many files to
     // scan (limit 20000); this looks like a mis-selected folder».

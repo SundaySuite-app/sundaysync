@@ -29,14 +29,20 @@ export const FIT_PADDING_PX = 24;
  * `spanMs` is at least 1 so nothing downstream divides by zero on an empty or
  * zero-length result.
  */
-export function contentBounds(spans: Spanned[]): { originMs: number; spanMs: number } {
+export function contentBounds(spans: Spanned[]): {
+  originMs: number;
+  spanMs: number;
+} {
   let earliest = 0;
   let latest = 0;
   for (const s of spans) {
     if (s.startMs < earliest) earliest = s.startMs;
     if (s.endMs > latest) latest = s.endMs;
   }
-  return { originMs: Math.min(0, earliest), spanMs: Math.max(1, latest - Math.min(0, earliest)) };
+  return {
+    originMs: Math.min(0, earliest),
+    spanMs: Math.max(1, latest - Math.min(0, earliest)),
+  };
 }
 
 /**
@@ -111,7 +117,8 @@ export function scrollbarMetrics(
   const visibleMs = view.widthPx / view.pxPerMs;
   const thumbFrac = Math.min(1, Math.max(MIN_THUMB_FRAC, visibleMs / span));
   const maxScrollMs = Math.max(0, span - visibleMs);
-  const scrolledFrac = maxScrollMs > 0 ? Math.min(1, Math.max(0, view.scrollMs / maxScrollMs)) : 0;
+  const scrolledFrac =
+    maxScrollMs > 0 ? Math.min(1, Math.max(0, view.scrollMs / maxScrollMs)) : 0;
   return { thumbFrac, offsetFrac: scrolledFrac * (1 - thumbFrac) };
 }
 
@@ -178,7 +185,10 @@ export function thumbOffsetFracToScrollMs(
  * zoom, and a screen reader announcing "75 %" for a scrollbar that is flush against its
  * right end is simply wrong (finding 14).
  */
-export function scrollbarValueNow(view: TimelineView, contentSpanMs: number): number {
+export function scrollbarValueNow(
+  view: TimelineView,
+  contentSpanMs: number,
+): number {
   const { thumbFrac, offsetFrac } = scrollbarMetrics(view, contentSpanMs);
   const travel = 1 - thumbFrac;
   return travel > 0 ? Math.round((offsetFrac / travel) * 100) : 0;

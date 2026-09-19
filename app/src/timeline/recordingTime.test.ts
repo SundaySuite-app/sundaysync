@@ -44,7 +44,9 @@ describe("the TZ this suite reasons in", () => {
 
 describe("rung 1 — a full ISO datetime in the container", () => {
   it("reads a Fujifilm's UTC stamp as UTC", () => {
-    const files = [file({ file: "/f/DSCF6408.MOV", creation_time: "2026-07-25T20:41:12Z" })];
+    const files = [
+      file({ file: "/f/DSCF6408.MOV", creation_time: "2026-07-25T20:41:12Z" }),
+    ];
     expect(at(files, "/f/DSCF6408.MOV")).toEqual({
       startMs: Date.UTC(2026, 6, 25, 20, 41, 12),
       source: "container",
@@ -91,7 +93,9 @@ describe("rung 2 — a BWF whose timestamp arrives in two halves", () => {
     ];
     const got = at(files, "/z/260725_001.TAKE/260725_001_Tr1.WAV");
     expect(got.source).toBe("bwf");
-    expect(got.startMs).toBe(Date.UTC(2026, 6, 25, 16, 12, 29) - OSLO_SUMMER_OFFSET_MS);
+    expect(got.startMs).toBe(
+      Date.UTC(2026, 6, 25, 16, 12, 29) - OSLO_SUMMER_OFFSET_MS,
+    );
   });
 
   it("finds the date in a folder name when there is no `date` tag", () => {
@@ -113,7 +117,9 @@ describe("rung 2 — a BWF whose timestamp arrives in two halves", () => {
     ];
     const got = at(files, "/z/tr1.wav");
     expect(got.source).toBe("bwf");
-    expect(got.startMs).toBe(Date.UTC(2026, 6, 25, 16, 12, 29) - OSLO_SUMMER_OFFSET_MS);
+    expect(got.startMs).toBe(
+      Date.UTC(2026, 6, 25, 16, 12, 29) - OSLO_SUMMER_OFFSET_MS,
+    );
   });
 
   it("gives up rather than inventing a day when there is nothing to borrow one from", () => {
@@ -129,7 +135,9 @@ describe("rung 3 — a timestamp in the filename", () => {
     const files = [file({ file: "/m/uirec-20260725_125533.wav" })];
     const got = at(files, "/m/uirec-20260725_125533.wav");
     expect(got.source).toBe("filename");
-    expect(got.startMs).toBe(Date.UTC(2026, 6, 25, 12, 55, 33) - OSLO_SUMMER_OFFSET_MS);
+    expect(got.startMs).toBe(
+      Date.UTC(2026, 6, 25, 12, 55, 33) - OSLO_SUMMER_OFFSET_MS,
+    );
   });
 
   it("reads a six-digit `YYMMDD_HHMMSS` too", () => {
@@ -180,7 +188,9 @@ describe("six digits are a date twice over", () => {
     // in the drop there is nothing to compare against, and the corpus-measured default
     // stands rather than a coin being tossed.
     const files = [file({ file: "/m/311226_120000.wav" })];
-    expect(new Date(at(files, "/m/311226_120000.wav").startMs ?? 0).getFullYear()).toBe(2031);
+    expect(
+      new Date(at(files, "/m/311226_120000.wav").startMs ?? 0).getFullYear(),
+    ).toBe(2031);
   });
 
   it("refuses a token that is not a date under either reading", () => {
@@ -236,7 +246,11 @@ describe("rung 4 — the mtime, minus the duration", () => {
 
   it("survives a file with no duration rather than producing NaN", () => {
     const files = [
-      file({ file: "/j/x.MTS", modified_time: "2026-07-25T12:00:00Z", duration_seconds: 0 }),
+      file({
+        file: "/j/x.MTS",
+        modified_time: "2026-07-25T12:00:00Z",
+        duration_seconds: 0,
+      }),
     ];
     expect(at(files, "/j/x.MTS").startMs).toBe(Date.UTC(2026, 6, 25, 12, 0, 0));
   });
@@ -300,7 +314,9 @@ describe("the five rungs together", () => {
     expect(new Date(dead?.outsideWindowMs ?? 0).getFullYear()).toBe(2020);
     expect(new Date(drone?.outsideWindowMs ?? 0).getFullYear()).toBe(2023);
     // …and a file that never had a stamp is NOT marked as outside anything.
-    const nothing = recordingTimes([file({ file: "/x/quiet.wav" })]).get("/x/quiet.wav");
+    const nothing = recordingTimes([file({ file: "/x/quiet.wav" })]).get(
+      "/x/quiet.wav",
+    );
     expect(nothing).toEqual({ startMs: null, source: "none" });
   });
 
@@ -334,7 +350,11 @@ describe("the session gate", () => {
     const files = [
       file({ file: "/f/A.MOV", creation_time: "2026-07-25T13:00:00Z" }),
       file({ file: "/f/B.MOV", creation_time: "2026-07-25T22:00:00Z" }),
-      file({ file: "/j/1.MTS", modified_time: "2026-07-25T12:00:00Z", duration_seconds: 60 }),
+      file({
+        file: "/j/1.MTS",
+        modified_time: "2026-07-25T12:00:00Z",
+        duration_seconds: 60,
+      }),
     ];
     expect(at(files, "/j/1.MTS").source).toBe("modified");
   });
@@ -354,8 +374,16 @@ describe("the session gate", () => {
     // No container stamps at all: the BWF pair is the most trustworthy corroboration there
     // is, and the mtime that disagrees with them by a year is the one that loses.
     const files = [
-      file({ file: "/z/a.wav", date_tag: "2026-07-25", creation_time: "16:00:00" }),
-      file({ file: "/z/b.wav", date_tag: "2026-07-25", creation_time: "17:00:00" }),
+      file({
+        file: "/z/a.wav",
+        date_tag: "2026-07-25",
+        creation_time: "16:00:00",
+      }),
+      file({
+        file: "/z/b.wav",
+        date_tag: "2026-07-25",
+        creation_time: "17:00:00",
+      }),
       file({ file: "/j/1.MTS", modified_time: "2025-01-01T00:00:00Z" }),
     ];
     expect(at(files, "/z/a.wav").source).toBe("bwf");
@@ -363,7 +391,9 @@ describe("the session gate", () => {
   });
 
   it("leaves a single stamped file alone — one clock cannot contradict itself", () => {
-    const files = [file({ file: "/f/A.MOV", creation_time: "1970-01-01T00:00:00Z" })];
+    const files = [
+      file({ file: "/f/A.MOV", creation_time: "1970-01-01T00:00:00Z" }),
+    ];
     expect(at(files, "/f/A.MOV").source).toBe("container");
   });
 
@@ -392,7 +422,10 @@ describe("the session gate", () => {
       file({ file: "/f/A.MOV", creation_time: iso(0) }),
       file({ file: "/f/B.MOV", creation_time: iso(1000) }),
       file({ file: "/f/edge.MOV", creation_time: iso(PLAUSIBLE_SPREAD_MS) }),
-      file({ file: "/f/past.MOV", creation_time: iso(PLAUSIBLE_SPREAD_MS + 2000) }),
+      file({
+        file: "/f/past.MOV",
+        creation_time: iso(PLAUSIBLE_SPREAD_MS + 2000),
+      }),
     ];
     expect(at(files, "/f/edge.MOV").source).toBe("container");
     expect(at(files, "/f/past.MOV").source).toBe("none");
@@ -419,7 +452,9 @@ describe("the session gate", () => {
       file({ file: "/f/B.MOV", creation_time: "2026-07-25T13:00:00Z" }),
       file({ file: "/g/D.MOV", creation_time: "2023-06-13T20:43:05Z" }),
     ];
-    const forward = [...recordingTimes(files)].map(([f, t]) => `${f}:${t.source}`).sort();
+    const forward = [...recordingTimes(files)]
+      .map(([f, t]) => `${f}:${t.source}`)
+      .sort();
     const backward = [...recordingTimes([...files].reverse())]
       .map(([f, t]) => `${f}:${t.source}`)
       .sort();
@@ -432,9 +467,21 @@ describe("the session gate", () => {
 describe("a date token that stood still while the recorder crossed midnight", () => {
   it("carries the day forward from the file that jumped backwards", () => {
     const files = [
-      file({ file: "/z/260725_001.TAKE/a.wav", device: "f6", creation_time: "23:50:00" }),
-      file({ file: "/z/260725_002.TAKE/a.wav", device: "f6", creation_time: "00:10:00" }),
-      file({ file: "/z/260725_003.TAKE/a.wav", device: "f6", creation_time: "00:30:00" }),
+      file({
+        file: "/z/260725_001.TAKE/a.wav",
+        device: "f6",
+        creation_time: "23:50:00",
+      }),
+      file({
+        file: "/z/260725_002.TAKE/a.wav",
+        device: "f6",
+        creation_time: "00:10:00",
+      }),
+      file({
+        file: "/z/260725_003.TAKE/a.wav",
+        device: "f6",
+        creation_time: "00:30:00",
+      }),
     ];
     const times = recordingTimes(files);
     const day = (f: string) => new Date(times.get(f)?.startMs ?? 0).getDate();
@@ -448,39 +495,80 @@ describe("a date token that stood still while the recorder crossed midnight", ()
     // Two recorders' files interleaved on one device, a few minutes out of order, is not a
     // midnight crossing — and adding a day to them would be inventing one.
     const files = [
-      file({ file: "/z/260725_001.TAKE/a.wav", device: "f6", creation_time: "12:30:00" }),
-      file({ file: "/z/260725_002.TAKE/a.wav", device: "f6", creation_time: "12:10:00" }),
+      file({
+        file: "/z/260725_001.TAKE/a.wav",
+        device: "f6",
+        creation_time: "12:30:00",
+      }),
+      file({
+        file: "/z/260725_002.TAKE/a.wav",
+        device: "f6",
+        creation_time: "12:10:00",
+      }),
     ];
     const times = recordingTimes(files);
-    expect(new Date(times.get("/z/260725_002.TAKE/a.wav")?.startMs ?? 0).getDate()).toBe(25);
+    expect(
+      new Date(times.get("/z/260725_002.TAKE/a.wav")?.startMs ?? 0).getDate(),
+    ).toBe(25);
   });
 
   it("is per device — one recorder's midnight is not another's", () => {
     const files = [
-      file({ file: "/z/260725_001.TAKE/a.wav", device: "f6", creation_time: "23:50:00" }),
-      file({ file: "/z/260725_002.TAKE/a.wav", device: "f6", creation_time: "00:10:00" }),
-      file({ file: "/y/260725_001.TAKE/a.wav", device: "other", creation_time: "23:55:00" }),
+      file({
+        file: "/z/260725_001.TAKE/a.wav",
+        device: "f6",
+        creation_time: "23:50:00",
+      }),
+      file({
+        file: "/z/260725_002.TAKE/a.wav",
+        device: "f6",
+        creation_time: "00:10:00",
+      }),
+      file({
+        file: "/y/260725_001.TAKE/a.wav",
+        device: "other",
+        creation_time: "23:55:00",
+      }),
     ];
     const times = recordingTimes(files);
-    expect(new Date(times.get("/y/260725_001.TAKE/a.wav")?.startMs ?? 0).getDate()).toBe(25);
+    expect(
+      new Date(times.get("/y/260725_001.TAKE/a.wav")?.startMs ?? 0).getDate(),
+    ).toBe(25);
   });
 
   it("leaves container stamps and mtimes alone — those carry their own date", () => {
     const files = [
-      file({ file: "/f/A.MOV", device: "f", creation_time: "2026-07-25T23:50:00Z" }),
-      file({ file: "/f/B.MOV", device: "f", creation_time: "2026-07-25T00:10:00Z" }),
-      file({ file: "/f/C.MOV", device: "f", creation_time: "2026-07-25T00:20:00Z" }),
+      file({
+        file: "/f/A.MOV",
+        device: "f",
+        creation_time: "2026-07-25T23:50:00Z",
+      }),
+      file({
+        file: "/f/B.MOV",
+        device: "f",
+        creation_time: "2026-07-25T00:10:00Z",
+      }),
+      file({
+        file: "/f/C.MOV",
+        device: "f",
+        creation_time: "2026-07-25T00:20:00Z",
+      }),
     ];
     const times = recordingTimes(files);
     // B genuinely reads earlier than A; that is a disagreement for the gate to judge, not
     // a rollover to paper over. Both are inside one day, so both stand as written.
-    expect(times.get("/f/B.MOV")?.startMs).toBe(Date.UTC(2026, 6, 25, 0, 10, 0));
+    expect(times.get("/f/B.MOV")?.startMs).toBe(
+      Date.UTC(2026, 6, 25, 0, 10, 0),
+    );
   });
 });
 
 describe("recordingTimes accounts for every file it is given", () => {
   it("answers for a file even when nothing at all can be said about it", () => {
-    const files = [file({ file: "/x/quiet.wav" }), file({ file: "/x/also.wav" })];
+    const files = [
+      file({ file: "/x/quiet.wav" }),
+      file({ file: "/x/also.wav" }),
+    ];
     const times = recordingTimes(files);
     expect(times.size).toBe(2);
     expect(times.get("/x/also.wav")).toEqual({ startMs: null, source: "none" });
@@ -528,13 +616,17 @@ describe("a whole device whose clock disagrees with the drop (R1)", () => {
 
   it("does not let the majority drag the session onto the copy day", () => {
     const times = recordingTimes([...wedding, ...copied]);
-    for (const f of wedding) expect(times.get(f.file)!.source).toBe("container");
+    for (const f of wedding)
+      expect(times.get(f.file)!.source).toBe("container");
   });
 
   it("the same block IS admitted when the copy happened inside the session", () => {
     // The gate is about a day's spread, not about mtimes being second-class: a card
     // offloaded the same evening lands inside the window and keeps its positions.
-    const sameDay = copied.map((f) => ({ ...f, modified_time: "2026-07-25T18:00:00Z" }));
+    const sameDay = copied.map((f) => ({
+      ...f,
+      modified_time: "2026-07-25T18:00:00Z",
+    }));
     const times = recordingTimes([...wedding, ...sameDay]);
     for (const f of sameDay) expect(times.get(f.file)!.source).toBe("modified");
   });
@@ -546,9 +638,21 @@ describe("a drop where only one rung ever produced two stamps", () => {
   // of mtimes, however much better a kind of evidence it is.
   const files = [
     file({ file: "/FUJI/only.MOV", creation_time: "2026-07-25T13:00:00Z" }),
-    file({ file: "/J/1.MTS", device: "j", modified_time: "2026-07-27T09:00:00Z" }),
-    file({ file: "/J/2.MTS", device: "j", modified_time: "2026-07-27T09:05:00Z" }),
-    file({ file: "/J/3.MTS", device: "j", modified_time: "2026-07-27T09:10:00Z" }),
+    file({
+      file: "/J/1.MTS",
+      device: "j",
+      modified_time: "2026-07-27T09:00:00Z",
+    }),
+    file({
+      file: "/J/2.MTS",
+      device: "j",
+      modified_time: "2026-07-27T09:05:00Z",
+    }),
+    file({
+      file: "/J/3.MTS",
+      device: "j",
+      modified_time: "2026-07-27T09:10:00Z",
+    }),
   ];
 
   it("anchors on the pair and demotes the single better stamp", () => {

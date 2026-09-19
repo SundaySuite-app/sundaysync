@@ -4,7 +4,12 @@ import { PcmStore, type PlannedChunk, type ReadWindow } from "./pcmStore";
 import { CHUNK_SAMPLES } from "./schedulePlan";
 
 function planned(file: string, chunkIndex: number): PlannedChunk {
-  return { file, chunkIndex, startSec: chunkIndex * 15, endSec: (chunkIndex + 1) * 15 };
+  return {
+    file,
+    chunkIndex,
+    startSec: chunkIndex * 15,
+    endSec: (chunkIndex + 1) * 15,
+  };
 }
 
 /** A backend that hands back `total` samples per file, then nothing. */
@@ -92,7 +97,8 @@ describe("PcmStore", () => {
     let calls = 0;
     const read: ReadWindow = async () => {
       calls += 1;
-      if (calls === 1) throw "failed to read /cache/abc.f32: input/output error";
+      if (calls === 1)
+        throw "failed to read /cache/abc.f32: input/output error";
       return new Float32Array(CHUNK_SAMPLES).buffer;
     };
     const store = new PcmStore({ read });
@@ -122,7 +128,10 @@ describe("PcmStore", () => {
   });
 
   it("honours the byte budget, keeping what is planned", async () => {
-    const store = new PcmStore({ read: backend(CHUNK_SAMPLES * 10), budgetBytes: 2 * CHUNK_BYTES });
+    const store = new PcmStore({
+      read: backend(CHUNK_SAMPLES * 10),
+      budgetBytes: 2 * CHUNK_BYTES,
+    });
 
     await store.ensure([planned("/a.wav", 0), planned("/a.wav", 1)], 0);
     expect(store.residentCount).toBe(2);

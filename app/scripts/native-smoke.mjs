@@ -53,7 +53,12 @@ export const ENGINES = {
 };
 
 /** A background that is absent or fully transparent means the stylesheet never applied. */
-const TRANSPARENT = new Set(["", "transparent", "rgba(0, 0, 0, 0)", "(unavailable)"]);
+const TRANSPARENT = new Set([
+  "",
+  "transparent",
+  "rgba(0, 0, 0, 0)",
+  "(unavailable)",
+]);
 
 /** Below this the document is a shell, not the app. */
 export const MIN_ELEMENT_COUNT = 20;
@@ -100,13 +105,17 @@ export function validateSmoke(envelope, platform, exitCode, output = "") {
 
   const fe = envelope.frontend;
   if (!fe) {
-    failures.push("the report carries no frontend section — the webview never spoke");
+    failures.push(
+      "the report carries no frontend section — the webview never spoke",
+    );
     return { ok: failures.length === 0, failures, notes };
   }
 
   if (!fe.mounted) failures.push("React never mounted anything under #root");
   if (!(fe.rootWidth > 0) || !(fe.rootHeight > 0)) {
-    failures.push(`#root laid out at ${fe.rootWidth}×${fe.rootHeight} — mounted but not rendered`);
+    failures.push(
+      `#root laid out at ${fe.rootWidth}×${fe.rootHeight} — mounted but not rendered`,
+    );
   }
   if (!(fe.elementCount >= MIN_ELEMENT_COUNT)) {
     failures.push(
@@ -119,19 +128,24 @@ export function validateSmoke(envelope, platform, exitCode, output = "") {
     );
   }
   if (Array.isArray(fe.bootErrors) && fe.bootErrors.length > 0) {
-    for (const err of fe.bootErrors) failures.push(`JS error during boot: ${err}`);
+    for (const err of fe.bootErrors)
+      failures.push(`JS error during boot: ${err}`);
   }
 
   const engine = ENGINES[platform];
   const ua = String(fe.userAgent ?? "");
   if (!engine) {
-    notes.push(`no engine expectation for platform ${platform}; user agent not checked`);
+    notes.push(
+      `no engine expectation for platform ${platform}; user agent not checked`,
+    );
   } else if (!ua) {
     failures.push("the report carries no user agent");
   } else {
     for (const re of engine.require) {
       if (!re.test(ua)) {
-        failures.push(`user agent does not look like ${engine.name} (missing ${re}): ${ua}`);
+        failures.push(
+          `user agent does not look like ${engine.name} (missing ${re}): ${ua}`,
+        );
       }
     }
     for (const re of engine.forbid) {
@@ -154,10 +168,11 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     const value = argv[i + 1];
-    if (flag === "--binary") (out.binary = value), (i += 1);
-    else if (flag === "--out") (out.out = value), (i += 1);
-    else if (flag === "--hold-ms") (out.holdMs = Number(value)), (i += 1);
-    else if (flag === "--timeout-ms") (out.timeoutMs = Number(value)), (i += 1);
+    if (flag === "--binary") ((out.binary = value), (i += 1));
+    else if (flag === "--out") ((out.out = value), (i += 1));
+    else if (flag === "--hold-ms") ((out.holdMs = Number(value)), (i += 1));
+    else if (flag === "--timeout-ms")
+      ((out.timeoutMs = Number(value)), (i += 1));
   }
   return out;
 }
@@ -176,13 +191,20 @@ export function defaultBinary(platform, targetDir) {
     // The executable is NOT named after productName — the sidecars (ffmpeg, ffprobe) live in
     // the same directory, so "take the first entry" picks ffmpeg. Info.plist is the only
     // authority on which of the three files macOS would launch.
-    const contents = path.join(targetDir, "bundle", "macos", "SundaySync.app", "Contents");
+    const contents = path.join(
+      targetDir,
+      "bundle",
+      "macos",
+      "SundaySync.app",
+      "Contents",
+    );
     const macos = path.join(contents, "MacOS");
     const plist = path.join(contents, "Info.plist");
     if (fs.existsSync(plist)) {
-      const m = /<key>CFBundleExecutable<\/key>\s*<string>([^<]+)<\/string>/.exec(
-        fs.readFileSync(plist, "utf8"),
-      );
+      const m =
+        /<key>CFBundleExecutable<\/key>\s*<string>([^<]+)<\/string>/.exec(
+          fs.readFileSync(plist, "utf8"),
+        );
       if (m) return path.join(macos, m[1]);
     }
     return path.join(macos, "sundaysync-app");
@@ -193,7 +215,10 @@ export function defaultBinary(platform, targetDir) {
 function screenshot(platform, file) {
   try {
     if (platform === "darwin") {
-      const r = spawnSync("screencapture", ["-x", file], { encoding: "utf8", timeout: 30000 });
+      const r = spawnSync("screencapture", ["-x", file], {
+        encoding: "utf8",
+        timeout: 30000,
+      });
       return r.status === 0;
     }
     if (platform === "win32") {
@@ -226,8 +251,12 @@ async function main() {
   // repo's own checkout lives under a path with a space in it.
   const here = path.dirname(fileURLToPath(import.meta.url));
   const targetDir = path.resolve(here, "..", "src-tauri", "target", "debug");
-  const binary = args.binary ? path.resolve(args.binary) : defaultBinary(platform, targetDir);
-  const outDir = path.resolve(args.out ?? path.join(here, "..", "..", "native-smoke"));
+  const binary = args.binary
+    ? path.resolve(args.binary)
+    : defaultBinary(platform, targetDir);
+  const outDir = path.resolve(
+    args.out ?? path.join(here, "..", "..", "native-smoke"),
+  );
   fs.mkdirSync(outDir, { recursive: true });
 
   const reportFile = path.join(outDir, "smoke.json");
@@ -240,7 +269,9 @@ async function main() {
   console.log(`native-smoke: platform=${platform}`);
   console.log(`native-smoke: launching ${binary}`);
   if (!fs.existsSync(binary)) {
-    console.error(`native-smoke: FAIL — no binary at ${binary}. Did the build step run?`);
+    console.error(
+      `native-smoke: FAIL — no binary at ${binary}. Did the build step run?`,
+    );
     process.exit(1);
   }
 
@@ -313,13 +344,18 @@ async function main() {
   }
 
   console.log("─".repeat(72));
-  console.log(`native-smoke: exit code ${exitCode}${exitSignal ? ` (signal ${exitSignal})` : ""}`);
-  if (envelope) console.log(`native-smoke: report ${JSON.stringify(envelope, null, 2)}`);
+  console.log(
+    `native-smoke: exit code ${exitCode}${exitSignal ? ` (signal ${exitSignal})` : ""}`,
+  );
+  if (envelope)
+    console.log(`native-smoke: report ${JSON.stringify(envelope, null, 2)}`);
   if (envelope?.frontend?.userAgent) {
     console.log(`native-smoke: USER AGENT → ${envelope.frontend.userAgent}`);
     console.log(`native-smoke: webview version → ${envelope.webviewVersion}`);
   }
-  console.log(`native-smoke: screenshot ${shot ? `saved to ${shotFile}` : "not available"}`);
+  console.log(
+    `native-smoke: screenshot ${shot ? `saved to ${shotFile}` : "not available"}`,
+  );
 
   const verdict = validateSmoke(envelope, platform, exitCode, output);
   for (const note of verdict.notes) console.log(`native-smoke: ${note}`);
@@ -334,7 +370,8 @@ async function main() {
 }
 
 const invokedDirectly =
-  process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+  process.argv[1] &&
+  pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 if (invokedDirectly) {
   main().catch((e) => {
     console.error(`native-smoke: unexpected failure — ${e.stack ?? e}`);

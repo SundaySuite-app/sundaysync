@@ -30,7 +30,9 @@ import { useEffect, type RefObject } from "react";
  * return is cheaper than a `toggle`-driven subscription, and it cannot get out of step with
  * an element the browser is also toggling on its own.
  */
-export function usePopoverDismiss(ref: RefObject<HTMLDetailsElement | null>): void {
+export function usePopoverDismiss(
+  ref: RefObject<HTMLDetailsElement | null>,
+): void {
   useEffect(() => {
     const close = () => {
       const el = ref.current;

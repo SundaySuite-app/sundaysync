@@ -105,7 +105,10 @@ export function isFrameInFlight(file: string): boolean {
  * caller of this is a panel drawing a thumbnail, and there is nothing a rejection could tell
  * it that `null` does not.
  */
-export function fetchFrame(file: string, durationSeconds: number): Promise<ImageBitmap | null> {
+export function fetchFrame(
+  file: string,
+  durationSeconds: number,
+): Promise<ImageBitmap | null> {
   const cached = frames.get(file);
   if (cached) return cached;
 

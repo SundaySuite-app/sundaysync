@@ -37,7 +37,12 @@ export type UpdateStatus =
   | { phase: "checking" }
   | { phase: "upToDate" }
   | { phase: "available"; version: string; notes?: string | null }
-  | { phase: "downloading"; version: string; percent: number; notes?: string | null }
+  | {
+      phase: "downloading";
+      version: string;
+      percent: number;
+      notes?: string | null;
+    }
   | { phase: "readyToInstall"; version: string; notes?: string | null }
   | { phase: "error"; message: string };
 
@@ -125,5 +130,7 @@ export async function relaunchForUpdate(): Promise<void> {
 export async function subscribeProgress(
   onProgress: (p: UpdateProgress) => void,
 ): Promise<UnlistenFn> {
-  return listen<UpdateProgress>("update:progress", (e) => onProgress(e.payload));
+  return listen<UpdateProgress>("update:progress", (e) =>
+    onProgress(e.payload),
+  );
 }

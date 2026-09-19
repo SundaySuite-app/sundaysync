@@ -158,7 +158,12 @@ export interface BarGeometry {
 function visibleWindow(
   span: ClipExtent,
   view: TimelineView,
-): { clipLeftPx: number; clipWidthPx: number; startPx: number; endPx: number } | null {
+): {
+  clipLeftPx: number;
+  clipWidthPx: number;
+  startPx: number;
+  endPx: number;
+} | null {
   const durationMs = span.endMs - span.startMs;
   if (durationMs <= 0) return null;
   const clipLeftPx = (span.startMs - view.scrollMs) * view.pxPerMs;
@@ -225,8 +230,14 @@ export function barGeometry(
   const startMsInClip = win.startPx / view.pxPerMs;
   const endMsInClip = win.endPx / view.pxPerMs;
 
-  const binStart = Math.min(lvl.bins, Math.max(0, Math.floor(startMsInClip / binMs)));
-  const binEnd = Math.min(lvl.bins, Math.max(binStart, Math.ceil(endMsInClip / binMs)));
+  const binStart = Math.min(
+    lvl.bins,
+    Math.max(0, Math.floor(startMsInClip / binMs)),
+  );
+  const binEnd = Math.min(
+    lvl.bins,
+    Math.max(binStart, Math.ceil(endMsInClip / binMs)),
+  );
   const visibleBins = binEnd - binStart;
   if (visibleBins <= 0) return null;
 

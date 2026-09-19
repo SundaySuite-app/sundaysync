@@ -11,7 +11,10 @@ import {
 } from "./waveformDraw";
 
 /** The real ladder shape: 13 levels, 120 samples doubling each step (peaks.rs). */
-function ladder(levelCount = 13, totalSamples = 12_000 * 3600): { levels: Level[]; totalSamples: number } {
+function ladder(
+  levelCount = 13,
+  totalSamples = 12_000 * 3600,
+): { levels: Level[]; totalSamples: number } {
   const levels: Level[] = [];
   let binSamples = 120;
   for (let i = 0; i < levelCount; i++) {
@@ -146,7 +149,11 @@ describe("barGeometry — intersection clipping", () => {
 
   it("a clip fully outside the viewport yields null", () => {
     const span = { startMs: 0, endMs: durationMs };
-    const view: TimelineView = { pxPerMs: 1, scrollMs: durationMs + 10_000, widthPx: 800 };
+    const view: TimelineView = {
+      pxPerMs: 1,
+      scrollMs: durationMs + 10_000,
+      widthPx: 800,
+    };
     expect(barGeometry(span, meta, view, 1)).toBeNull();
   });
 
@@ -181,7 +188,10 @@ describe("barGeometry — anchored to real time, never stretched to the box", ()
       const k = geom.binStart + i;
       const expectedMsInClip = k * binMs;
       // xs is canvas-local device px; at dpr 1 and leftCssPx 0 that is clip-local CSS px.
-      expect(geom.xs[i]).toBeCloseTo(expectedMsInClip * view.pxPerMs - geom.leftCssPx, 9);
+      expect(geom.xs[i]).toBeCloseTo(
+        expectedMsInClip * view.pxPerMs - geom.leftCssPx,
+        9,
+      );
     }
   });
 
@@ -271,9 +281,23 @@ describe("barGeometry — DPR", () => {
     const hourSpan = { startMs: 0, endMs: 3_600_000 };
     for (const dpr of [1, 2]) {
       for (const pxPerMs of [
-        MIN_PX_PER_MS, 0.00005, 0.000125, 0.0005, 0.00125, 0.0125, 0.05, 0.2, 0.75, 2,
+        MIN_PX_PER_MS,
+        0.00005,
+        0.000125,
+        0.0005,
+        0.00125,
+        0.0125,
+        0.05,
+        0.2,
+        0.75,
+        2,
       ]) {
-        const g = barGeometry(hourSpan, oneHour, { pxPerMs, scrollMs: 0, widthPx: 900 }, dpr);
+        const g = barGeometry(
+          hourSpan,
+          oneHour,
+          { pxPerMs, scrollMs: 0, widthPx: 900 },
+          dpr,
+        );
         if (!g) continue;
         const label = `dpr ${dpr}, pxPerMs ${pxPerMs}`;
         expect(g.barWidthPx, label).toBeGreaterThan(0);
@@ -299,7 +323,8 @@ describe("barGeometry — DPR", () => {
       [g1, 1],
       [g2, 2],
     ] as const) {
-      const binDevicePx = binDurationMs(oneHour.levels[g.level]) * v.pxPerMs * dpr;
+      const binDevicePx =
+        binDurationMs(oneHour.levels[g.level]) * v.pxPerMs * dpr;
       expect(binDevicePx).toBeGreaterThanOrEqual(1 / MAX_BINS_PER_PX - 1e-9);
     }
   });
@@ -312,7 +337,11 @@ describe("barGeometry — the strided fallback bounds xs (finding 11)", () => {
     const span = { startMs: 0, endMs: threeHoursMs };
     const widthPx = 1200;
     // Fit: the whole thing across the window (viewport.ts `fitPxPerMs`, padding ignored).
-    const view: TimelineView = { pxPerMs: widthPx / threeHoursMs, scrollMs: 0, widthPx };
+    const view: TimelineView = {
+      pxPerMs: widthPx / threeHoursMs,
+      scrollMs: 0,
+      widthPx,
+    };
 
     for (const dpr of [1, 2]) {
       const g = barGeometry(span, meta, view, dpr)!;
@@ -339,7 +368,11 @@ describe("barGeometry — the strided fallback bounds xs (finding 11)", () => {
     const ninetyMinMs = 90 * 60_000;
     const meta = ladder(13, ANALYSIS_RATE_HZ * 90 * 60);
     const span = { startMs: 0, endMs: ninetyMinMs };
-    const view: TimelineView = { pxPerMs: MIN_PX_PER_MS, scrollMs: 0, widthPx: 736 };
+    const view: TimelineView = {
+      pxPerMs: MIN_PX_PER_MS,
+      scrollMs: 0,
+      widthPx: 736,
+    };
 
     const g1 = barGeometry(span, meta, view, 1)!;
     expect(g1).not.toBeNull();
@@ -354,11 +387,16 @@ describe("barGeometry — the strided fallback bounds xs (finding 11)", () => {
       [g1, 1],
       [g2, 2],
     ] as const) {
-      expect(g.xs.length).toBeLessThanOrEqual(MAX_BINS_PER_PX * g.widthCssPx * dpr + 2);
+      expect(g.xs.length).toBeLessThanOrEqual(
+        MAX_BINS_PER_PX * g.widthCssPx * dpr + 2,
+      );
       expect(g.xs.length).toBe(g.binCount);
       // Strided bars stay abutting — the property a naive `stride` breaks first.
       for (let i = 1; i < g.xs.length; i++) {
-        expect(g.xs[i] - g.xs[i - 1], `dpr ${dpr}`).toBeCloseTo(g.barWidthPx, 6);
+        expect(g.xs[i] - g.xs[i - 1], `dpr ${dpr}`).toBeCloseTo(
+          g.barWidthPx,
+          6,
+        );
       }
     }
   });
@@ -370,7 +408,11 @@ describe("barGeometry — the strided fallback bounds xs (finding 11)", () => {
     const stunted = ladder(3, ANALYSIS_RATE_HZ * 3 * 3600); // coarsest bin: 40 ms
     const span = { startMs: 0, endMs: threeHoursMs };
     const widthPx = 1200;
-    const view: TimelineView = { pxPerMs: widthPx / threeHoursMs, scrollMs: 0, widthPx };
+    const view: TimelineView = {
+      pxPerMs: widthPx / threeHoursMs,
+      scrollMs: 0,
+      widthPx,
+    };
 
     const g = barGeometry(span, stunted, view, 1)!;
     expect(g.stride).toBeGreaterThan(1);
@@ -380,7 +422,10 @@ describe("barGeometry — the strided fallback bounds xs (finding 11)", () => {
     for (let i = 1; i < g.xs.length; i++) {
       expect(g.xs[i] - g.xs[i - 1]).toBeCloseTo(g.barWidthPx, 6);
     }
-    expect(g.xs[0]).toBeCloseTo(g.binStart * binMs * view.pxPerMs - g.leftCssPx, 6);
+    expect(g.xs[0]).toBeCloseTo(
+      g.binStart * binMs * view.pxPerMs - g.leftCssPx,
+      6,
+    );
   });
 });
 
@@ -450,7 +495,9 @@ describe("barGeometry — empty / degenerate inputs", () => {
 
   it("an empty ladder yields null", () => {
     const span = { startMs: 0, endMs: 1000 };
-    expect(barGeometry(span, { totalSamples: 12_000, levels: [] }, view, 1)).toBeNull();
+    expect(
+      barGeometry(span, { totalSamples: 12_000, levels: [] }, view, 1),
+    ).toBeNull();
   });
 
   it("zero total samples yields null (nothing decoded yet)", () => {
@@ -467,7 +514,10 @@ describe("barGeometry — empty / degenerate inputs", () => {
 
   it("a level with no bins yields null even if the ladder itself is non-empty", () => {
     const span = { startMs: 0, endMs: 1000 };
-    const meta = { totalSamples: 12_000, levels: [{ binSamples: 120, bins: 0 }] };
+    const meta = {
+      totalSamples: 12_000,
+      levels: [{ binSamples: 120, bins: 0 }],
+    };
     expect(barGeometry(span, meta, view, 1)).toBeNull();
   });
 });

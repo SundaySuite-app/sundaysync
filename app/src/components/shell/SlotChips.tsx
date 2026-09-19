@@ -88,16 +88,26 @@ function RemovedChip({
       <summary className="chip" title={t.removedTitle(removed.length)}>
         <span className="chip__text">{t.removedTitle(removed.length)}</span>
       </summary>
-      <div className="popover__panel" role="group" aria-label={t.removedTitle(removed.length)}>
+      <div
+        className="popover__panel"
+        role="group"
+        aria-label={t.removedTitle(removed.length)}
+      >
         {removed.map(({ file, entry, problem }) => (
           <div key={file} className="filerow filerow--removed">
             <span className="filerow__name" title={file}>
               {basename(file)}
             </span>
             <span className="filerow__badges">
-              {entry && <span className="badge">{formatDuration(entry.duration_seconds)}</span>}
+              {entry && (
+                <span className="badge">
+                  {formatDuration(entry.duration_seconds)}
+                </span>
+              )}
               {problem && (
-                <span className="badge badge--problem">{reasonText[problem.reason]}</span>
+                <span className="badge badge--problem">
+                  {reasonText[problem.reason]}
+                </span>
               )}
             </span>
             <span />

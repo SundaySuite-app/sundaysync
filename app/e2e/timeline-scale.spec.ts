@@ -1,5 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { boot, BOOT_FIXTURES, fn, SETTLED_SETTINGS, waitForResult } from "./harness";
+import {
+  boot,
+  BOOT_FIXTURES,
+  fn,
+  SETTLED_SETTINGS,
+  waitForResult,
+} from "./harness";
 import { en } from "../src/i18n";
 import { MIN_PX_PER_MS, visibleClips } from "../src/timeline/geometry";
 import { stackClips, type ClipSpan } from "../src/timeline/laneLayout";
@@ -120,8 +126,15 @@ function buildScenario() {
         device: id,
         duration_seconds: CLIP_DUR_SEC,
         format_name: kind === "video" ? "mov,mp4" : "wav",
-        audio: { codec: kind === "video" ? "aac" : "pcm_s16le", sample_rate: 48000, channels: 2 },
-        video: kind === "video" ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" } : null,
+        audio: {
+          codec: kind === "video" ? "aac" : "pcm_s16le",
+          sample_rate: 48000,
+          channels: 2,
+        },
+        video:
+          kind === "video"
+            ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" }
+            : null,
         creation_time: startedAt(offset),
       });
     }
@@ -158,7 +171,12 @@ function buildScenario() {
     (devices[d].files as string[]).push(file);
   }
 
-  devices.push({ id: EMPTY_DEVICE_ID, label: "Device 5", kind: "audio", files: [] });
+  devices.push({
+    id: EMPTY_DEVICE_ID,
+    label: "Device 5",
+    kind: "audio",
+    files: [],
+  });
 
   const unsynced = [
     { file: "/nas/dev2/bad-take.wav", reason: "low_confidence" },
@@ -178,18 +196,26 @@ function deviceRows(deviceId: string): ClipSpan[][] {
     .filter((p) => p.device === deviceId)
     .map((p) => {
       const startMs = p.offset_seconds * 1000;
-      return { file: p.file, startMs, endMs: startMs + SCENARIO.durations[p.file] * 1000 };
+      return {
+        file: p.file,
+        startMs,
+        endMs: startMs + SCENARIO.durations[p.file] * 1000,
+      };
     });
   return stackClips(spans);
 }
 
 /** What `Track.tsx` should mount for every device, given a visible window — the
  *  independently-computed expectation the DOM is checked against. */
-function expectedMountedFiles(visStartMs: number, visEndMs: number): Set<string> {
+function expectedMountedFiles(
+  visStartMs: number,
+  visEndMs: number,
+): Set<string> {
   const out = new Set<string>();
   for (const id of BUSY_DEVICE_IDS) {
     for (const row of deviceRows(id)) {
-      for (const { item } of visibleClips(row, visStartMs, visEndMs)) out.add(item.file);
+      for (const { item } of visibleClips(row, visStartMs, visEndMs))
+        out.add(item.file);
     }
   }
   return out;
@@ -207,7 +233,9 @@ const LEVELS_EXPR =
  *  which file it is for. */
 function waveformFixtures() {
   return {
-    waveform_meta: fn(`(args) => ({ totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} })`),
+    waveform_meta: fn(
+      `(args) => ({ totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} })`,
+    ),
     waveform_level: fn(`(args) => {
       const levels = ${LEVELS_EXPR};
       const lvl = levels[args.level];
@@ -227,7 +255,12 @@ async function reachResult(page: Page): Promise<void> {
       ...BOOT_FIXTURES,
       ...waveformFixtures(),
       "plugin:dialog|open": ["/Volumes/nas/shoot"],
-      scan_inputs: { schema: 1, devices: SCENARIO.devices, files: SCENARIO.scanFiles, unsynced: [] },
+      scan_inputs: {
+        schema: 1,
+        devices: SCENARIO.devices,
+        files: SCENARIO.scanFiles,
+        unsynced: [],
+      },
       run_sync: {
         result: {
           schema: 1,
@@ -255,7 +288,9 @@ async function reachResult(page: Page): Promise<void> {
 /** `title` is `Clip.tsx`'s basename — read off every currently-mounted clip so the DOM's
  *  actual membership can be compared against `expectedMountedFiles`'s prediction. */
 async function mountedBasenames(page: Page): Promise<string[]> {
-  return page.locator(".clip").evaluateAll((els) => els.map((el) => el.getAttribute("title") ?? ""));
+  return page
+    .locator(".clip")
+    .evaluateAll((els) => els.map((el) => el.getAttribute("title") ?? ""));
 }
 
 function basename(file: string): string {
@@ -275,9 +310,13 @@ const VIEWPORT = "#timeline-viewport";
  *  because every zoom/pan below is anchored on that clip's own on-screen position (see
  *  `zoomInAroundCalibrationClip`), which keeps it inside `visibleClips`'s window (or at
  *  worst its overscan buffer) regardless of how far the zoom goes. */
-async function measureView(page: Page): Promise<{ pxPerMs: number; visStartMs: number; visEndMs: number }> {
+async function measureView(
+  page: Page,
+): Promise<{ pxPerMs: number; visStartMs: number; visEndMs: number }> {
   const vpBox = (await page.locator(VIEWPORT).boundingBox())!;
-  const calBox = (await page.locator(".clip", { hasText: basename(CALIBRATION_FILE) }).boundingBox())!;
+  const calBox = (await page
+    .locator(".clip", { hasText: basename(CALIBRATION_FILE) })
+    .boundingBox())!;
   const pxPerMs = calBox.width / (CLIP_DUR_SEC * 1000);
   const calStartMs = CALIBRATION_START_SEC * 1000;
   const leftRelPx = calBox.x - vpBox.x; // = msToX(calStartMs, view) = (calStartMs - scrollMs) * pxPerMs
@@ -302,7 +341,10 @@ async function measureView(page: Page): Promise<{ pxPerMs: number; visStartMs: n
  * page. Dispatching the WheelEvent directly is exactly what a real ctrl+scroll delivers
  * to this listener, and it is already proven to work by the burst-interaction test.
  */
-async function zoomInAroundCalibrationClip(page: Page, notches: number): Promise<void> {
+async function zoomInAroundCalibrationClip(
+  page: Page,
+  notches: number,
+): Promise<void> {
   const title = basename(CALIBRATION_FILE);
   await page.evaluate(
     ({ n, title }) => {
@@ -341,12 +383,16 @@ test.describe(`timeline scale (${TOTAL_PLACEMENTS} placements, 6 devices, 3-hour
     page,
   }) => {
     await reachResult(page);
-    await expect(page.locator(".track:not(.track--ruler):not(.track--scrollbar)")).toHaveCount(6);
+    await expect(
+      page.locator(".track:not(.track--ruler):not(.track--scrollbar)"),
+    ).toHaveCount(6);
     const empty = page.getByRole("group", { name: en.trackAria("Device 5") });
     await expect(empty.getByText(en.emptyLane)).toBeVisible();
     // Both overlap devices really did get a second sub-track.
     await expect(
-      page.getByRole("group", { name: en.trackAria("Device 0") }).getByRole("group", { name: en.subTrackAria(2) }),
+      page
+        .getByRole("group", { name: en.trackAria("Device 0") })
+        .getByRole("group", { name: en.subTrackAria(2) }),
     ).toBeVisible();
     expect(TOTAL_PLACEMENTS).toBeGreaterThanOrEqual(50);
     // The unsynced shelf actually carries the two entries the scenario planted — behind the
@@ -423,7 +469,9 @@ test.describe(`timeline scale (${TOTAL_PLACEMENTS} placements, 6 devices, 3-hour
     await expect(page.locator(".waveform__canvas")).toHaveCount(actualCount);
   });
 
-  test("panning at deep zoom changes which clips are mounted", async ({ page }) => {
+  test("panning at deep zoom changes which clips are mounted", async ({
+    page,
+  }) => {
     await reachResult(page);
     await zoomInAroundCalibrationClip(page, 28);
     const before = new Set(await mountedBasenames(page));
@@ -441,7 +489,13 @@ test.describe(`timeline scale (${TOTAL_PLACEMENTS} placements, 6 devices, 3-hour
       const clientY = rect.top + rect.height / 2;
       for (let i = 0; i < 40; i += 1) {
         body.dispatchEvent(
-          new WheelEvent("wheel", { deltaX: 4000, bubbles: true, cancelable: true, clientX, clientY }),
+          new WheelEvent("wheel", {
+            deltaX: 4000,
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+          }),
         );
       }
     });
@@ -450,7 +504,9 @@ test.describe(`timeline scale (${TOTAL_PLACEMENTS} placements, 6 devices, 3-hour
       .poll(async () => {
         const now = new Set(await mountedBasenames(page));
         // Symmetric difference: something left, something new arrived.
-        const changed = [...now].some((f) => !before.has(f)) || [...before].some((f) => !now.has(f));
+        const changed =
+          [...now].some((f) => !before.has(f)) ||
+          [...before].some((f) => !now.has(f));
         return changed;
       })
       .toBe(true);
@@ -461,7 +517,9 @@ test.describe(`timeline scale (${TOTAL_PLACEMENTS} placements, 6 devices, 3-hour
     expect(stayedResident.length).toBeLessThan(before.size);
   });
 
-  test("a burst of zoom/pan interactions stays pixel-coherent and settles back on fit ('0')", async ({ page }) => {
+  test("a burst of zoom/pan interactions stays pixel-coherent and settles back on fit ('0')", async ({
+    page,
+  }) => {
     await reachResult(page);
     await zoomInAroundCalibrationClip(page, 15);
 
@@ -564,8 +622,15 @@ function buildStormScan(): Record<string, unknown> {
         device: id,
         duration_seconds: CLIP_DUR_SEC,
         format_name: kind === "video" ? "mov,mp4" : "wav",
-        audio: { codec: kind === "video" ? "aac" : "pcm_s16le", sample_rate: 48000, channels: 2 },
-        video: kind === "video" ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" } : null,
+        audio: {
+          codec: kind === "video" ? "aac" : "pcm_s16le",
+          sample_rate: 48000,
+          channels: 2,
+        },
+        video:
+          kind === "video"
+            ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" }
+            : null,
         creation_time: startedAt(c * STORM_SPACING_SEC),
         date_tag: null,
         modified_time: null,
@@ -618,7 +683,8 @@ interface MetaSpy {
 
 async function readMetaSpy(page: Page): Promise<MetaSpy> {
   return page.evaluate(() => {
-    const s = (window as unknown as Record<string, MetaSpy | undefined>).__E2E_META__;
+    const s = (window as unknown as Record<string, MetaSpy | undefined>)
+      .__E2E_META__;
     return { calls: s?.calls ?? [], peak: s?.peak ?? 0 };
   });
 }
@@ -651,7 +717,13 @@ async function panBy(page: Page, deltaX: number, times: number): Promise<void> {
       const clientY = rect.top + rect.height / 2;
       for (let i = 0; i < times; i += 1) {
         body.dispatchEvent(
-          new WheelEvent("wheel", { deltaX, bubbles: true, cancelable: true, clientX, clientY }),
+          new WheelEvent("wheel", {
+            deltaX,
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+          }),
         );
       }
     },
@@ -680,7 +752,9 @@ test.describe(`the metadata storm (${STORM_TOTAL} clips, D-072)`, () => {
     // carries a canvas either. The IPC, the element and the draw are one decision.
     const widths = await page
       .locator(".clip")
-      .evaluateAll((els) => els.map((el) => (el as HTMLElement).getBoundingClientRect().width));
+      .evaluateAll((els) =>
+        els.map((el) => (el as HTMLElement).getBoundingClientRect().width),
+      );
     expect(Math.max(...widths)).toBeLessThan(24); // MIN_WAVEFORM_PX
     await expect(page.locator(".waveform__canvas")).toHaveCount(0);
     // And nothing offers to rebuild anything — D-064's other half, at this scale.
@@ -742,9 +816,17 @@ test.describe(`the metadata storm (${STORM_TOTAL} clips, D-072)`, () => {
 
     const after = new Map(
       (
-        await page.locator(".clip").evaluateAll((els) =>
-          els.map((el) => [el.getAttribute("data-file") ?? "", (el as HTMLElement).style.left] as const),
-        )
+        await page
+          .locator(".clip")
+          .evaluateAll((els) =>
+            els.map(
+              (el) =>
+                [
+                  el.getAttribute("data-file") ?? "",
+                  (el as HTMLElement).style.left,
+                ] as const,
+            ),
+          )
       ).map(([file, left]) => [file, left]),
     );
 
@@ -759,7 +841,9 @@ test.describe(`the metadata storm (${STORM_TOTAL} clips, D-072)`, () => {
     expect(unchanged.map((c) => c.file)).toEqual([]);
   });
 
-  test("at the fitted zoom of 400 clips no box shows two texts, at any width", async ({ page }) => {
+  test("at the fitted zoom of 400 clips no box shows two texts, at any width", async ({
+    page,
+  }) => {
     // D-065 × the real zoom the owner lands on. Not a unit-tested threshold — the rendered
     // boxes, measured. A clip may show a name, or a status, or neither; what it may never
     // do is draw two things over each other, which is exactly what the screenshot showed.
@@ -784,7 +868,9 @@ test.describe(`the metadata storm (${STORM_TOTAL} clips, D-072)`, () => {
       els
         .filter((el) => {
           const box = el.getBoundingClientRect();
-          return Array.from(el.querySelectorAll(".clip__name, .clip__status")).some((child) => {
+          return Array.from(
+            el.querySelectorAll(".clip__name, .clip__status"),
+          ).some((child) => {
             const c = child.getBoundingClientRect();
             return c.left < box.left - 0.5 || c.right > box.right + 0.5;
           });
@@ -805,7 +891,9 @@ test.describe(`the metadata storm (${STORM_TOTAL} clips, D-072)`, () => {
         ...BOOT_FIXTURES,
         "plugin:dialog|open": ["/Volumes/nas/wedding"],
         scan_inputs: STORM_SCAN,
-        waveform_meta: fn(`(args) => Promise.reject("cache_missing:" + args.file)`),
+        waveform_meta: fn(
+          `(args) => Promise.reject("cache_missing:" + args.file)`,
+        ),
       },
       settings: SETTLED_SETTINGS,
     });
@@ -899,7 +987,9 @@ test.describe(`the metadata storm (${STORM_TOTAL} clips, D-072)`, () => {
 
     const widths = await page
       .locator(".clip")
-      .evaluateAll((els) => els.map((el) => (el as HTMLElement).getBoundingClientRect().width));
+      .evaluateAll((els) =>
+        els.map((el) => (el as HTMLElement).getBoundingClientRect().width),
+      );
     // The zoom really did take the clips past the threshold — otherwise the rest is vacuous.
     expect(Math.max(...widths)).toBeGreaterThanOrEqual(24);
 
@@ -931,7 +1021,8 @@ const LONG_DEVICE_IDS = ["cam-a", "cam-b", "rec"];
 /** Six per device across sixteen hours, evenly spaced so the LAST clip's end lands exactly
  *  on the span — the right edge is the whole point of this test. */
 const LONG_PER_DEVICE = 6;
-const LONG_SPACING_SEC = (LONG_SPAN_SEC - LONG_CLIP_DUR_SEC) / (LONG_PER_DEVICE - 1);
+const LONG_SPACING_SEC =
+  (LONG_SPAN_SEC - LONG_CLIP_DUR_SEC) / (LONG_PER_DEVICE - 1);
 
 function buildLongDay() {
   const devices: Record<string, unknown>[] = [];
@@ -966,8 +1057,15 @@ function buildLongDay() {
         device: id,
         duration_seconds: LONG_CLIP_DUR_SEC,
         format_name: kind === "video" ? "mov,mp4" : "wav",
-        audio: { codec: kind === "video" ? "aac" : "pcm_s16le", sample_rate: 48000, channels: 2 },
-        video: kind === "video" ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" } : null,
+        audio: {
+          codec: kind === "video" ? "aac" : "pcm_s16le",
+          sample_rate: 48000,
+          channels: 2,
+        },
+        video:
+          kind === "video"
+            ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" }
+            : null,
         creation_time: startedAt(offset),
       });
     }
@@ -989,12 +1087,20 @@ async function reachLongResult(page: Page): Promise<void> {
     fixtures: {
       ...BOOT_FIXTURES,
       "plugin:dialog|open": ["/Volumes/nas/wedding"],
-      scan_inputs: { schema: 1, devices: LONG.devices, files: LONG.scanFiles, unsynced: [] },
+      scan_inputs: {
+        schema: 1,
+        devices: LONG.devices,
+        files: LONG.scanFiles,
+        unsynced: [],
+      },
       run_sync: {
         result: {
           schema: 1,
           parameters: { analysis_rate: 12000, min_psr: 15 },
-          reference: { file: LONG.placements[0].file, device: LONG_DEVICE_IDS[0] },
+          reference: {
+            file: LONG.placements[0].file,
+            device: LONG_DEVICE_IDS[0],
+          },
           devices: LONG.devices,
           placements: LONG.placements,
           unsynced: [],

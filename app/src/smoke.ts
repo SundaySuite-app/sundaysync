@@ -42,17 +42,23 @@ export function bootErrorsSoFar(): string[] {
   return [...bootErrors];
 }
 
-if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+if (
+  typeof window !== "undefined" &&
+  typeof window.addEventListener === "function"
+) {
   window.addEventListener("error", (event: ErrorEvent) => {
     recordBootError("error", event.message ?? String(event.error ?? ""));
   });
-  window.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
-    const reason: unknown = event.reason;
-    recordBootError(
-      "unhandledrejection",
-      reason instanceof Error ? reason.message : String(reason),
-    );
-  });
+  window.addEventListener(
+    "unhandledrejection",
+    (event: PromiseRejectionEvent) => {
+      const reason: unknown = event.reason;
+      recordBootError(
+        "unhandledrejection",
+        reason instanceof Error ? reason.message : String(reason),
+      );
+    },
+  );
 }
 
 /** The payload `smoke.rs`'s `FrontendReport` deserialises. */
@@ -79,7 +85,10 @@ export interface SmokeReport {
  * Tauri's asset protocol and applied, which the CSP and the custom protocol both have to be
  * right for and neither of which Chromium exercises.
  */
-export function collectSmokeReport(doc: Document = document, win: Window = window): SmokeReport {
+export function collectSmokeReport(
+  doc: Document = document,
+  win: Window = window,
+): SmokeReport {
   const root = doc.getElementById("root");
   const rect = root?.getBoundingClientRect();
   let bodyBackground = "";
@@ -97,7 +106,8 @@ export function collectSmokeReport(doc: Document = document, win: Window = windo
     elementCount: doc.querySelectorAll("*").length,
     bodyBackground,
     bootErrors: bootErrorsSoFar(),
-    readyMs: typeof win.performance?.now === "function" ? win.performance.now() : 0,
+    readyMs:
+      typeof win.performance?.now === "function" ? win.performance.now() : 0,
     devicePixelRatio: win.devicePixelRatio ?? 1,
     language: win.navigator?.language ?? "",
   };
@@ -115,9 +125,11 @@ export function collectSmokeReport(doc: Document = document, win: Window = windo
 export function scheduleSmokeReport(win: Window = window): void {
   const send = (): void => {
     try {
-      void invoke("smoke_report", { report: collectSmokeReport() }).catch(() => {
-        /* no shell listening, or no shell at all */
-      });
+      void invoke("smoke_report", { report: collectSmokeReport() }).catch(
+        () => {
+          /* no shell listening, or no shell at all */
+        },
+      );
     } catch {
       /* @tauri-apps/api throws synchronously outside a Tauri webview */
     }

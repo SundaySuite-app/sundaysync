@@ -97,13 +97,20 @@ describe("phase machine", () => {
   it("a real sync failure is an error banner", () => {
     let s = toSources();
     s = reducer(s, { type: "sync/start" });
-    s = reducer(s, { type: "sync/failed", error: { kind: "error", text: "boom" } });
+    s = reducer(s, {
+      type: "sync/failed",
+      error: { kind: "error", text: "boom" },
+    });
     expect(s.banner?.kind).toBe("error");
   });
 
   it("changing an override marks a result stale", () => {
     let s = toResult();
-    s = reducer(s, { type: "override/set", file: "/x/C0001.MP4", device: "rec" });
+    s = reducer(s, {
+      type: "override/set",
+      file: "/x/C0001.MP4",
+      device: "rec",
+    });
     expect(s.phase.name).toBe("result");
     expect(s.phase.name === "result" && s.phase.stale).toBe(true);
     expect(s.overrides["/x/C0001.MP4"]).toBe("rec");
@@ -111,7 +118,11 @@ describe("phase machine", () => {
 
   it("a re-scan prunes overrides and reference pointing at removed files", () => {
     let s = toSources();
-    s = reducer(s, { type: "override/set", file: "/x/C0001.MP4", device: "rec" });
+    s = reducer(s, {
+      type: "override/set",
+      file: "/x/C0001.MP4",
+      device: "rec",
+    });
     s = reducer(s, { type: "reference/set", file: "/x/GONE.MP4" });
     s = reducer(s, { type: "inputs/add", paths: ["/more"] });
     s = reducer(s, { type: "scan/done", seq: s.scanSeq, manifest });
@@ -121,7 +132,11 @@ describe("phase machine", () => {
 
   it("removing the last root returns to empty and clears cross-phase state", () => {
     let s = toSources();
-    s = reducer(s, { type: "override/set", file: "/x/C0001.MP4", device: "rec" });
+    s = reducer(s, {
+      type: "override/set",
+      file: "/x/C0001.MP4",
+      device: "rec",
+    });
     s = reducer(s, { type: "inputs/removeRoot", path: "/x" });
     expect(s.phase.name).toBe("empty");
     expect(Object.keys(s.overrides)).toHaveLength(0);
@@ -129,12 +144,14 @@ describe("phase machine", () => {
 
   it("banners clear on the next input transition", () => {
     let s = toSources();
-    s = reducer(s, { type: "banner/set", banner: { kind: "ok", text: "eksportert" } });
+    s = reducer(s, {
+      type: "banner/set",
+      banner: { kind: "ok", text: "eksportert" },
+    });
     s = reducer(s, { type: "inputs/add", paths: ["/more"] });
     expect(s.banner).toBeNull();
   });
 });
-
 
 // ---- Per-file removal + background pre-analysis (V04-U4, D-062) ---------------------
 
@@ -175,7 +192,11 @@ describe("removing files from the run (D-062)", () => {
   it("the file's override goes with it, and does not come back on restore", () => {
     // A device assignment for a file nobody is syncing is a claim about a run that will
     // not happen — and one that would silently reappear when the file did.
-    let s = reducer(toSources(), { type: "override/set", file: CAM, device: "rec" });
+    let s = reducer(toSources(), {
+      type: "override/set",
+      file: CAM,
+      device: "rec",
+    });
     s = reducer(s, { type: "files/exclude", file: CAM });
     expect(s.overrides[CAM]).toBeUndefined();
     s = reducer(s, { type: "files/restore", file: CAM });
@@ -203,7 +224,13 @@ describe("removing files from the run (D-062)", () => {
 
     // And again on the way back: the run stored is one this file was not part of.
     s = reducer(toResult(), { type: "files/exclude", file: CAM });
-    s = { ...s, phase: { ...(s.phase as Extract<AppState["phase"], { name: "result" }>), stale: false } };
+    s = {
+      ...s,
+      phase: {
+        ...(s.phase as Extract<AppState["phase"], { name: "result" }>),
+        stale: false,
+      },
+    };
     s = reducer(s, { type: "files/restore", file: CAM });
     expect(s.phase.name === "result" && s.phase.stale).toBe(true);
   });
@@ -218,7 +245,11 @@ describe("removing files from the run (D-062)", () => {
     s = reducer(s, { type: "files/exclude", file: BROKEN });
     s = reducer(s, { type: "files/exclude", file: CAM });
     s = reducer(s, { type: "inputs/add", paths: ["/more"] });
-    s = reducer(s, { type: "scan/done", seq: s.scanSeq, manifest: manifestWithProblem });
+    s = reducer(s, {
+      type: "scan/done",
+      seq: s.scanSeq,
+      manifest: manifestWithProblem,
+    });
     // Both survive: one is a scanned file, the other a reported problem file. The panel
     // shows a row for each, so an exclusion for each must still be actionable.
     expect(s.excluded.sort()).toEqual([BROKEN, CAM].sort());
@@ -279,14 +310,24 @@ describe("background pre-analysis bookkeeping (D-062)", () => {
     // A late event from a superseded pass. Inventing an entry would leave a status
     // behind for a clip that does not exist.
     const s = toSources();
-    expect(reducer(s, { type: "prewarm/file", file: "/x/GONE.MP4", ok: true })).toBe(s);
+    expect(
+      reducer(s, { type: "prewarm/file", file: "/x/GONE.MP4", ok: true }),
+    ).toBe(s);
   });
 
   it("prewarm/progress carries the aggregate tick and settling clears it", () => {
     const sources = toSources();
-    let s = reducer(sources, { type: "prewarm/progress", completed: 1, total: 2 });
+    let s = reducer(sources, {
+      type: "prewarm/progress",
+      completed: 1,
+      total: 2,
+    });
     expect(s.prewarmProgress).toEqual({ completed: 1, total: 2 });
-    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq, reason: "done" });
+    s = reducer(s, {
+      type: "prewarm/settled",
+      seq: sources.scanSeq,
+      reason: "done",
+    });
     expect(s.prewarmProgress).toBeNull();
   });
 
@@ -297,19 +338,28 @@ describe("background pre-analysis bookkeeping (D-062)", () => {
     // would never be read.
     const sources = toSources();
     let s = reducer(sources, { type: "prewarm/file", file: CAM, ok: true });
-    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq, reason: "done" });
+    s = reducer(s, {
+      type: "prewarm/settled",
+      seq: sources.scanSeq,
+      reason: "done",
+    });
     expect(s.prewarm).toEqual({ [CAM]: "ready", [WAV]: "failed" });
   });
 
   it("settling an already-settled pass is a no-op", () => {
     const sources = toSources();
     const seq = sources.scanSeq;
-    const s = reducer(reducer(sources, { type: "prewarm/settled", seq, reason: "done" }), {
-      type: "prewarm/settled",
-      seq,
-      reason: "done",
-    });
-    expect(reducer(s, { type: "prewarm/settled", seq, reason: "done" })).toBe(s);
+    const s = reducer(
+      reducer(sources, { type: "prewarm/settled", seq, reason: "done" }),
+      {
+        type: "prewarm/settled",
+        seq,
+        reason: "done",
+      },
+    );
+    expect(reducer(s, { type: "prewarm/settled", seq, reason: "done" })).toBe(
+      s,
+    );
   });
 
   // ── V05-W1 (D-064): a cancelled pass is not a failed one ────────────────────────────
@@ -328,7 +378,11 @@ describe("background pre-analysis bookkeeping (D-062)", () => {
     // what puts a rebuild control on a clip whose waveform is being built right now.
     const sources = toSources();
     let s = reducer(sources, { type: "prewarm/file", file: CAM, ok: true });
-    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq, reason: "cancelled" });
+    s = reducer(s, {
+      type: "prewarm/settled",
+      seq: sources.scanSeq,
+      reason: "cancelled",
+    });
     expect(s.prewarm).toEqual({ [CAM]: "ready" });
     expect(WAV in s.prewarm).toBe(false);
   });
@@ -338,7 +392,11 @@ describe("background pre-analysis bookkeeping (D-062)", () => {
     // after it does not retract it.
     const sources = toSources();
     let s = reducer(sources, { type: "prewarm/file", file: CAM, ok: false });
-    s = reducer(s, { type: "prewarm/settled", seq: sources.scanSeq, reason: "cancelled" });
+    s = reducer(s, {
+      type: "prewarm/settled",
+      seq: sources.scanSeq,
+      reason: "cancelled",
+    });
     expect(s.prewarm).toEqual({ [CAM]: "failed" });
   });
 
@@ -352,7 +410,11 @@ describe("background pre-analysis bookkeeping (D-062)", () => {
     expect(syncing.prewarm).toEqual({ [CAM]: "pending", [WAV]: "pending" });
 
     for (const reason of ["done", "cancelled"] as const) {
-      const after = reducer(syncing, { type: "prewarm/settled", seq: syncing.scanSeq, reason });
+      const after = reducer(syncing, {
+        type: "prewarm/settled",
+        seq: syncing.scanSeq,
+        reason,
+      });
       expect(after).toBe(syncing);
     }
   });
@@ -399,7 +461,9 @@ describe("the sync's own analysis (V05-W1)", () => {
 
   it("sync/start does not claim to be analysing a file that was taken out of the run", () => {
     const s = reducer(toSources(), { type: "files/exclude", file: CAM });
-    expect(reducer(s, { type: "sync/start" }).prewarm).toEqual({ [WAV]: "pending" });
+    expect(reducer(s, { type: "sync/start" }).prewarm).toEqual({
+      [WAV]: "pending",
+    });
   });
 
   it("sync/done stops claiming anything", () => {
@@ -442,16 +506,16 @@ describe("a superseded pre-analysis pass (V04-U5)", () => {
     // still running for as long as it takes to notice it was cancelled.
     const scanning = reducer(sources, { type: "inputs/add", paths: ["/y"] });
     expect(scanning.phase.name).toBe("scanning");
-    expect(reducer(scanning, { type: "prewarm/progress", completed: 3, total: 9 })).toBe(
-      scanning,
-    );
+    expect(
+      reducer(scanning, { type: "prewarm/progress", completed: 3, total: 9 }),
+    ).toBe(scanning);
   });
 
   it("cannot tick it while a sync it was preempted by is running either", () => {
     const syncing = reducer(toSources(), { type: "sync/start" });
-    expect(reducer(syncing, { type: "prewarm/progress", completed: 3, total: 9 })).toBe(
-      syncing,
-    );
+    expect(
+      reducer(syncing, { type: "prewarm/progress", completed: 3, total: 9 }),
+    ).toBe(syncing);
   });
 
   it("cannot declare the NEW drop's files failed when it finally settles", () => {
@@ -463,13 +527,18 @@ describe("a superseded pre-analysis pass (V04-U5)", () => {
 
     // NOW the first pass's promise finally resolves. Its sequence is stale, so it settles
     // nothing: these files are waiting on the second pass, which is still running.
-    const late = reducer(s, { type: "prewarm/settled", seq: first.scanSeq, reason: "done" });
+    const late = reducer(s, {
+      type: "prewarm/settled",
+      seq: first.scanSeq,
+      reason: "done",
+    });
     expect(late).toBe(s);
     expect(late.prewarm).toEqual({ [CAM]: "pending", [WAV]: "pending" });
 
     // The pass that actually belongs to this drop still settles it.
     expect(
-      reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason: "done" }).prewarm,
+      reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason: "done" })
+        .prewarm,
     ).toEqual({
       [CAM]: "failed",
       [WAV]: "failed",
@@ -528,7 +597,10 @@ describe("a second run inherits nothing from the first (V05-W5)", () => {
   it("a run that BROKE leaves no claim behind either, and says so in red", () => {
     let s = toSources();
     s = reducer(s, { type: "sync/start" });
-    s = reducer(s, { type: "sync/failed", error: { kind: "error", text: "ffmpeg døde" } });
+    s = reducer(s, {
+      type: "sync/failed",
+      error: { kind: "error", text: "ffmpeg døde" },
+    });
     expect(s.banner).toEqual({ kind: "error", text: "ffmpeg døde" });
     expect(s.prewarm).toEqual({});
   });
@@ -540,13 +612,20 @@ describe("a second run inherits nothing from the first (V05-W5)", () => {
       let s = toSources();
       s = reducer(s, { type: "sync/start" });
       if (after === "cancelled") {
-        s = reducer(s, { type: "sync/failed", error: { kind: "notice", text: "Avbrutt" } });
+        s = reducer(s, {
+          type: "sync/failed",
+          error: { kind: "notice", text: "Avbrutt" },
+        });
       } else if (after === "done") {
         s = reducer(s, { type: "sync/done", outcome });
       }
       const before = s.prewarm;
       for (const reason of ["done", "cancelled"] as const) {
-        const settled = reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason });
+        const settled = reducer(s, {
+          type: "prewarm/settled",
+          seq: s.scanSeq,
+          reason,
+        });
         expect(settled.prewarm).toEqual(before);
       }
     }
@@ -557,7 +636,11 @@ describe("a second run inherits nothing from the first (V05-W5)", () => {
     // pins what the reducer then does with it — deletes, never invents.
     let s = toSources();
     s = reducer(s, { type: "prewarm/file", file: "/x/Z.WAV", ok: true });
-    s = reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason: "cancelled" });
+    s = reducer(s, {
+      type: "prewarm/settled",
+      seq: s.scanSeq,
+      reason: "cancelled",
+    });
     expect(s.prewarm).toEqual({ "/x/Z.WAV": "ready" });
     expect("/x/C0001.MP4" in s.prewarm).toBe(false);
   });
@@ -572,7 +655,11 @@ describe("a second run inherits nothing from the first (V05-W5)", () => {
     expect(Object.values(s.prewarm)).toEqual(["pending", "pending"]);
 
     // …and the abandoned pass finally settles, claiming to have finished.
-    const late = reducer(s, { type: "prewarm/settled", seq: oldSeq, reason: "done" });
+    const late = reducer(s, {
+      type: "prewarm/settled",
+      seq: oldSeq,
+      reason: "done",
+    });
     expect(Object.values(late.prewarm)).toEqual(["pending", "pending"]);
     // Its progress ticks are NOT inert, and this pins the known gap rather than pretending
     // it is not there. `prewarm:progress` carries no sequence of its own (lib.rs emits a
@@ -582,7 +669,11 @@ describe("a second run inherits nothing from the first (V05-W5)", () => {
     // Recorded in KNOWN_LIMITATIONS: it is cosmetic, self-correcting within one file, and
     // the only honest fix is a sequence on the backend event — not a heuristic on `total`
     // dressed up as a rule.
-    const ticked = reducer(s, { type: "prewarm/progress", completed: 300, total: 386 });
+    const ticked = reducer(s, {
+      type: "prewarm/progress",
+      completed: 300,
+      total: 386,
+    });
     expect(ticked.prewarmProgress).toEqual({ completed: 300, total: 386 });
   });
 
@@ -621,7 +712,11 @@ describe("a rebuilt analysis (V06 review)", () => {
     // that then offer the rebuild control. `prewarm/file`'s "must already be in the map"
     // guard is about late events from a superseded pass; this is the operator's own click.
     let s = toSources();
-    s = reducer(s, { type: "prewarm/settled", seq: s.scanSeq, reason: "cancelled" });
+    s = reducer(s, {
+      type: "prewarm/settled",
+      seq: s.scanSeq,
+      reason: "cancelled",
+    });
     expect(s.prewarm).toEqual({});
     s = reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" });
     expect(s.prewarm).toEqual({ "/x/C0001.MP4": "ready" });
@@ -629,7 +724,9 @@ describe("a rebuilt analysis (V06 review)", () => {
 
   it("invents nothing for a path this drop does not contain", () => {
     const s = toSources();
-    expect(reducer(s, { type: "analysis/regenerated", file: "/gone/ghost.mp4" })).toBe(s);
+    expect(
+      reducer(s, { type: "analysis/regenerated", file: "/gone/ghost.mp4" }),
+    ).toBe(s);
   });
 
   it("says nothing about a file the operator has taken out of the run", () => {
@@ -638,21 +735,30 @@ describe("a rebuilt analysis (V06 review)", () => {
     // not put it back — the map would then hold a verdict about a file that is not in the run.
     let s = toSources();
     s = reducer(s, { type: "files/exclude", file: "/x/C0001.MP4" });
-    expect(reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" })).toBe(s);
+    expect(
+      reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" }),
+    ).toBe(s);
   });
 
   it("is inert outside the sources phase, where the map is not read", () => {
     // While a sync runs the map describes the RUN's own extraction (D-064), and after one
     // every drawn clip is placed and the dot says so — neither is a place for a per-file
     // pre-analysis verdict to appear.
-    for (const s of [reducer(toSources(), { type: "sync/start" }), toResult()]) {
-      expect(reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" })).toBe(s);
+    for (const s of [
+      reducer(toSources(), { type: "sync/start" }),
+      toResult(),
+    ]) {
+      expect(
+        reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" }),
+      ).toBe(s);
     }
   });
 
   it("is idempotent", () => {
     let s = toSources();
     s = reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" });
-    expect(reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" })).toBe(s);
+    expect(
+      reducer(s, { type: "analysis/regenerated", file: "/x/C0001.MP4" }),
+    ).toBe(s);
   });
 });

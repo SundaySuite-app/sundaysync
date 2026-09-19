@@ -20,4 +20,3 @@ describe("stackClips — does not mutate input", () => {
     expect(clips.map((c) => c.file)).toEqual(["b.mov", "a.mov"]);
   });
 });
-

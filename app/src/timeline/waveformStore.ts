@@ -16,7 +16,12 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { BUSY_PREFIX, CACHE_MISSING, mapEngineError, type MappedError } from "../errors";
+import {
+  BUSY_PREFIX,
+  CACHE_MISSING,
+  mapEngineError,
+  type MappedError,
+} from "../errors";
 import type { Strings } from "../i18n";
 import { getSettings } from "../settings";
 import type { WaveformMeta } from "../types";
@@ -107,8 +112,14 @@ function scheduleDrain(): void {
     drainScheduled = false;
     drainMetaQueue();
   };
-  const idle = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void })
-    .requestIdleCallback;
+  const idle = (
+    globalThis as {
+      requestIdleCallback?: (
+        cb: () => void,
+        opts?: { timeout: number },
+      ) => void;
+    }
+  ).requestIdleCallback;
   if (typeof idle === "function") idle(run, { timeout: IDLE_TIMEOUT_MS });
   else setTimeout(run, 0);
 }
@@ -125,7 +136,10 @@ function drainMetaQueue(): void {
     let request: Promise<WaveformMeta>;
     try {
       request = Promise.resolve(
-        invoke<WaveformMeta>("waveform_meta", { file: entry.file, cacheDir: cacheDir() }),
+        invoke<WaveformMeta>("waveform_meta", {
+          file: entry.file,
+          cacheDir: cacheDir(),
+        }),
       );
     } catch (error) {
       metaInFlight -= 1;
@@ -213,13 +227,18 @@ export function releaseWaveformMeta(file: string): void {
  * One level's bins, as `[peak, rms]` `u8` pairs (already unwrapped from the
  * `ArrayBuffer` `invoke("waveform_level", …)` resolves to — D-052's binary-IPC path).
  */
-export function fetchWaveformLevel(file: string, level: number): Promise<Uint8Array> {
+export function fetchWaveformLevel(
+  file: string,
+  level: number,
+): Promise<Uint8Array> {
   const key = levelKey(file, level);
   const cached = levelCache.get(key);
   if (cached) return cached;
-  const promise = invoke<ArrayBuffer>("waveform_level", { file, level, cacheDir: cacheDir() }).then(
-    (buf) => new Uint8Array(buf),
-  );
+  const promise = invoke<ArrayBuffer>("waveform_level", {
+    file,
+    level,
+    cacheDir: cacheDir(),
+  }).then((buf) => new Uint8Array(buf));
   promise.catch(() => {
     if (levelCache.get(key) === promise) levelCache.delete(key);
   });
@@ -302,7 +321,10 @@ export function getEpoch(): number {
  * pass is already running.
  */
 export function regenerateAnalysis(file: string): Promise<void> {
-  return invoke<void>("regenerate_analysis", { file, cacheDir: cacheDir() }).then(() => {
+  return invoke<void>("regenerate_analysis", {
+    file,
+    cacheDir: cacheDir(),
+  }).then(() => {
     for (const listener of regeneratedListeners) listener(file);
   });
 }
@@ -327,7 +349,9 @@ export function regenerateAnalysis(file: string): Promise<void> {
  */
 const regeneratedListeners = new Set<(file: string) => void>();
 
-export function subscribeRegenerated(listener: (file: string) => void): () => void {
+export function subscribeRegenerated(
+  listener: (file: string) => void,
+): () => void {
   regeneratedListeners.add(listener);
   return () => {
     regeneratedListeners.delete(listener);

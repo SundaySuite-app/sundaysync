@@ -23,7 +23,12 @@ export function EmptyState({
     // middle of it — and it carries the app's ONLY `DropZone` while it is on screen (the
     // strip's compact one is mounted from the scanning phase onwards, never beside this).
     <div className="empty">
-      <DropZone t={t} onFiles={onFiles} onFolder={onFolder} onDropPaths={onDropPaths} />
+      <DropZone
+        t={t}
+        onFiles={onFiles}
+        onFolder={onFolder}
+        onDropPaths={onDropPaths}
+      />
       <div className="flow-hint" aria-hidden="true">
         <span className="step">1. {t.emptyFlow1}</span>
         <span className="arrow">→</span>
@@ -31,7 +36,16 @@ export function EmptyState({
         <span className="arrow">→</span>
         <span className="step">3. {t.emptyFlow3}</span>
       </div>
-      <p className="muted" style={{ textAlign: "center", marginTop: "1rem", maxWidth: "38rem", marginLeft: "auto", marginRight: "auto" }}>
+      <p
+        className="muted"
+        style={{
+          textAlign: "center",
+          marginTop: "1rem",
+          maxWidth: "38rem",
+          marginLeft: "auto",
+          marginRight: "auto",
+        }}
+      >
         {t.emptyExplain}
       </p>
     </div>

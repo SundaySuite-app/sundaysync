@@ -46,7 +46,10 @@ export interface SourceCounts {
 }
 
 /** The effective device for a file: the operator's override, else the scan's own grouping. */
-function effectiveDevice(entry: FileEntry, overrides: Record<string, string>): string {
+function effectiveDevice(
+  entry: FileEntry,
+  overrides: Record<string, string>,
+): string {
   return overrides[entry.file] ?? entry.device;
 }
 
@@ -62,7 +65,8 @@ export function groupFiles(
   excluded: ReadonlySet<string>,
 ): DeviceGroup[] {
   const byId = new Map<string, DeviceGroup>();
-  for (const device of manifest.devices) byId.set(device.id, { device, files: [] });
+  for (const device of manifest.devices)
+    byId.set(device.id, { device, files: [] });
   for (const entry of manifest.files) {
     if (excluded.has(entry.file)) continue;
     byId.get(effectiveDevice(entry, overrides))?.files.push(entry);

@@ -22,7 +22,10 @@ function clip(startMs: number, lengthMs: number) {
 }
 
 /** What the clip's box measures, in the view a target describes. */
-function drawn(target: { pxPerMs: number; scrollMs: number }, span: { startMs: number; endMs: number }) {
+function drawn(
+  target: { pxPerMs: number; scrollMs: number },
+  span: { startMs: number; endMs: number },
+) {
   const left = (span.startMs - target.scrollMs) * target.pxPerMs;
   const width = (span.endMs - span.startMs) * target.pxPerMs;
   return { left, right: left + width, width };
@@ -135,24 +138,34 @@ describe("revealScrollTop — the tracks column, without scrollIntoView", () => 
   const MAX = 700;
 
   it("leaves a row that is already fully visible alone", () => {
-    expect(revealScrollTop({ top: 100, height: 40 }, 50, BOX, RULER, MAX)).toBe(50);
+    expect(revealScrollTop({ top: 100, height: 40 }, 50, BOX, RULER, MAX)).toBe(
+      50,
+    );
   });
 
   it("scrolls up so a row above the window clears the sticky ruler", () => {
     // The whole of the inset: at `scrollTop = 100` the row's own top would sit exactly at
     // the top of the box, which is underneath the ruler that is stuck there.
-    expect(revealScrollTop({ top: 100, height: 40 }, 400, BOX, RULER, MAX)).toBe(100 - RULER);
+    expect(
+      revealScrollTop({ top: 100, height: 40 }, 400, BOX, RULER, MAX),
+    ).toBe(100 - RULER);
   });
 
   it("scrolls down just far enough to bring a row's bottom into view", () => {
     // 520 is the row's bottom minus the box's height: the row lands flush against the
     // bottom edge and nothing above it is scrolled away that did not have to be.
-    expect(revealScrollTop({ top: 780, height: 40 }, 0, BOX, RULER, MAX)).toBe(520);
+    expect(revealScrollTop({ top: 780, height: 40 }, 0, BOX, RULER, MAX)).toBe(
+      520,
+    );
   });
 
   it("never scrolls before the top or past the end of the content", () => {
-    expect(revealScrollTop({ top: 0, height: 40 }, 200, BOX, RULER, MAX)).toBe(0);
-    expect(revealScrollTop({ top: 5_000, height: 40 }, 0, BOX, RULER, MAX)).toBe(MAX);
+    expect(revealScrollTop({ top: 0, height: 40 }, 200, BOX, RULER, MAX)).toBe(
+      0,
+    );
+    expect(
+      revealScrollTop({ top: 5_000, height: 40 }, 0, BOX, RULER, MAX),
+    ).toBe(MAX);
   });
 
   it("answers zero for a column with nothing to scroll", () => {

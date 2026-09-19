@@ -159,14 +159,20 @@ export class PlaybackEngine {
   private readonly listeners = new Set<() => void>();
 
   constructor(opts: EngineOptions = {}) {
-    this.store = opts.store ?? new PcmStore({
-      onDead: () => this.publish(),
-      onArrived: () => this.scheduleResident(),
-    });
+    this.store =
+      opts.store ??
+      new PcmStore({
+        onDead: () => this.publish(),
+        onArrived: () => this.scheduleResident(),
+      });
     this.createContext = opts.createContext ?? (() => new AudioContext());
     this.clock = new PlaybackClock({ onEnded: () => this.pause() });
     const s = getSettings();
-    this.snapshot = { ...EMPTY, volume: s.playbackVolume, driftCorrected: s.playbackDriftCorrected };
+    this.snapshot = {
+      ...EMPTY,
+      volume: s.playbackVolume,
+      driftCorrected: s.playbackDriftCorrected,
+    };
   }
 
   // ---- React binding -------------------------------------------------------------
@@ -225,7 +231,10 @@ export class PlaybackEngine {
 
     // Pre-roll: enough of every audible clip that the first seconds cannot dropout. The
     // transport says "buffering" for exactly this window — honest, on a NAS it is real.
-    await this.store.ensure(this.plan(this.playStartSec, PREROLL_SEC, 0), this.playStartSec);
+    await this.store.ensure(
+      this.plan(this.playStartSec, PREROLL_SEC, 0),
+      this.playStartSec,
+    );
     if (generation !== this.generation) return; // paused or re-sought while fetching
 
     this.base = ctx.currentTime + BASE_LEAD_SEC;
@@ -304,10 +313,13 @@ export class PlaybackEngine {
   setDriftCorrected(on: boolean): void {
     saveSettings({ playbackDriftCorrected: on });
     this.snapshot = { ...this.snapshot, driftCorrected: on };
-    this.clock.setDuration(timelineDurationSec(this.clips, this.scheduleOpts()));
+    this.clock.setDuration(
+      timelineDurationSec(this.clips, this.scheduleOpts()),
+    );
     // The rates just changed, so everything scheduled is wrong. Rebuild from where the
     // playhead stands rather than pretending the change can wait.
-    if (this.snapshot.playing || this.snapshot.buffering) this.seekTo(this.clock.currentTime);
+    if (this.snapshot.playing || this.snapshot.buffering)
+      this.seekTo(this.clock.currentTime);
     else this.publish();
   }
 
@@ -362,12 +374,17 @@ export class PlaybackEngine {
 
   private applyGains(): void {
     if (this.master) this.master.gain.value = this.snapshot.volume;
-    for (const [device, bus] of this.deviceGains) bus.gain.value = this.gainFor(device);
+    for (const [device, bus] of this.deviceGains)
+      bus.gain.value = this.gainFor(device);
     this.publishHook();
   }
 
   /** Chunks worth holding, annotated with where they sound (eviction needs that). */
-  private plan(tSec: number, aheadSec: number, behindSec: number): PlannedChunk[] {
+  private plan(
+    tSec: number,
+    aheadSec: number,
+    behindSec: number,
+  ): PlannedChunk[] {
     const opts = { ...this.scheduleOpts(), aheadSec, behindSec };
     const byFile = new Map(this.clips.map((c) => [c.file, c]));
     return planChunks(this.clips, tSec, opts).map((ref) => {
@@ -432,7 +449,11 @@ export class PlaybackEngine {
       const duration = Math.min(aimed.sourceDurationSec, available);
       if (duration <= 0) continue;
 
-      src.start(this.base + aimed.whenOffsetSec, aimed.sourceOffsetSec, duration);
+      src.start(
+        this.base + aimed.whenOffsetSec,
+        aimed.sourceOffsetSec,
+        duration,
+      );
       src.onended = () => {
         try {
           src.disconnect();
@@ -509,9 +530,12 @@ export class PlaybackEngine {
       buffering: this.snapshot.buffering,
       scheduled,
       deviceGains: Object.fromEntries(
-        [...new Set([...this.deviceGains.keys(), ...this.clips.map((c) => c.device)])].map(
-          (d) => [d, this.gainFor(d)],
-        ),
+        [
+          ...new Set([
+            ...this.deviceGains.keys(),
+            ...this.clips.map((c) => c.device),
+          ]),
+        ].map((d) => [d, this.gainFor(d)]),
       ),
       masterGain: this.snapshot.volume,
       deadFiles: this.store.deadFiles(),
@@ -519,7 +543,11 @@ export class PlaybackEngine {
   }
 }
 
-function hookEntry(entry: ScheduledSource, base: number, gain: number): AudioHookEntry {
+function hookEntry(
+  entry: ScheduledSource,
+  base: number,
+  gain: number,
+): AudioHookEntry {
   return {
     file: entry.file,
     device: entry.device,

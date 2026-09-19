@@ -55,7 +55,8 @@ const SIZES = [
 
 /** Everything the room's own edges are, in one read. */
 async function room(page: Page) {
-  const box = async (selector: string) => (await page.locator(selector).first().boundingBox())!;
+  const box = async (selector: string) =>
+    (await page.locator(selector).first().boundingBox())!;
   return {
     strip: await box(".app__header"),
     slot: await box(".slot"),
@@ -102,7 +103,9 @@ async function reachSources(
     settings: SETTLED_SETTINGS,
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
-  await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: en.sourcesTitle }),
+  ).toBeVisible();
 }
 
 for (const size of SIZES) {
@@ -134,15 +137,21 @@ for (const size of SIZES) {
       // …and the document itself does not scroll. Everything that scrolls in this app says so
       // for itself; the room does not.
       const overflowed = await page.evaluate(
-        () => document.documentElement.scrollHeight > document.documentElement.clientHeight,
+        () =>
+          document.documentElement.scrollHeight >
+          document.documentElement.clientHeight,
       );
       expect(overflowed).toBe(false);
     });
 
-    test("nothing in the room moves across sources → syncing → result", async ({ page }) => {
+    test("nothing in the room moves across sources → syncing → result", async ({
+      page,
+    }) => {
       await reachSources(page, size);
       const sources = await room(page);
-      const frameAtSources = (await page.locator(".timeline__frame").boundingBox())!;
+      const frameAtSources = (await page
+        .locator(".timeline__frame")
+        .boundingBox())!;
 
       // ---- syncing: the band, and ONLY the band -------------------------------------
       await page.getByRole("button", { name: en.syncButton }).click();
@@ -158,10 +167,15 @@ for (const size of SIZES) {
       expect(syncing.gutter.width).toBeCloseTo(sources.gutter.width, 0);
 
       // The one drawn exception, as an exact number in one direction.
-      expect((await page.locator(".band").boundingBox())!.height).toBeCloseTo(34, 0);
+      expect((await page.locator(".band").boundingBox())!.height).toBeCloseTo(
+        34,
+        0,
+      );
       expect(syncing.stage.y).toBeCloseTo(sources.stage.y + 34, 0);
       expect(syncing.stage.height).toBeCloseTo(sources.stage.height - 34, 0);
-      const frameWhileSyncing = (await page.locator(".timeline__frame").boundingBox())!;
+      const frameWhileSyncing = (await page
+        .locator(".timeline__frame")
+        .boundingBox())!;
       expect(frameWhileSyncing.y).toBeCloseTo(frameAtSources.y + 34, 0);
 
       // ---- result: the band goes only once the clips have stopped moving --------------
@@ -191,7 +205,9 @@ for (const size of SIZES) {
       // stage that ends it: the legend, the meta sentence, the warnings and the zoom have
       // all left, and `.timeline` now contains one child. Nothing renders above
       // `.timeline__frame`, so the frame starts at the top of the stage in EVERY phase.
-      const frameAtResult = (await page.locator(".timeline__frame").boundingBox())!;
+      const frameAtResult = (await page
+        .locator(".timeline__frame")
+        .boundingBox())!;
       sameBox(frameAtResult, frameAtSources);
 
       // Nothing has been pushed under the slot at either window size.
@@ -221,7 +237,8 @@ for (const size of SIZES) {
 
       await page.evaluate(() => {
         const w = window as unknown as Record<string, unknown>;
-        const samples: { hop: boolean; band: boolean; travelling: number }[] = [];
+        const samples: { hop: boolean; band: boolean; travelling: number }[] =
+          [];
         w.__E2E_BAND_SAMPLES__ = samples;
         const tick = () => {
           samples.push({
@@ -243,7 +260,8 @@ for (const size of SIZES) {
 
       const samples = await page.evaluate(
         () =>
-          (window as unknown as Record<string, unknown>).__E2E_BAND_SAMPLES__ as {
+          (window as unknown as Record<string, unknown>)
+            .__E2E_BAND_SAMPLES__ as {
             hop: boolean;
             band: boolean;
             travelling: number;
@@ -282,7 +300,9 @@ for (const size of SIZES) {
       // gutter COLUMN rather than merely near it.
       await reachSources(page, size);
 
-      const gutter = page.getByRole("group", { name: en.trackAria("Camera A") }).locator(".track__gutter");
+      const gutter = page
+        .getByRole("group", { name: en.trackAria("Camera A") })
+        .locator(".track__gutter");
       const ident = gutter.locator(".track__ident");
       const meta = gutter.locator(".track__meta");
       await expect(ident.locator(".track__name")).toHaveText("Camera A");
@@ -295,23 +315,37 @@ for (const size of SIZES) {
       ]);
       // Two lines, in order, both wholly inside the gutter — at 11/12 px type inside a
       // single-lane track, which is the tightest case there is.
-      expect(metaBox!.y).toBeGreaterThanOrEqual(identBox!.y + identBox!.height - 1);
+      expect(metaBox!.y).toBeGreaterThanOrEqual(
+        identBox!.y + identBox!.height - 1,
+      );
       expect(identBox!.y).toBeGreaterThanOrEqual(gutterBox!.y - 1);
-      expect(metaBox!.y + metaBox!.height).toBeLessThanOrEqual(gutterBox!.y + gutterBox!.height + 1);
+      expect(metaBox!.y + metaBox!.height).toBeLessThanOrEqual(
+        gutterBox!.y + gutterBox!.height + 1,
+      );
 
       // The zoom sits in the RULER row's gutter cell — the empty one, left of the ruler.
-      const rulerGutter = (await page.locator(".track--ruler .track__gutter").boundingBox())!;
+      const rulerGutter = (await page
+        .locator(".track--ruler .track__gutter")
+        .boundingBox())!;
       for (const name of [en.zoomOut, en.zoomIn, en.zoomFitAria]) {
         const box = (await page.getByRole("button", { name }).boundingBox())!;
         expect(box.x).toBeGreaterThanOrEqual(rulerGutter.x - 1);
-        expect(box.x + box.width).toBeLessThanOrEqual(rulerGutter.x + rulerGutter.width + 1);
+        expect(box.x + box.width).toBeLessThanOrEqual(
+          rulerGutter.x + rulerGutter.width + 1,
+        );
         expect(box.y).toBeGreaterThanOrEqual(rulerGutter.y - 1);
-        expect(box.y + box.height).toBeLessThanOrEqual(rulerGutter.y + rulerGutter.height + 1);
+        expect(box.y + box.height).toBeLessThanOrEqual(
+          rulerGutter.y + rulerGutter.height + 1,
+        );
       }
       // …and it still WORKS from there, which is the half a box check cannot see.
-      const before = (await page.locator(`.clip[data-file="${CAM_A}"]`).boundingBox())!;
+      const before = (await page
+        .locator(`.clip[data-file="${CAM_A}"]`)
+        .boundingBox())!;
       await page.getByRole("button", { name: en.zoomIn }).click();
-      const after = (await page.locator(`.clip[data-file="${CAM_A}"]`).boundingBox())!;
+      const after = (await page
+        .locator(`.clip[data-file="${CAM_A}"]`)
+        .boundingBox())!;
       expect(after.width).toBeGreaterThan(before.width);
     });
 
@@ -331,19 +365,27 @@ for (const size of SIZES) {
         }`),
       });
       const dot = (device: string) =>
-        page.getByRole("group", { name: en.trackAria(device) }).locator(".track__dot");
+        page
+          .getByRole("group", { name: en.trackAria(device) })
+          .locator(".track__dot");
       await waitForPending(page, "prewarm_analysis");
 
       // Nothing analysed: both rows grey, and the dot says so in words too — the colour is
       // never the only carrier of the claim.
       await expect(dot("Camera A")).toHaveClass(/track__dot--pending/);
       await expect(dot("Zoom recorder")).toHaveClass(/track__dot--pending/);
-      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackAnalysing);
+      await expect(dot("Camera A")).toHaveAttribute(
+        "aria-label",
+        en.trackAnalysing,
+      );
 
       // One file lands. Its device turns blue; the other does not.
       await emit(page, "prewarm:file", { file: CAM_A, ok: true });
       await expect(dot("Camera A")).toHaveClass(/track__dot--ready/);
-      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackAnalysed);
+      await expect(dot("Camera A")).toHaveAttribute(
+        "aria-label",
+        en.trackAnalysed,
+      );
       await expect(dot("Zoom recorder")).toHaveClass(/track__dot--pending/);
 
       await emit(page, "prewarm:file", { file: WAV, ok: true });
@@ -355,7 +397,10 @@ for (const size of SIZES) {
       await resolveControlled(page, "run_sync", syncOutcome());
       await waitForResult(page);
       await expect(dot("Camera A")).toHaveClass(/track__dot--placed/);
-      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackPlaced);
+      await expect(dot("Camera A")).toHaveAttribute(
+        "aria-label",
+        en.trackPlaced,
+      );
     });
 
     test("a row the pass finished with and could not read stops saying it is working", async ({
@@ -377,28 +422,48 @@ for (const size of SIZES) {
         }`),
       });
       const dot = (device: string) =>
-        page.getByRole("group", { name: en.trackAria(device) }).locator(".track__dot");
+        page
+          .getByRole("group", { name: en.trackAria(device) })
+          .locator(".track__dot");
       await waitForPending(page, "prewarm_analysis");
-      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackAnalysing);
+      await expect(dot("Camera A")).toHaveAttribute(
+        "aria-label",
+        en.trackAnalysing,
+      );
 
       await emit(page, "prewarm:file", { file: CAM_A, ok: false });
       await expect(dot("Camera A")).toHaveClass(/track__dot--failed/);
-      await expect(dot("Camera A")).toHaveAttribute("aria-label", en.trackAnalysisFailed);
-      // Grey, exactly as before: a different sentence, not a fourth colour.
-      const grey = await page.evaluate(
-        () => getComputedStyle(document.documentElement).getPropertyValue("--text4").trim(),
+      await expect(dot("Camera A")).toHaveAttribute(
+        "aria-label",
+        en.trackAnalysisFailed,
       );
-      await expect(dot("Camera A")).toHaveCSS("background-color", hexToRgb(grey));
+      // Grey, exactly as before: a different sentence, not a fourth colour.
+      const grey = await page.evaluate(() =>
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--text4")
+          .trim(),
+      );
+      await expect(dot("Camera A")).toHaveCSS(
+        "background-color",
+        hexToRgb(grey),
+      );
 
       // …and the OTHER row, which the pass has genuinely not reached, still says it is
       // working. «Ferdig, og det gikk ikke» and «ikke ferdig» are two different answers.
-      await expect(dot("Zoom recorder")).toHaveAttribute("aria-label", en.trackAnalysing);
+      await expect(dot("Zoom recorder")).toHaveAttribute(
+        "aria-label",
+        en.trackAnalysing,
+      );
     });
 
-    test("marking a clip fills the inspector and moves nothing", async ({ page }) => {
+    test("marking a clip fills the inspector and moves nothing", async ({
+      page,
+    }) => {
       await reachSources(page, size);
       const before = await room(page);
-      const frameBefore = (await page.locator(".timeline__frame").boundingBox())!;
+      const frameBefore = (await page
+        .locator(".timeline__frame")
+        .boundingBox())!;
       await expect(page.getByText(en.previewEmpty)).toBeVisible();
 
       await page.locator(`.clip[data-file="${CAM_A}"]`).click();
@@ -410,10 +475,15 @@ for (const size of SIZES) {
       sameBox(after.inspector, before.inspector);
       sameBox(after.stage, before.stage);
       sameBox(after.gutter, before.gutter);
-      sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
+      sameBox(
+        (await page.locator(".timeline__frame").boundingBox())!,
+        frameBefore,
+      );
     });
 
-    test("«Kilder» stays openable in every phase, exported included", async ({ page }) => {
+    test("«Kilder» stays openable in every phase, exported included", async ({
+      page,
+    }) => {
       // V06-G3 (D-092 ⑦). R3 left the strip's narrow-window behaviour deliberately undecided
       // — «a stated order of what it gives up first … is a design decision, not a number» —
       // and undecided meant flex resolved it by proportion. At 1024 in the exported phase the
@@ -429,30 +499,46 @@ for (const size of SIZES) {
       // numbers: in every phase the opener is visible, wide enough to hit, and opens.
       await reachSources(page, size, {
         scan_inputs: scanManifest({
-          unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
-          skipped: [{ file: "/Users/e2e/shoot/IMG_0001.HEIC", reason: "still_image" }],
+          unsynced: [
+            { file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" },
+          ],
+          skipped: [
+            { file: "/Users/e2e/shoot/IMG_0001.HEIC", reason: "still_image" },
+          ],
         }),
         "plugin:dialog|save": "/Users/e2e/out/x.fcpxml",
         export_timeline: 1,
       });
 
-      const opener = page.locator(".strip__sources .popover--sources > summary");
-      const panel = page.locator(".strip__sources .popover--sources .popover__panel");
+      const opener = page.locator(
+        ".strip__sources .popover--sources > summary",
+      );
+      const panel = page.locator(
+        ".strip__sources .popover--sources .popover__panel",
+      );
 
       const openable = async (phase: string) => {
         await expect(opener, phase).toBeVisible();
         const box = (await opener.boundingBox())!;
         // Wide enough to be a target and to still be saying something. `en.fileCount(2)` is
         // «2 files»; a control narrower than that is a control that has stopped being one.
-        expect(box.width, `${phase}: opener is ${box.width}px wide`).toBeGreaterThan(44);
+        expect(
+          box.width,
+          `${phase}: opener is ${box.width}px wide`,
+        ).toBeGreaterThan(44);
         // …and the hit test in the middle of it reaches the summary itself, rather than
         // whatever has been drawn over it.
         const hits = await opener.evaluate((el) => {
           const r = el.getBoundingClientRect();
-          const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          const at = document.elementFromPoint(
+            r.x + r.width / 2,
+            r.y + r.height / 2,
+          );
           return at !== null && (el === at || el.contains(at));
         });
-        expect(hits, `${phase}: something else is on top of the opener`).toBe(true);
+        expect(hits, `${phase}: something else is on top of the opener`).toBe(
+          true,
+        );
         await opener.click();
         await expect(panel, phase).toBeVisible();
         await page.keyboard.press("Escape");
@@ -468,11 +554,15 @@ for (const size of SIZES) {
       await openable("result");
 
       await page.getByRole("button", { name: en.exportButton }).click();
-      await expect(page.getByRole("button", { name: en.revealInFinder })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: en.revealInFinder }),
+      ).toBeVisible();
       await openable("exported");
     });
 
-    test("every popover overlays the room — opening one moves nothing", async ({ page }) => {
+    test("every popover overlays the room — opening one moves nothing", async ({
+      page,
+    }) => {
       // V06-R2a (D-078). The sources panel used to take 40 % of the stage under the timeline;
       // what replaced it is four disclosures whose panels are LAYERS. That is the whole reason
       // they are layers: a list that took space when it opened would move the material the
@@ -482,17 +572,26 @@ for (const size of SIZES) {
       // popover that pushed only at 1024×600 is exactly the failure this file exists for.
       await reachSources(page, size, {
         scan_inputs: scanManifest({
-          unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
-          skipped: [{ file: "/Users/e2e/shoot/IMG_0001.HEIC", reason: "still_image" }],
+          unsynced: [
+            { file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" },
+          ],
+          skipped: [
+            { file: "/Users/e2e/shoot/IMG_0001.HEIC", reason: "still_image" },
+          ],
         }),
       });
       // Something removed, so the slot's «Fjernet» chip exists to be opened.
       await page.locator(`.clip[data-file="${CAM_A}"]`).click();
       await expect(page.locator(".preview__name")).toHaveText("C0001.MP4");
-      await page.locator(".inspector").getByLabel(`${en.removeFile}: C0001.MP4`).click();
+      await page
+        .locator(".inspector")
+        .getByLabel(`${en.removeFile}: C0001.MP4`)
+        .click();
 
       const before = await room(page);
-      const frameBefore = (await page.locator(".timeline__frame").boundingBox())!;
+      const frameBefore = (await page
+        .locator(".timeline__frame")
+        .boundingBox())!;
 
       for (const selector of [
         ".popover--sources",
@@ -510,7 +609,10 @@ for (const size of SIZES) {
         sameBox(after.inspector, before.inspector);
         sameBox(after.stage, before.stage);
         sameBox(after.gutter, before.gutter);
-        sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
+        sameBox(
+          (await page.locator(".timeline__frame").boundingBox())!,
+          frameBefore,
+        );
 
         await page.keyboard.press("Escape");
         await expect(popover.locator(".popover__panel")).toBeHidden();
@@ -527,7 +629,9 @@ for (const size of SIZES) {
       // panels open at once, overlapping each other on top of the room they float over.
       await reachSources(page, size, {
         scan_inputs: scanManifest({
-          unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
+          unsynced: [
+            { file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" },
+          ],
         }),
       });
       const sources = page.locator(".popover--sources");
@@ -563,8 +667,12 @@ for (const size of SIZES) {
       // AND warnings AND a skipped file AND an export behind it AND stale sources.
       await reachSources(page, size, {
         scan_inputs: scanManifest({
-          unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
-          skipped: [{ file: "/Users/e2e/shoot/IMG_0001.HEIC", reason: "still_image" }],
+          unsynced: [
+            { file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" },
+          ],
+          skipped: [
+            { file: "/Users/e2e/shoot/IMG_0001.HEIC", reason: "still_image" },
+          ],
         }),
         "plugin:dialog|save": "/Users/e2e/out/x.fcpxml",
         export_timeline: 1,
@@ -583,7 +691,9 @@ for (const size of SIZES) {
       );
       await waitForResult(page);
       await page.getByRole("button", { name: en.exportButton }).click();
-      await expect(page.getByRole("button", { name: en.revealInFinder })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: en.revealInFinder }),
+      ).toBeVisible();
       // The export's answer is a line ON this row now (D-092 ⑤) rather than a toast to
       // dismiss — which makes the strip one item busier here than it was, and is exactly why
       // this measurement is worth having.
@@ -598,7 +708,11 @@ for (const size of SIZES) {
           els
             .map((el) => {
               const r = el.getBoundingClientRect();
-              return { cls: el.className || el.tagName, left: r.left, right: r.right };
+              return {
+                cls: el.className || el.tagName,
+                left: r.left,
+                right: r.right,
+              };
             })
             // A zero-width portal target that has nothing in it is not an item on the row.
             .filter((b) => b.right - b.left > 0.5),
@@ -612,20 +726,28 @@ for (const size of SIZES) {
         // …and the row itself does not overflow the window.
         const own = (await page.locator(row).boundingBox())!;
         if (boxes.length > 0) {
-          expect(boxes[boxes.length - 1].right).toBeLessThanOrEqual(own.x + own.width + 0.5);
+          expect(boxes[boxes.length - 1].right).toBeLessThanOrEqual(
+            own.x + own.width + 0.5,
+          );
         }
       }
 
       // The cluster inside the strip is the same claim one level down: its own children were
       // the ones that overflowed it.
-      const cluster = await page.locator(".strip__sources > *").evaluateAll((els) =>
-        els
-          .map((el) => {
-            const r = el.getBoundingClientRect();
-            return { cls: el.className || el.tagName, left: r.left, right: r.right };
-          })
-          .filter((b) => b.right - b.left > 0.5),
-      );
+      const cluster = await page
+        .locator(".strip__sources > *")
+        .evaluateAll((els) =>
+          els
+            .map((el) => {
+              const r = el.getBoundingClientRect();
+              return {
+                cls: el.className || el.tagName,
+                left: r.left,
+                right: r.right,
+              };
+            })
+            .filter((b) => b.right - b.left > 0.5),
+        );
       for (let i = 1; i < cluster.length; i++) {
         expect(
           cluster[i].left,
@@ -645,7 +767,9 @@ for (const size of SIZES) {
         return sib ? sib.getBoundingClientRect().left : null;
       });
       if (cluster.length > 0 && nextAfterCluster !== null) {
-        expect(cluster[cluster.length - 1].right).toBeLessThanOrEqual(nextAfterCluster + 0.5);
+        expect(cluster[cluster.length - 1].right).toBeLessThanOrEqual(
+          nextAfterCluster + 0.5,
+        );
       }
     });
 
@@ -658,7 +782,9 @@ for (const size of SIZES) {
       // own header yet. A two-warning run therefore pushed the frame down by two lines in the
       // same instant the clips hopped.
       await reachSources(page, size);
-      const frameBefore = (await page.locator(".timeline__frame").boundingBox())!;
+      const frameBefore = (await page
+        .locator(".timeline__frame")
+        .boundingBox())!;
       const before = await room(page);
 
       await page.getByRole("button", { name: en.syncButton }).click();
@@ -668,7 +794,10 @@ for (const size of SIZES) {
         ...base,
         result: {
           ...(base.result as Record<string, unknown>),
-          warnings: [{ code: "mixed_fps" }, { code: "drift", projected_end_error_ms: 120 }],
+          warnings: [
+            { code: "mixed_fps" },
+            { code: "drift", projected_end_error_ms: 120 },
+          ],
         },
       });
       await waitForResult(page);
@@ -679,20 +808,30 @@ for (const size of SIZES) {
       const chip = page.locator(".popover--warnings");
       await expect(chip.locator("> summary")).toHaveText(en.warningsCount(2));
       await expect(page.locator(".banner--warn")).toHaveCount(0);
-      sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
+      sameBox(
+        (await page.locator(".timeline__frame").boundingBox())!,
+        frameBefore,
+      );
 
       // …and the sentences themselves are one click away, on a layer, moving nothing.
       await chip.locator("> summary").click();
       await expect(chip.locator(".popover__panel")).toContainText(en.mixedFps);
-      await expect(chip.locator(".popover__panel")).toContainText(en.drift(120));
+      await expect(chip.locator(".popover__panel")).toContainText(
+        en.drift(120),
+      );
       const after = await room(page);
       sameBox(after.strip, before.strip);
       sameBox(after.slot, before.slot);
       sameBox(after.stage, before.stage);
-      sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
+      sameBox(
+        (await page.locator(".timeline__frame").boundingBox())!,
+        frameBefore,
+      );
     });
 
-    test("an error banner floats over the stage instead of pushing it", async ({ page }) => {
+    test("an error banner floats over the stage instead of pushing it", async ({
+      page,
+    }) => {
       // Banners used to be a row between the header and everything else, so an export that
       // failed — or an update notice arriving on its own — shoved the timeline down by the
       // height of a sentence, mid-run, under the operator's hand. They are a layer now
@@ -711,7 +850,9 @@ for (const size of SIZES) {
       await expect(page.locator(".band")).toHaveCount(0);
 
       const before = await room(page);
-      const frameBefore = (await page.locator(".timeline__frame").boundingBox())!;
+      const frameBefore = (await page
+        .locator(".timeline__frame")
+        .boundingBox())!;
 
       await page.getByRole("button", { name: en.exportButton }).click();
       const banner = page.locator(".banner--error");
@@ -723,12 +864,17 @@ for (const size of SIZES) {
       sameBox(after.inspector, before.inspector);
       sameBox(after.stage, before.stage);
       sameBox(after.gutter, before.gutter);
-      sameBox((await page.locator(".timeline__frame").boundingBox())!, frameBefore);
+      sameBox(
+        (await page.locator(".timeline__frame").boundingBox())!,
+        frameBefore,
+      );
 
       // …and it is genuinely on top of the stage, not squeezed in beside it.
       const box = (await banner.boundingBox())!;
       expect(box.y).toBeGreaterThanOrEqual(before.stage.y);
-      expect(box.x + box.width).toBeLessThanOrEqual(before.stage.x + before.stage.width + 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(
+        before.stage.x + before.stage.width + 1,
+      );
     });
   });
 }
