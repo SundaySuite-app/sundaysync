@@ -13,7 +13,9 @@ function device(id: string, kind: Device["kind"] = "video"): Device {
   return { id, label: id, kind, files: [] };
 }
 
-function file(over: Partial<FileEntry> & { file: string; device: string }): FileEntry {
+function file(
+  over: Partial<FileEntry> & { file: string; device: string },
+): FileEntry {
   return {
     duration_seconds: 60,
     format_name: "mov,mp4",
@@ -60,9 +62,13 @@ describe("sourceSpans", () => {
 
     expect(unknownStart.size).toBe(0);
     expect(tracks.map((t) => t.device.id)).toEqual(["cam-a", "cam-b"]);
-    expect(tracks[0].spans).toEqual([{ file: "/a/C1.MP4", startMs: 0, endMs: 90_000 }]);
+    expect(tracks[0].spans).toEqual([
+      { file: "/a/C1.MP4", startMs: 0, endMs: 90_000 },
+    ]);
     // 30 s later than the origin, 30 s long.
-    expect(tracks[1].spans).toEqual([{ file: "/b/C1.MP4", startMs: 30_000, endMs: 60_000 }]);
+    expect(tracks[1].spans).toEqual([
+      { file: "/b/C1.MP4", startMs: 30_000, endMs: 60_000 },
+    ]);
   });
 
   it("takes the origin from the earliest stamp, whatever order the files arrive in", () => {
@@ -70,8 +76,16 @@ describe("sourceSpans", () => {
       manifest(
         [device("cam-a")],
         [
-          file({ file: "/a/late.MP4", device: "cam-a", creation_time: "2026-08-09T10:01:00Z" }),
-          file({ file: "/a/early.MP4", device: "cam-a", creation_time: "2026-08-09T10:00:00Z" }),
+          file({
+            file: "/a/late.MP4",
+            device: "cam-a",
+            creation_time: "2026-08-09T10:01:00Z",
+          }),
+          file({
+            file: "/a/early.MP4",
+            device: "cam-a",
+            creation_time: "2026-08-09T10:00:00Z",
+          }),
         ],
       ),
       {},
@@ -88,8 +102,16 @@ describe("sourceSpans", () => {
       manifest(
         [device("cam-a"), device("rec", "audio")],
         [
-          file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "2026-08-09T10:00:00Z" }),
-          file({ file: "/a/C2.MP4", device: "cam-a", creation_time: "2026-08-09T10:30:00Z" }),
+          file({
+            file: "/a/C1.MP4",
+            device: "cam-a",
+            creation_time: "2026-08-09T10:00:00Z",
+          }),
+          file({
+            file: "/a/C2.MP4",
+            device: "cam-a",
+            creation_time: "2026-08-09T10:30:00Z",
+          }),
           file({
             file: "/r/uirec-20260809_113000.wav",
             device: "rec",
@@ -100,15 +122,25 @@ describe("sourceSpans", () => {
       {},
     );
     expect(layout.timeSource.get("/a/C1.MP4")).toBe("container");
-    expect(layout.timeSource.get("/r/uirec-20260809_113000.wav")).toBe("filename");
+    expect(layout.timeSource.get("/r/uirec-20260809_113000.wav")).toBe(
+      "filename",
+    );
   });
 
   it("regroups under the override overlay, dropping a device it empties", () => {
     const scan = manifest(
       [device("cam-a"), device("rec", "audio")],
       [
-        file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "2026-08-09T10:00:00Z" }),
-        file({ file: "/r/ZOOM0001.WAV", device: "rec", duration_seconds: 3600 }),
+        file({
+          file: "/a/C1.MP4",
+          device: "cam-a",
+          creation_time: "2026-08-09T10:00:00Z",
+        }),
+        file({
+          file: "/r/ZOOM0001.WAV",
+          device: "rec",
+          duration_seconds: 3600,
+        }),
       ],
     );
 
@@ -124,14 +156,20 @@ describe("sourceSpans", () => {
 
   it("skips a file whose effective device is not in the manifest", () => {
     const { tracks } = sourceSpans(
-      manifest([device("cam-a")], [file({ file: "/a/C1.MP4", device: "cam-a" })]),
+      manifest(
+        [device("cam-a")],
+        [file({ file: "/a/C1.MP4", device: "cam-a" })],
+      ),
       { "/a/C1.MP4": "ghost" },
     );
     expect(tracks).toEqual([]);
   });
 
   it("answers an empty manifest with no tracks and nothing unknown", () => {
-    const { tracks, unknownStart, outsideWindow } = sourceSpans(manifest([], []), {});
+    const { tracks, unknownStart, outsideWindow } = sourceSpans(
+      manifest([], []),
+      {},
+    );
     expect(tracks).toEqual([]);
     expect(unknownStart.size).toBe(0);
     expect(outsideWindow.size).toBe(0);
@@ -176,7 +214,11 @@ describe("files nothing could time are laid out in order, not in a pile", () => 
       { file: "/r/T2.WAV", startMs: 10_000, endMs: 30_000 },
       { file: "/r/T3.WAV", startMs: 30_000, endMs: 60_000 },
     ]);
-    expect([...layout.unknownStart].sort()).toEqual(["/r/T1.WAV", "/r/T2.WAV", "/r/T3.WAV"]);
+    expect([...layout.unknownStart].sort()).toEqual([
+      "/r/T1.WAV",
+      "/r/T2.WAV",
+      "/r/T3.WAV",
+    ]);
   });
 
   it("collapses to ONE lane, because end-to-end clips do not overlap", () => {
@@ -191,7 +233,9 @@ describe("files nothing could time are laid out in order, not in a pile", () => 
     // A card that is half timed and half not reads as one continuous strip, rather than as
     // a pile at the start sitting on top of the clips that were placed.
     const scan = untimedDrop();
-    scan.files.push(file({ file: "/a/C9.MP4", device: "cam-a", duration_seconds: 45 }));
+    scan.files.push(
+      file({ file: "/a/C9.MP4", device: "cam-a", duration_seconds: 45 }),
+    );
     const layout = sourceSpans(scan, {});
     const cam = layout.tracks.find((t) => t.device.id === "cam-a")!;
     const c9 = cam.spans.find((s) => s.file === "/a/C9.MP4")!;
@@ -217,9 +261,13 @@ describe("files nothing could time are laid out in order, not in a pile", () => 
     // …and when a device's strip DOES run past the session, the span grows to hold it,
     // because a clip drawn outside the bounds would be a clip nobody can scroll to.
     const scan = untimedDrop();
-    scan.files.push(file({ file: "/r/T4.WAV", device: "rec", duration_seconds: 600 }));
+    scan.files.push(
+      file({ file: "/r/T4.WAV", device: "rec", duration_seconds: 600 }),
+    );
     const grown = sourceSpans(scan, {});
-    expect(contentBounds(grown.tracks.flatMap((t) => t.spans)).spanMs).toBe(660_000);
+    expect(contentBounds(grown.tracks.flatMap((t) => t.spans)).spanMs).toBe(
+      660_000,
+    );
   });
 
   it("still stacks two genuinely overlapping PLACED clips into two lanes", () => {
@@ -284,7 +332,10 @@ describe("files stamped outside the session", () => {
 
   it("keeps them out of `unknownStart` — they are a different sentence", () => {
     const layout = sourceSpans(strayDrop(), {});
-    expect([...layout.outsideWindow].sort()).toEqual(["/d/DJI_0075.MP4", "/d/DJI_0076.MP4"]);
+    expect([...layout.outsideWindow].sort()).toEqual([
+      "/d/DJI_0075.MP4",
+      "/d/DJI_0076.MP4",
+    ]);
     expect(layout.unknownStart.size).toBe(0);
   });
 
@@ -312,7 +363,9 @@ describe("files stamped outside the session", () => {
     const layout = sourceSpans(scan, {});
     expect(layout.outsideWindowDays).toHaveLength(2);
     // Ascending, so the line reads in the order a calendar does.
-    expect(layout.outsideWindowDays[0]).toBeLessThan(layout.outsideWindowDays[1]);
+    expect(layout.outsideWindowDays[0]).toBeLessThan(
+      layout.outsideWindowDays[1],
+    );
   });
 
   it("removes nothing — every file is still on a track", () => {
@@ -349,10 +402,22 @@ describe("sourceSpans and clocks that cannot be true", () => {
     const scan = manifest(
       [device("cam-a"), device("cam-b"), device("dud")],
       [
-        file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "2026-08-09T10:00:00Z" }),
-        file({ file: "/b/C2.MP4", device: "cam-b", creation_time: "2026-08-09T10:10:00Z" }),
+        file({
+          file: "/a/C1.MP4",
+          device: "cam-a",
+          creation_time: "2026-08-09T10:00:00Z",
+        }),
+        file({
+          file: "/b/C2.MP4",
+          device: "cam-b",
+          creation_time: "2026-08-09T10:10:00Z",
+        }),
         // Flat battery: the camera came back at the epoch and wrote it down.
-        file({ file: "/d/C3.MP4", device: "dud", creation_time: "1970-01-01T00:00:00Z" }),
+        file({
+          file: "/d/C3.MP4",
+          device: "dud",
+          creation_time: "1970-01-01T00:00:00Z",
+        }),
       ],
     );
 
@@ -375,8 +440,16 @@ describe("sourceSpans and clocks that cannot be true", () => {
     const scan = manifest(
       [device("cam-a"), device("cam-b")],
       [
-        file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "2026-08-09T08:00:00Z" }),
-        file({ file: "/b/C2.MP4", device: "cam-b", creation_time: "2026-08-09T14:00:00Z" }),
+        file({
+          file: "/a/C1.MP4",
+          device: "cam-a",
+          creation_time: "2026-08-09T08:00:00Z",
+        }),
+        file({
+          file: "/b/C2.MP4",
+          device: "cam-b",
+          creation_time: "2026-08-09T14:00:00Z",
+        }),
       ],
     );
     const layout = sourceSpans(scan, {});
@@ -389,8 +462,16 @@ describe("sourceSpans and clocks that cannot be true", () => {
     const scan = manifest(
       [device("cam-a"), device("cam-b")],
       [
-        file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "2020-01-01T00:00:00Z" }),
-        file({ file: "/b/C2.MP4", device: "cam-b", creation_time: "2026-08-09T10:00:00Z" }),
+        file({
+          file: "/a/C1.MP4",
+          device: "cam-a",
+          creation_time: "2020-01-01T00:00:00Z",
+        }),
+        file({
+          file: "/b/C2.MP4",
+          device: "cam-b",
+          creation_time: "2026-08-09T10:00:00Z",
+        }),
       ],
     );
     // Neither file has company, so size cannot decide. A camera that lost its clock falls
@@ -403,7 +484,11 @@ describe("sourceSpans and clocks that cannot be true", () => {
     const scan = manifest(
       [device("cam-a"), device("cam-b"), device("cam-c"), device("dud")],
       [
-        file({ file: "/a.MP4", device: "cam-a", creation_time: new Date(base).toISOString() }),
+        file({
+          file: "/a.MP4",
+          device: "cam-a",
+          creation_time: new Date(base).toISOString(),
+        }),
         file({
           file: "/b.MP4",
           device: "cam-b",
@@ -428,7 +513,13 @@ describe("sourceSpans and clocks that cannot be true", () => {
   it("leaves a single stamped file alone — one clock cannot contradict itself", () => {
     const scan = manifest(
       [device("cam-a")],
-      [file({ file: "/a/C1.MP4", device: "cam-a", creation_time: "1970-01-01T00:00:00Z" })],
+      [
+        file({
+          file: "/a/C1.MP4",
+          device: "cam-a",
+          creation_time: "1970-01-01T00:00:00Z",
+        }),
+      ],
     );
     // Absurd on its face, but there is nothing to compare it with, and it positions
     // nothing: it is the origin, it sits at zero, and the sync is about to answer anyway.
@@ -464,7 +555,9 @@ describe("a device with EVERYTHING unplaced and a long total (R2)", () => {
       file({
         file: "/FUJI/B.MOV",
         device: "fuji",
-        creation_time: new Date(Date.parse("2026-07-25T10:00:00Z") + SESSION_MS - 600_000).toISOString(),
+        creation_time: new Date(
+          Date.parse("2026-07-25T10:00:00Z") + SESSION_MS - 600_000,
+        ).toISOString(),
         duration_seconds: 600,
       }),
     ];
@@ -477,7 +570,10 @@ describe("a device with EVERYTHING unplaced and a long total (R2)", () => {
         }),
       );
     }
-    return sourceSpans(manifest([device("fuji"), device("mikser", "audio")], files), {});
+    return sourceSpans(
+      manifest([device("fuji"), device("mikser", "audio")], files),
+      {},
+    );
   }
 
   it("the strip starts at zero and runs its own length — nothing is invented", () => {
@@ -550,7 +646,9 @@ describe("a device with EVERYTHING unplaced and a long total (R2)", () => {
       startMs: 4200_000, // where B ended (1 h + 10 min)
       endMs: 4500_000,
     });
-    expect(contentBounds(layout.tracks.flatMap((t) => t.spans)).spanMs).toBe(4500_000);
+    expect(contentBounds(layout.tracks.flatMap((t) => t.spans)).spanMs).toBe(
+      4500_000,
+    );
   });
 });
 
@@ -593,8 +691,16 @@ describe("the layout's origin epoch", () => {
       manifest(
         [device("johnny")],
         [
-          file({ file: "/JOHNNY/MUSIC_01.WAV", device: "johnny", duration_seconds: 300 }),
-          file({ file: "/JOHNNY/MUSIC_02.WAV", device: "johnny", duration_seconds: 300 }),
+          file({
+            file: "/JOHNNY/MUSIC_01.WAV",
+            device: "johnny",
+            duration_seconds: 300,
+          }),
+          file({
+            file: "/JOHNNY/MUSIC_02.WAV",
+            device: "johnny",
+            duration_seconds: 300,
+          }),
         ],
       ),
       {},
@@ -618,9 +724,9 @@ describe("the layout's origin epoch", () => {
       creation_time: "2026-07-25T11:00:00Z",
       duration_seconds: 600,
     });
-    expect(sourceSpans(manifest([device("fuji")], [early, late]), {}).originMs).toBe(
-      Date.parse("2026-07-25T10:00:00Z"),
-    );
+    expect(
+      sourceSpans(manifest([device("fuji")], [early, late]), {}).originMs,
+    ).toBe(Date.parse("2026-07-25T10:00:00Z"));
     expect(sourceSpans(manifest([device("fuji")], [late]), {}).originMs).toBe(
       Date.parse("2026-07-25T11:00:00Z"),
     );

@@ -105,7 +105,10 @@ async function laneWidth(page: Page): Promise<number> {
  * column is off screen in every sense that matters and still reports a rectangle. These two
  * numbers are the app's own claim about where the clip is.
  */
-async function drawnBox(page: Page, file: string): Promise<{ left: number; width: number } | null> {
+async function drawnBox(
+  page: Page,
+  file: string,
+): Promise<{ left: number; width: number } | null> {
   const clip = page.locator(`.clip[data-file="${file}"]`);
   if ((await clip.count()) === 0) return null;
   return clip.evaluate((el) => ({
@@ -143,7 +146,9 @@ async function watchReveals(page: Page) {
 
 async function revealCount(page: Page): Promise<number> {
   return page.evaluate(
-    () => ((window as unknown as Record<string, unknown>).__E2E_REVEALS__ as number) ?? 0,
+    () =>
+      ((window as unknown as Record<string, unknown>)
+        .__E2E_REVEALS__ as number) ?? 0,
   );
 }
 
@@ -178,7 +183,10 @@ async function zoomAwayFromTheEnd(page: Page) {
   const width = await laneWidth(page);
   // Either it has no node at all, or it is drawn well past the right edge of the column.
   // Both are «the operator cannot see it», which is the state this whole feature is about.
-  expect(box === null || box.left > width, `the target is on screen at left=${box?.left}`).toBe(true);
+  expect(
+    box === null || box.left > width,
+    `the target is on screen at left=${box?.left}`,
+  ).toBe(true);
 }
 
 test.describe("«Kilder» finds the clip", () => {
@@ -189,7 +197,10 @@ test.describe("«Kilder» finds the clip", () => {
     await zoomAwayFromTheEnd(page);
 
     await pickFromKilder(page, "CLIP_0010.MP4");
-    await expect(page.locator(".timeline")).not.toHaveAttribute("data-reveal", /.*/);
+    await expect(page.locator(".timeline")).not.toHaveAttribute(
+      "data-reveal",
+      /.*/,
+    );
 
     // It exists at all, which on main it does not: the virtualization window never reached
     // it, so the row the operator clicked marked a file with no box anywhere on screen.
@@ -208,7 +219,9 @@ test.describe("«Kilder» finds the clip", () => {
     await expect(clip).toHaveClass(/clip--selected/);
   });
 
-  test("a clip too narrow to look at is zoomed to, not merely panned to", async ({ page }) => {
+  test("a clip too narrow to look at is zoomed to, not merely panned to", async ({
+    page,
+  }) => {
     // «Tilpass» over a six-hour card draws every take at ~2 px. Panning to a 2 px tick among
     // 2 px ticks answers «where is it?» with «somewhere in that stripe».
     await reachLongDay(page);
@@ -217,7 +230,10 @@ test.describe("«Kilder» finds the clip", () => {
     expect(before.width).toBeLessThan(24);
 
     await pickFromKilder(page, "CLIP_0010.MP4");
-    await expect(page.locator(".timeline")).not.toHaveAttribute("data-reveal", /.*/);
+    await expect(page.locator(".timeline")).not.toHaveAttribute(
+      "data-reveal",
+      /.*/,
+    );
 
     await expectComfortablyVisible(page, TARGET);
     // Centred, near enough: its middle is in the middle third of the column. A region rather
@@ -240,11 +256,16 @@ test.describe("«Kilder» finds the clip", () => {
     // The attribute went on (the app is moving the view under its own power) and came off
     // again (it has arrived). Both are discrete facts; neither is a sampled frame.
     await expect.poll(() => revealCount(page)).toBeGreaterThan(0);
-    await expect(page.locator(".timeline")).not.toHaveAttribute("data-reveal", /.*/);
+    await expect(page.locator(".timeline")).not.toHaveAttribute(
+      "data-reveal",
+      /.*/,
+    );
     await expect(page.locator(`.clip[data-file="${TARGET}"]`)).toBeVisible();
   });
 
-  test("the last clip of the day lands against the end, never past it", async ({ page }) => {
+  test("the last clip of the day lands against the end, never past it", async ({
+    page,
+  }) => {
     // Where the pan clamp has the last word. Nothing may scroll beyond the content (that is
     // `clampScroll`, and every gesture in this view obeys it), so the final take cannot have
     // its full breathing room on the right — it ends flush with the frame. What must still
@@ -255,7 +276,10 @@ test.describe("«Kilder» finds the clip", () => {
     await zoomAwayFromTheEnd(page);
 
     await pickFromKilder(page, "CLIP_0012.MP4");
-    await expect(page.locator(".timeline")).not.toHaveAttribute("data-reveal", /.*/);
+    await expect(page.locator(".timeline")).not.toHaveAttribute(
+      "data-reveal",
+      /.*/,
+    );
 
     const box = (await drawnBox(page, LAST))!;
     const width = await laneWidth(page);
@@ -304,14 +328,18 @@ test.describe("«Kilder» finds the clip", () => {
       settings: SETTLED_SETTINGS,
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
-    await expect(page.locator(".track:not(.track--ruler):not(.track--scrollbar)")).toHaveCount(12);
+    await expect(
+      page.locator(".track:not(.track--ruler):not(.track--scrollbar)"),
+    ).toHaveCount(12);
 
     const scroller = page.locator(".timeline__scroll");
     await scroller.evaluate((el) => {
       el.scrollTop = 0;
     });
     // There is genuinely something to scroll, or everything below is vacuous.
-    const scrollable = await scroller.evaluate((el) => el.scrollHeight - el.clientHeight);
+    const scrollable = await scroller.evaluate(
+      (el) => el.scrollHeight - el.clientHeight,
+    );
     expect(scrollable).toBeGreaterThan(0);
 
     await pickFromKilder(page, "DEV12.MP4");
@@ -320,7 +348,9 @@ test.describe("«Kilder» finds the clip", () => {
     // The row is inside the visible part of the column — under the sticky ruler, not behind it.
     const box = await scroller.boundingBox();
     const row = await page
-      .locator(".track", { has: page.locator(`.clip[data-file="${BASE}/DEV12/DEV12.MP4"]`) })
+      .locator(".track", {
+        has: page.locator(`.clip[data-file="${BASE}/DEV12/DEV12.MP4"]`),
+      })
       .boundingBox();
     expect(row!.y).toBeGreaterThanOrEqual(box!.y);
     expect(row!.y + row!.height).toBeLessThanOrEqual(box!.y + box!.height + 1);
@@ -332,7 +362,9 @@ test.describe("«Kilder» finds the clip", () => {
   test.describe("reduced motion", () => {
     test.use({ contextOptions: { reducedMotion: "reduce" } });
 
-    test("the clip is simply THERE, with no travel to wait for", async ({ page }) => {
+    test("the clip is simply THERE, with no travel to wait for", async ({
+      page,
+    }) => {
       await reachLongDay(page);
       await zoomAwayFromTheEnd(page);
       await watchReveals(page);
@@ -345,7 +377,10 @@ test.describe("«Kilder» finds the clip", () => {
       // that never comes.
       await expect(page.locator(`.clip[data-file="${TARGET}"]`)).toBeVisible();
       expect(await revealCount(page)).toBe(0);
-      await expect(page.locator(".timeline")).not.toHaveAttribute("data-reveal", /.*/);
+      await expect(page.locator(".timeline")).not.toHaveAttribute(
+        "data-reveal",
+        /.*/,
+      );
       await expectComfortablyVisible(page, TARGET);
     });
   });
@@ -363,8 +398,14 @@ function unsyncedScanManifest(): Record<string, unknown> {
     device,
     duration_seconds: 600,
     format_name: video ? "mov,mp4" : "wav",
-    audio: { codec: video ? "aac" : "pcm_s16le", sample_rate: 48000, channels: 2 },
-    video: video ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" } : null,
+    audio: {
+      codec: video ? "aac" : "pcm_s16le",
+      sample_rate: 48000,
+      channels: 2,
+    },
+    video: video
+      ? { codec: "h264", width: 1920, height: 1080, fps: "25/1" }
+      : null,
     creation_time: null,
   });
   return {
@@ -373,7 +414,10 @@ function unsyncedScanManifest(): Record<string, unknown> {
       { id: "rec", label: "Zoom recorder", kind: "audio", files: [WAV] },
       { id: "cam-a", label: "Camera A", kind: "video", files: CAM_FILES },
     ],
-    files: [media(WAV, "rec", false), ...CAM_FILES.map((f) => media(f, "cam-a", true))],
+    files: [
+      media(WAV, "rec", false),
+      ...CAM_FILES.map((f) => media(f, "cam-a", true)),
+    ],
     unsynced: [],
   };
 }
@@ -447,7 +491,9 @@ test.describe("the unplaced files live in their device's row (R2c)", () => {
     await waitForResult(page);
   }
 
-  test("three refusals are three numbered pills in that camera's row", async ({ page }) => {
+  test("three refusals are three numbered pills in that camera's row", async ({
+    page,
+  }) => {
     await reachResultWithRefusals(page);
 
     const pills = track(page, "Camera A").locator(".pill--unsynced");
@@ -458,26 +504,46 @@ test.describe("the unplaced files live in their device's row (R2c)", () => {
     await expect(pills).toHaveText(["1", "2", "3"]);
     // The number alone says nothing, so the whole sentence rides on the control: which file,
     // and why it was refused — the same words the problem popover prints.
-    await expect(pills.nth(0)).toHaveAttribute("aria-label", `TAKE_2.MP4 — ${en.reasonLowConfidence}`);
-    await expect(pills.nth(1)).toHaveAttribute("aria-label", `TAKE_3.MP4 — ${en.reasonNoAudio}`);
-    await expect(pills.nth(2)).toHaveAttribute("aria-label", `TAKE_4.MP4 — ${en.reasonDeviceOverlap}`);
-    await expect(pills.nth(0)).toHaveAttribute("title", `TAKE_2.MP4 — ${en.reasonLowConfidence}`);
+    await expect(pills.nth(0)).toHaveAttribute(
+      "aria-label",
+      `TAKE_2.MP4 — ${en.reasonLowConfidence}`,
+    );
+    await expect(pills.nth(1)).toHaveAttribute(
+      "aria-label",
+      `TAKE_3.MP4 — ${en.reasonNoAudio}`,
+    );
+    await expect(pills.nth(2)).toHaveAttribute(
+      "aria-label",
+      `TAKE_4.MP4 — ${en.reasonDeviceOverlap}`,
+    );
+    await expect(pills.nth(0)).toHaveAttribute(
+      "title",
+      `TAKE_2.MP4 — ${en.reasonLowConfidence}`,
+    );
     // The row has its own name, and it is not «Underspor»: nothing in it is a position in
     // time, so it must not announce itself as another lane.
     await expect(
-      track(page, "Camera A").getByRole("group", { name: en.unsyncedRowAria("Camera A") }),
+      track(page, "Camera A").getByRole("group", {
+        name: en.unsyncedRowAria("Camera A"),
+      }),
     ).toBeVisible();
   });
 
-  test("a device that placed everything has no strip at all", async ({ page }) => {
+  test("a device that placed everything has no strip at all", async ({
+    page,
+  }) => {
     await reachResultWithRefusals(page);
     // The recorder's row is untouched — an empty strip on every clean device would be a row
     // of nothing the eye has to learn to ignore.
-    await expect(track(page, "Zoom recorder").locator(".track__unsynced")).toHaveCount(0);
+    await expect(
+      track(page, "Zoom recorder").locator(".track__unsynced"),
+    ).toHaveCount(0);
     await expect(page.locator(".track__unsynced")).toHaveCount(1);
   });
 
-  test("the shelf stays: the popover is the overview, the pills are the row", async ({ page }) => {
+  test("the shelf stays: the popover is the overview, the pills are the row", async ({
+    page,
+  }) => {
     await reachResultWithRefusals(page);
     // D-079's list is not replaced by D-096's pills. It is the complete list (a strip 700 px
     // wide cannot hold forty), it carries the bulk affordances, and it is where the SCAN's
@@ -503,12 +569,16 @@ test.describe("the unplaced files live in their device's row (R2c)", () => {
     );
     // …and the two decisions D-027 says are the fix are right there, as they are for any
     // other marked file.
-    await expect(page.locator(".inspector").getByLabel(`${en.moveToDevice}: TAKE_3.MP4`)).toBeVisible();
-    await expect(page.locator(".inspector").getByLabel(`${en.removeFile}: TAKE_3.MP4`)).toBeVisible();
+    await expect(
+      page.locator(".inspector").getByLabel(`${en.moveToDevice}: TAKE_3.MP4`),
+    ).toBeVisible();
+    await expect(
+      page.locator(".inspector").getByLabel(`${en.removeFile}: TAKE_3.MP4`),
+    ).toBeVisible();
     // The pill wears the same gold as a selected clip — one word for «denne».
-    await expect(track(page, "Camera A").locator(".pill--unsynced").nth(1)).toHaveClass(
-      /pill--selected/,
-    );
+    await expect(
+      track(page, "Camera A").locator(".pill--unsynced").nth(1),
+    ).toHaveClass(/pill--selected/);
   });
 
   test("removing one from the inspector takes its pill out and renumbers the rest", async ({
@@ -518,7 +588,10 @@ test.describe("the unplaced files live in their device's row (R2c)", () => {
     const pills = track(page, "Camera A").locator(".pill--unsynced");
 
     await pills.nth(1).click();
-    await page.locator(".inspector").getByLabel(`${en.removeFile}: TAKE_3.MP4`).click();
+    await page
+      .locator(".inspector")
+      .getByLabel(`${en.removeFile}: TAKE_3.MP4`)
+      .click();
 
     await expect(pills).toHaveCount(2);
     await expect(pills).toHaveText(["1", "2"]);
@@ -527,9 +600,9 @@ test.describe("the unplaced files live in their device's row (R2c)", () => {
       `TAKE_4.MP4 — ${en.reasonDeviceOverlap}`,
     );
     // The chip agrees, because both are counted from the same list minus the same removals.
-    await expect(sources(page).locator(".popover--problems > summary")).toHaveText(
-      en.problemCount(2),
-    );
+    await expect(
+      sources(page).locator(".popover--problems > summary"),
+    ).toHaveText(en.problemCount(2));
   });
 
   test("the strip is inside the tracks, so the room does not move when it appears", async ({
@@ -552,7 +625,8 @@ test.describe("the unplaced files live in their device's row (R2c)", () => {
     await page.getByRole("button", { name: en.dropFolder }).click();
     await expect(sources(page)).toBeVisible();
 
-    const box = async (selector: string) => (await page.locator(selector).first().boundingBox())!;
+    const box = async (selector: string) =>
+      (await page.locator(selector).first().boundingBox())!;
     const before = {
       strip: await box(".app__header"),
       slot: await box(".slot"),

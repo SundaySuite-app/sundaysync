@@ -5798,3 +5798,18 @@ To nye TS 7-standarder traff sync:
   sier derfor `"types": ["node"]`, fordi `playwright.config.ts` bruker `process`.
 - `noUncheckedSideEffectImports` er på. `import "./styles.css"` i `main.tsx` trenger en
   deklarasjon, så `tsconfig.json` sier `"types": ["vite/client"]`, som deklarerer `*.css`.
+
+### ④ ESLint 10, Prettier og commit-sjekker (del 2, egen PR)
+
+Samme verktøykjede som i resten av suiten, satt opp for at `package.json` bor i `app/`:
+
+- **ESLint 10** med samme regler som sundaystudio for `src/`: ingen `any`, ingen ubrukte variabler
+  (`_`-prefiks tillatt) og `react-hooks`. I e2e-specsene er `any` slått av, som i sundayrec. Der er
+  det selve poenget å rekke inn i `window` etter den mockede Tauri-IPC-en.
+- **Prettier** over hele `app/`. Første kjøring er en ren formateringscommit, holdt adskilt fra de
+  få kodefiksene lint krevde.
+- **commitlint + husky + lint-staged.** Git-roten er ett nivå over `app/`, så `prepare` er
+  `cd .. && husky app/.husky`, og hookene går inn i `app/` før de kjører. commitlint godtar syncs
+  egne typer (`release`, `design`, `polish`, `ops`, `eng`) og har ingen lengdegrense.
+  Overskriftene bærer D- og PR-nummer, og sjekken skal håndheve formen, ikke skrive om vanene.
+- CI-jobben «Playwright e2e» kjører nå også `lint` og `format:check`.

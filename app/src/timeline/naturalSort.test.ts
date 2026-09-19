@@ -14,11 +14,9 @@ describe("compareNatural over the drop's four real filename families", () => {
   });
 
   it("orders an AVCHD card whose names are nothing but zero-padded numbers", () => {
-    expect(sortNatural(["/j/02118.MTS", "/j/02106.MTS", "/j/02242.MTS"])).toEqual([
-      "/j/02106.MTS",
-      "/j/02118.MTS",
-      "/j/02242.MTS",
-    ]);
+    expect(
+      sortNatural(["/j/02118.MTS", "/j/02106.MTS", "/j/02242.MTS"]),
+    ).toEqual(["/j/02106.MTS", "/j/02118.MTS", "/j/02242.MTS"]);
   });
 
   it("orders a mixer's `uirec-YYYYMMDD_HHMMSS` names chronologically, because they sort so", () => {
@@ -68,7 +66,9 @@ describe("compareNatural is a total order", () => {
   });
 
   it("reads both path separators, because a Windows manifest carries backslashes", () => {
-    expect(compareNatural("C:\\shoot\\A\\2.mov", "C:/shoot/A/10.mov")).toBeLessThan(0);
+    expect(
+      compareNatural("C:\\shoot\\A\\2.mov", "C:/shoot/A/10.mov"),
+    ).toBeLessThan(0);
   });
 
   it("puts digits before letters at the same position", () => {
@@ -107,7 +107,9 @@ describe("compareNatural is a total order", () => {
       for (const b of files) {
         // Written as a sum rather than as `sign(x) === -sign(y)`, because `Math.sign(0)`
         // is `+0` and its negation is `-0`, and the two are not `Object.is`-equal.
-        expect(Math.sign(compareNatural(a, b)) + Math.sign(compareNatural(b, a))).toBe(0);
+        expect(
+          Math.sign(compareNatural(a, b)) + Math.sign(compareNatural(b, a)),
+        ).toBe(0);
       }
     }
   });

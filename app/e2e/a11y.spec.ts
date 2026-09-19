@@ -85,12 +85,13 @@ interface Exclusion {
 const EXCLUSIONS: Exclusion[] = [
   {
     rule: "nested-interactive",
-    element: "the clip's «Rebuild waveform» control, a role=button span inside the clip's own <button>",
+    element:
+      "the clip's «Rebuild waveform» control, a role=button span inside the clip's own <button>",
     html: /class="[^"]*\bclip\b[^"]*"/,
     why:
       "D-054/D-055/D-065, and the trade is forced in both directions. The clip root must stay a " +
       "real <button>: the timeline tells a clip click from a background-pan gesture with " +
-      "target.closest(\"button, …\"). A genuinely nested <button> is un-nested by the HTML " +
+      'target.closest("button, …"). A genuinely nested <button> is un-nested by the HTML ' +
       "parser, which would break the DOM rather than merely fail a validator — so the rebuild " +
       "affordance is a role=button span with tabIndex, Enter/Space and aria-disabled. The " +
       "focus-visible audit for D-097 confirms it is a real tab stop with a visible ring, so the " +
@@ -99,7 +100,8 @@ const EXCLUSIONS: Exclusion[] = [
   },
   {
     rule: "color-contrast",
-    element: "the clip's own chrome — the filename and the waveform status drawn inside the box",
+    element:
+      "the clip's own chrome — the filename and the waveform status drawn inside the box",
     html: /class="clip__(name|status)\b/,
     why:
       "DEFERRED to the timeline's owner, not accepted. A clip is a drawing: its ink is " +
@@ -134,7 +136,8 @@ const EXCLUSIONS: Exclusion[] = [
   },
   {
     rule: "color-contrast",
-    element: "the timeline's ticks, gutter meta and zoom controls while a sync is running",
+    element:
+      "the timeline's ticks, gutter meta and zoom controls while a sync is running",
     within: ".timeline--busy",
     states: ["syncing"],
     why:
@@ -152,7 +155,7 @@ const EXCLUSIONS: Exclusion[] = [
     within: ".settings",
     html: /readonly/,
     why:
-      "DEFERRED to the settings owner. `SettingsPanel.tsx` renders `<input type=\"text\" readOnly " +
+      'DEFERRED to the settings owner. `SettingsPanel.tsx` renders `<input type="text" readOnly ' +
       "value={…} />` with no label of any kind, so a screen reader announces an unnamed edit " +
       "field showing a path. The fix is one `aria-label` in a file this track does not own. " +
       "TODO(settings owner).",
@@ -224,11 +227,17 @@ async function reachSources(page: Page, extra: Fixtures = {}): Promise<void> {
     settings: SETTLED_SETTINGS,
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
-  await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: en.sourcesTitle }),
+  ).toBeVisible();
 }
 
 /** Open one `<details>` popover, scan with the panel up, and close it again. */
-async function scanWithPopover(page: Page, selector: string, state: string): Promise<void> {
+async function scanWithPopover(
+  page: Page,
+  selector: string,
+  state: string,
+): Promise<void> {
   const popover = page.locator(selector);
   await popover.locator("> summary").click();
   await expect(popover.locator(".popover__panel")).toBeVisible();
@@ -254,7 +263,11 @@ async function scanWithPopover(page: Page, selector: string, state: string): Pro
  * to nothing and stay green. A track that legitimately removes a control lowers the number
  * here on purpose; one that removes a control by accident finds out.
  */
-async function walkTabStops(page: Page, state: string, minStops: number): Promise<void> {
+async function walkTabStops(
+  page: Page,
+  state: string,
+  minStops: number,
+): Promise<void> {
   await page.evaluate(() => {
     (document.activeElement as HTMLElement | null)?.blur();
     // Reset Chromium's sequential-focus navigation starting point, or the walk resumes
@@ -304,7 +317,8 @@ async function walkTabStops(page: Page, state: string, minStops: number): Promis
     }
     sinceNew = 0;
     seen.push(stop.key);
-    const noOutline = stop.outlineStyle === "none" || parseFloat(stop.outlineWidth) === 0;
+    const noOutline =
+      stop.outlineStyle === "none" || parseFloat(stop.outlineWidth) === 0;
     if (noOutline && stop.boxShadow === "none") ringless.push(stop.key);
   }
   // A walk that found nothing is a walk that proved nothing — and it is what this test looks
@@ -321,7 +335,9 @@ async function walkTabStops(page: Page, state: string, minStops: number): Promis
 }
 
 test.describe("accessibility (WCAG 2.1 A/AA)", () => {
-  test("the room: empty, sources, every popover, and a marked clip", async ({ page }) => {
+  test("the room: empty, sources, every popover, and a marked clip", async ({
+    page,
+  }) => {
     await boot(page, {
       fixtures: {
         ...BOOT_FIXTURES,
@@ -333,34 +349,57 @@ test.describe("accessibility (WCAG 2.1 A/AA)", () => {
     await expectAccessible(page, "empty");
 
     await page.getByRole("button", { name: en.dropFolder }).click();
-    await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: en.sourcesTitle }),
+    ).toBeVisible();
     await expectAccessible(page, "sources");
 
     // All four disclosures, each scanned OPEN — a panel that is only ever scanned shut is a
     // panel that has never been scanned. The removed chip needs something removed first, so
     // the marked-clip state below comes before it.
     await scanWithPopover(page, ".popover--sources", "sources + «Kilder» open");
-    await scanWithPopover(page, ".popover--problems", "sources + problems open");
-    await scanWithPopover(page, ".slot__skipped", "sources + skipped chip open");
+    await scanWithPopover(
+      page,
+      ".popover--problems",
+      "sources + problems open",
+    );
+    await scanWithPopover(
+      page,
+      ".slot__skipped",
+      "sources + skipped chip open",
+    );
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
     await expect(page.locator(".preview__name")).toHaveText("C0001.MP4");
     await expectAccessible(page, "sources + a marked clip");
 
-    await page.locator(".inspector").getByLabel(`${en.removeFile}: C0001.MP4`).click();
-    await scanWithPopover(page, ".slot__removed", "sources + removed chip open");
+    await page
+      .locator(".inspector")
+      .getByLabel(`${en.removeFile}: C0001.MP4`)
+      .click();
+    await scanWithPopover(
+      page,
+      ".slot__removed",
+      "sources + removed chip open",
+    );
   });
 
   test("syncing, with the band up and a stage reported", async ({ page }) => {
     await reachSources(page, { run_sync: controlled("run_sync") });
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForPending(page, "run_sync");
-    await emit(page, "sync:progress", { stage: "Correlating", completed: 2, total: 5 });
+    await emit(page, "sync:progress", {
+      stage: "Correlating",
+      completed: 2,
+      total: 5,
+    });
     await expect(page.locator(".progress__label")).toContainText("2/5");
     await expectAccessible(page, "syncing");
   });
 
-  test("result, a marked clip, the export receipt, and an error toast", async ({ page }) => {
+  test("result, a marked clip, the export receipt, and an error toast", async ({
+    page,
+  }) => {
     await reachSources(page, {
       run_sync: controlled("run_sync"),
       "plugin:dialog|save": "/Users/e2e/out/x.fcpxml",
@@ -378,7 +417,9 @@ test.describe("accessibility (WCAG 2.1 A/AA)", () => {
 
     // The receipt (D-092 ⑤) — a button whose accessible name ends in «Vis i Finder».
     await page.getByRole("button", { name: en.exportButton }).click();
-    await expect(page.getByRole("button", { name: en.revealInFinder })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.revealInFinder }),
+    ).toBeVisible();
     await expectAccessible(page, "result + export receipt");
   });
 
@@ -386,7 +427,9 @@ test.describe("accessibility (WCAG 2.1 A/AA)", () => {
     await reachSources(page, {
       run_sync: syncOutcome(),
       "plugin:dialog|save": "/Users/e2e/out/x.fcpxml",
-      export_timeline: fn(`() => Promise.reject("io: no space left on device")`),
+      export_timeline: fn(
+        `() => Promise.reject("io: no space left on device")`,
+      ),
     });
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForResult(page);
@@ -395,7 +438,9 @@ test.describe("accessibility (WCAG 2.1 A/AA)", () => {
     await expectAccessible(page, "result + error toast");
   });
 
-  test("the rebuild affordance — the one nested control, measured at last", async ({ page }) => {
+  test("the rebuild affordance — the one nested control, measured at last", async ({
+    page,
+  }) => {
     // The state KNOWN_LIMITATIONS was written about and nobody had ever produced: a clip whose
     // analysis cache is empty offers «Bygg bølgeform på nytt» inside its own <button>. Without
     // this fixture the affordance never renders, so `nested-interactive` never fires and the
@@ -407,7 +452,9 @@ test.describe("accessibility (WCAG 2.1 A/AA)", () => {
         "plugin:dialog|open": ["/Users/e2e/shoot"],
         scan_inputs: scanManifest(),
         run_sync: syncOutcome(),
-        waveform_meta: fn(`(args) => Promise.reject("cache_missing:" + args.file)`),
+        waveform_meta: fn(
+          `(args) => Promise.reject("cache_missing:" + args.file)`,
+        ),
       },
       settings: SETTLED_SETTINGS,
     });
@@ -436,7 +483,9 @@ test.describe("accessibility (WCAG 2.1 A/AA)", () => {
     await walkTabStops(page, "settings dialog", 11);
   });
 
-  test("every tab stop shows a focus ring — the first three screens", async ({ page }) => {
+  test("every tab stop shows a focus ring — the first three screens", async ({
+    page,
+  }) => {
     // The three screens an operator meets before there is anything to sync: the consent card,
     // the onboarding, and the empty room. Between them they are the whole of `ConsentCard`,
     // `Onboarding`, `DropZone`, `EmptyState` and the strip — few stops each, and for that
@@ -444,20 +493,32 @@ test.describe("accessibility (WCAG 2.1 A/AA)", () => {
     await boot(page, {
       fixtures: {
         ...BOOT_FIXTURES,
-        telemetry_status: { consentVersion: null, granted: false, hasInstallId: false, queued: 0 },
+        telemetry_status: {
+          consentVersion: null,
+          granted: false,
+          hasInstallId: false,
+          queued: 0,
+        },
         ...consentSetSpy(),
       },
       settings: SETTLED_SETTINGS,
     });
-    await expect(page.getByRole("dialog", { name: en.consentTitle })).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: en.consentTitle }),
+    ).toBeVisible();
     await walkTabStops(page, "consent card", 3);
 
-    await boot(page, { fixtures: BOOT_FIXTURES, settings: { onboardingDone: false, lang: "en" } });
+    await boot(page, {
+      fixtures: BOOT_FIXTURES,
+      settings: { onboardingDone: false, lang: "en" },
+    });
     await expect(page.getByRole("dialog", { name: en.obTitle1 })).toBeVisible();
     await walkTabStops(page, "onboarding step 1", 3);
 
     await boot(page, { fixtures: BOOT_FIXTURES, settings: SETTLED_SETTINGS });
-    await expect(page.getByRole("button", { name: en.dropFolder })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.dropFolder }),
+    ).toBeVisible();
     await walkTabStops(page, "empty", 3);
   });
 
@@ -475,22 +536,33 @@ test.describe("accessibility (WCAG 2.1 A/AA)", () => {
     await expectAccessible(page, "onboarding step 1");
     await page.getByRole("button", { name: en.obNext }).click();
     await page.getByRole("button", { name: en.obNext }).click();
-    await expect(page.getByRole("heading", { name: en.obTitle3 })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: en.obTitle3 }),
+    ).toBeVisible();
     await expectAccessible(page, "onboarding step 3");
 
     await boot(page, {
       fixtures: {
         ...BOOT_FIXTURES,
-        telemetry_status: { consentVersion: null, granted: false, hasInstallId: false, queued: 0 },
+        telemetry_status: {
+          consentVersion: null,
+          granted: false,
+          hasInstallId: false,
+          queued: 0,
+        },
         ...consentSetSpy(),
       },
       settings: SETTLED_SETTINGS,
     });
-    await expect(page.getByRole("dialog", { name: en.consentTitle })).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: en.consentTitle }),
+    ).toBeVisible();
     await expectAccessible(page, "consent card");
   });
 
-  test("settings with an update offered, and the release note it came with", async ({ page }) => {
+  test("settings with an update offered, and the release note it came with", async ({
+    page,
+  }) => {
     // Settings has a SECOND shape, and it is the one an operator sees twenty minutes before a
     // service: an offered version, and the note that came with it (D-095). Scanning only the
     // resting dialog would have missed it — and did: the note's heading landed painted in
@@ -502,14 +574,20 @@ test.describe("accessibility (WCAG 2.1 A/AA)", () => {
         update_check: {
           phase: "available",
           version: "0.9.9",
-          notes: "Blackout er flyttet fra Escape til Shift+B.\nEksport tar med kameranavnet.",
+          notes:
+            "Blackout er flyttet fra Escape til Shift+B.\nEksport tar med kameranavnet.",
         },
       },
       settings: SETTLED_SETTINGS,
     });
     await page.getByRole("button", { name: en.settings }).click();
     await page.getByRole("button", { name: en.updateCheck }).click();
-    await expect(page.getByRole("group", { name: en.updateNotesTitle })).toBeVisible();
-    await expectAccessible(page, "settings dialog + an update with a release note");
+    await expect(
+      page.getByRole("group", { name: en.updateNotesTitle }),
+    ).toBeVisible();
+    await expectAccessible(
+      page,
+      "settings dialog + an update with a release note",
+    );
   });
 });

@@ -137,7 +137,9 @@ async function reachSources(page: Page, fixtures: Fixtures = {}) {
     settings: SETTLED_SETTINGS,
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
-  await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: en.sourcesTitle }),
+  ).toBeVisible();
 }
 
 function clip(page: Page, file: string) {
@@ -145,12 +147,16 @@ function clip(page: Page, file: string) {
 }
 
 test.describe("the pass starts on its own", () => {
-  test("a finished scan hands its files straight to prewarm_analysis", async ({ page }) => {
+  test("a finished scan hands its files straight to prewarm_analysis", async ({
+    page,
+  }) => {
     await reachSources(page, prewarmHeld());
 
     await expect
       .poll(async () =>
-        page.evaluate(() => (window as unknown as Record<string, any>).__E2E_PREWARM_ARGS__),
+        page.evaluate(
+          () => (window as unknown as Record<string, any>).__E2E_PREWARM_ARGS__,
+        ),
       )
       .toEqual({ files: [WAV, CAM_A], cacheDir: null });
   });
@@ -160,11 +166,15 @@ test.describe("the pass starts on its own", () => {
   // mid-pass had its own pass refused `busy:` and silently swallowed. The new drop then got
   // no background analysis at all, while the abandoned pass carried on reading the old
   // folder off the NAS. Nothing on either side of that seam was wrong on its own.
-  test("a second drop stops the pass running against the first", async ({ page }) => {
+  test("a second drop stops the pass running against the first", async ({
+    page,
+  }) => {
     await reachSources(page, { ...prewarmHeld(), ...cancelPrewarmSpy() });
     await waitForPending(page, "prewarm_analysis");
     expect(
-      await page.evaluate(() => (window as unknown as Record<string, any>).__E2E_CANCEL_PREWARM__),
+      await page.evaluate(
+        () => (window as unknown as Record<string, any>).__E2E_CANCEL_PREWARM__,
+      ),
     ).toBeUndefined();
 
     // A second folder goes in. The scan for it has not finished yet — the cancel must not
@@ -174,7 +184,10 @@ test.describe("the pass starts on its own", () => {
 
     await expect
       .poll(async () =>
-        page.evaluate(() => (window as unknown as Record<string, any>).__E2E_CANCEL_PREWARM__),
+        page.evaluate(
+          () =>
+            (window as unknown as Record<string, any>).__E2E_CANCEL_PREWARM__,
+        ),
       )
       .toBe(1);
   });
@@ -191,11 +204,16 @@ test.describe("the pass starts on its own", () => {
       .locator(".popover--sources > summary")
       .click();
     await page.locator(".roots .root button").click();
-    await expect(page.getByRole("button", { name: en.dropAction })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.dropAction }),
+    ).toBeVisible();
 
     await expect
       .poll(async () =>
-        page.evaluate(() => (window as unknown as Record<string, any>).__E2E_CANCEL_PREWARM__),
+        page.evaluate(
+          () =>
+            (window as unknown as Record<string, any>).__E2E_CANCEL_PREWARM__,
+        ),
       )
       .toBe(1);
   });
@@ -207,19 +225,25 @@ test.describe("it is fire-and-forget", () => {
     // the slot, and prewarming is an optimisation — the sync does the same extraction
     // itself. Anything on screen here would be the app apologising for a non-event.
     await reachSources(page, {
-      prewarm_analysis: fn(`(args) => Promise.reject("busy: cache maintenance in progress")`),
+      prewarm_analysis: fn(
+        `(args) => Promise.reject("busy: cache maintenance in progress")`,
+      ),
       waveform_meta: waveformMetaAlwaysCacheMissing(),
       waveform_level: waveformLevelOk(),
     });
 
     await expect(page.locator(".banner")).toHaveCount(0);
-    await expect(page.getByText(en.errUnknown("busy: cache maintenance in progress"))).toHaveCount(0);
+    await expect(
+      page.getByText(en.errUnknown("busy: cache maintenance in progress")),
+    ).toHaveCount(0);
     // And no clip is left waiting on a pass that never ran: the ordinary cache-miss
     // affordance is back, which is the right offer once nothing is going to write it.
     await expect(
       clip(page, CAM_A).getByRole("button", { name: en.waveformRegenerate }),
     ).toBeVisible();
-    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toHaveCount(0);
+    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toHaveCount(
+      0,
+    );
   });
 
   test("pressing Sync mid-pass starts the sync at once, and the abandoned pass is silent", async ({
@@ -256,7 +280,9 @@ test.describe("it is fire-and-forget", () => {
     //
     // What the clips must say while the run analyses them is what is true: they are being
     // analysed.
-    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toBeVisible();
+    await expect(
+      clip(page, CAM_A).getByText(en.waveformAnalysing),
+    ).toBeVisible();
     await expect(clip(page, WAV).getByText(en.waveformAnalysing)).toBeVisible();
     await expect(page.locator(".waveform__regenerate")).toHaveCount(0);
 
@@ -266,7 +292,9 @@ test.describe("it is fire-and-forget", () => {
     await settleFrames(page);
     await expect(page.locator(".banner")).toHaveCount(0);
     await expect(page.locator(".waveform__regenerate")).toHaveCount(0);
-    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toBeVisible();
+    await expect(
+      clip(page, CAM_A).getByText(en.waveformAnalysing),
+    ).toBeVisible();
 
     await resolveControlled(page, "run_sync", syncOutcome());
     await waitForResult(page);
@@ -281,7 +309,9 @@ test.describe("it is fire-and-forget", () => {
     // all — the D-046 guard refuses it outright. Nothing was pre-analysed and nothing
     // failed; the sync is doing the work. A refusal is not a verdict either.
     await reachSources(page, {
-      prewarm_analysis: fn(`(args) => Promise.reject("busy: sync in progress")`),
+      prewarm_analysis: fn(
+        `(args) => Promise.reject("busy: sync in progress")`,
+      ),
       run_sync: controlled("run_sync"),
       waveform_meta: waveformMetaAlwaysCacheMissing(),
       waveform_level: waveformLevelOk(),
@@ -291,13 +321,17 @@ test.describe("it is fire-and-forget", () => {
     await waitForPending(page, "run_sync");
     await settleFrames(page);
 
-    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toBeVisible();
+    await expect(
+      clip(page, CAM_A).getByText(en.waveformAnalysing),
+    ).toBeVisible();
     await expect(page.locator(".waveform__regenerate")).toHaveCount(0);
   });
 });
 
 test.describe("the run is the analysis, and the clips read it when it lands", () => {
-  test("the waveforms the sync built appear without a reload", async ({ page }) => {
+  test("the waveforms the sync built appear without a reload", async ({
+    page,
+  }) => {
     // The owner's second sentence: "even after the sync finished, no waveforms appeared."
     // Not a separate feature — the same bug's tail. The prewarm map was never cleared and
     // `WaveformCanvas`'s only re-read trigger was `pending → ready`, so every clip went on
@@ -312,7 +346,9 @@ test.describe("the run is the analysis, and the clips read it when it lands", ()
     await waitForPending(page, "prewarm_analysis");
     // Cold cache: nothing to draw, and the clip says so in the only way that is true while
     // a pass is on it.
-    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toBeVisible();
+    await expect(
+      clip(page, CAM_A).getByText(en.waveformAnalysing),
+    ).toBeVisible();
 
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForPending(page, "run_sync");
@@ -320,16 +356,21 @@ test.describe("the run is the analysis, and the clips read it when it lands", ()
 
     // The run does what a run does: it extracts every file's analysis into the cache.
     await page.evaluate(() => {
-      (window as unknown as Record<string, unknown>).__E2E_ANALYSIS_WRITTEN__ = true;
+      (window as unknown as Record<string, unknown>).__E2E_ANALYSIS_WRITTEN__ =
+        true;
     });
     await resolveControlled(page, "run_sync", syncOutcome());
     await waitForResult(page);
 
     // And every clip goes back and looks, exactly once. No reload, no re-sync, nothing to
     // press.
-    await expect(clip(page, CAM_A).locator(".clip__waveform canvas")).toBeVisible();
+    await expect(
+      clip(page, CAM_A).locator(".clip__waveform canvas"),
+    ).toBeVisible();
     await expect(page.locator(".waveform__regenerate")).toHaveCount(0);
-    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toHaveCount(0);
+    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toHaveCount(
+      0,
+    );
   });
 });
 
@@ -349,26 +390,36 @@ test.describe("waveforms arrive one file at a time", () => {
     // bytes it would rebuild are being written right now.
     const waiting = clip(page, CAM_A);
     await expect(waiting.getByText(en.waveformAnalysing)).toBeVisible();
-    await expect(waiting.getByRole("button", { name: en.waveformRegenerate })).toHaveCount(0);
+    await expect(
+      waiting.getByRole("button", { name: en.waveformRegenerate }),
+    ).toHaveCount(0);
     await expect(waiting.locator(".clip__waveform canvas")).toHaveCount(0);
 
     // One file finishes. Its clip re-reads and draws; the other is still waiting, which is
     // the whole point of a per-file event rather than one at the end.
     await emit(page, "prewarm:file", { file: CAM_A, ok: true });
 
-    await expect(clip(page, CAM_A).locator(".clip__waveform canvas")).toBeVisible();
-    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toHaveCount(0);
+    await expect(
+      clip(page, CAM_A).locator(".clip__waveform canvas"),
+    ).toBeVisible();
+    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toHaveCount(
+      0,
+    );
     await expect(clip(page, WAV).getByText(en.waveformAnalysing)).toBeVisible();
   });
 
-  test("a file that would not decode gets the rebuild control back", async ({ page }) => {
+  test("a file that would not decode gets the rebuild control back", async ({
+    page,
+  }) => {
     await reachSources(page, {
       ...prewarmHeld(),
       waveform_meta: waveformMetaAlwaysCacheMissing(),
       waveform_level: waveformLevelOk(),
     });
     await waitForPending(page, "prewarm_analysis");
-    await expect(clip(page, CAM_A).getByText(en.waveformAnalysing)).toBeVisible();
+    await expect(
+      clip(page, CAM_A).getByText(en.waveformAnalysing),
+    ).toBeVisible();
 
     await emit(page, "prewarm:file", { file: CAM_A, ok: false });
 
@@ -391,7 +442,9 @@ test.describe("waveforms arrive one file at a time", () => {
 // What these two prove is that the mark is per-FILE (the whole reason `prewarm:file` is a
 // per-file event) and that it is not colour-only.
 test.describe("a clip goes blue when its own analysis lands", () => {
-  test("a clip turns blue the moment its own file is reported", async ({ page }) => {
+  test("a clip turns blue the moment its own file is reported", async ({
+    page,
+  }) => {
     await reachSources(page, {
       ...prewarmHeld(),
       run_sync: syncOutcome(),
@@ -417,7 +470,9 @@ test.describe("a clip goes blue when its own analysis lands", () => {
     // §7.2's "a bad file is a value": it goes back to the ordinary cache-missing state
     // (proved above), and it must not pick up the mark on the way.
     await emit(page, "prewarm:file", { file: WAV, ok: false });
-    await expect(clip(page, WAV).getByRole("button", { name: en.waveformRegenerate })).toBeVisible();
+    await expect(
+      clip(page, WAV).getByRole("button", { name: en.waveformRegenerate }),
+    ).toBeVisible();
     await expect(clip(page, WAV)).not.toHaveClass(/clip--analysed/);
     await expect(clip(page, CAM_A)).toHaveClass(/clip--analysed/);
 
@@ -432,7 +487,9 @@ test.describe("a clip goes blue when its own analysis lands", () => {
     await expect(page.locator(".clip--pre")).toHaveCount(0);
   });
 
-  test("the blue is in the accessible name too, not only in the pixels", async ({ page }) => {
+  test("the blue is in the accessible name too, not only in the pixels", async ({
+    page,
+  }) => {
     // §9.4's rule about the clip's name: a claim the app makes in colour is a claim it owes
     // in words. Appended to the pre-sync sentence rather than replacing it — where the
     // start came from is still the more important half.
@@ -494,7 +551,9 @@ function provenanceManifest(): Record<string, unknown> {
 
 async function boxStyle(page: Page, file: string) {
   return page.evaluate((f) => {
-    const s = getComputedStyle(document.querySelector(`.clip[data-file="${f}"]`)!);
+    const s = getComputedStyle(
+      document.querySelector(`.clip[data-file="${f}"]`)!,
+    );
     return {
       background: s.backgroundColor,
       color: s.color,
@@ -529,7 +588,8 @@ test.describe("the blue and the provenance marks divide the box between them", (
     await expect(clip(page, STRAY)).toHaveClass(/clip--offsession/);
 
     const strayBefore = await boxStyle(page, STRAY);
-    for (const f of [PLAIN, NOCLOCK, STRAY]) await emit(page, "prewarm:file", { file: f, ok: true });
+    for (const f of [PLAIN, NOCLOCK, STRAY])
+      await emit(page, "prewarm:file", { file: f, ok: true });
     await expect(clip(page, NOCLOCK)).toHaveClass(/clip--analysed/);
 
     // D-091 re-expressed the blue, it did not relax the claim. What used to be a 32 %
@@ -567,17 +627,29 @@ test.describe("the aggregate tick is quiet and separate", () => {
     await reachSources(page, prewarmHeld());
     await waitForPending(page, "prewarm_analysis");
 
-    await emit(page, "prewarm:progress", { stage: "Extracting", completed: 1, total: 2 });
+    await emit(page, "prewarm:progress", {
+      stage: "Extracting",
+      completed: 1,
+      total: 2,
+    });
 
     const panel = page.getByRole("region", { name: en.sourcesTitle });
-    await expect(panel.locator(".prewarm")).toHaveText(en.prewarmProgress(1, 2));
+    await expect(panel.locator(".prewarm")).toHaveText(
+      en.prewarmProgress(1, 2),
+    );
     // The ProgressBar belongs to things the operator is WAITING for. Dressing speculative
     // background work as one of those would say the app is busy when it is not.
     await expect(page.locator(".progress__label")).toHaveCount(0);
     await expect(page.getByRole("progressbar")).toHaveCount(0);
 
-    await emit(page, "prewarm:progress", { stage: "Extracting", completed: 2, total: 2 });
-    await expect(panel.locator(".prewarm")).toHaveText(en.prewarmProgress(2, 2));
+    await emit(page, "prewarm:progress", {
+      stage: "Extracting",
+      completed: 2,
+      total: 2,
+    });
+    await expect(panel.locator(".prewarm")).toHaveText(
+      en.prewarmProgress(2, 2),
+    );
 
     // When the pass ends the line goes away entirely — it is not a summary, it is a tick.
     await resolveControlled(page, "prewarm_analysis", undefined);

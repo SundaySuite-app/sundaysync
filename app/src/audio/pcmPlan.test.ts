@@ -52,7 +52,11 @@ describe("planChunks", () => {
   it("uses the documented default horizon", () => {
     expect(AHEAD_SEC).toBe(30);
     expect(BEHIND_SEC).toBe(15);
-    const wide = planChunks([clip()], 600, { ...OPTS, aheadSec: 60, behindSec: 60 });
+    const wide = planChunks([clip()], 600, {
+      ...OPTS,
+      aheadSec: 60,
+      behindSec: 60,
+    });
     expect(wide.length).toBeGreaterThan(planChunks([clip()], 600, OPTS).length);
   });
 
@@ -72,7 +76,9 @@ describe("planChunks", () => {
     ];
     const got = planChunks(clips, 600.1, OPTS);
     // Both clips' standing chunks (distance 0) come before either clip's look-ahead.
-    expect(new Set(got.slice(0, 2).map((r) => r.file))).toEqual(new Set(["/a.wav", "/b.mp4"]));
+    expect(new Set(got.slice(0, 2).map((r) => r.file))).toEqual(
+      new Set(["/a.wav", "/b.mp4"]),
+    );
     expect(got.slice(0, 2).every((r) => r.chunkIndex === 40)).toBe(true);
   });
 
@@ -89,9 +95,17 @@ describe("planChunks", () => {
     // so the plan has to look where the audio will actually be, not where §5 stored it.
     // At t=0.5 s the window ends at 30.5 s: uncorrected, chunk 2 starts at 30.0 and is
     // needed; corrected, it starts at 30.885 and is not.
-    const drifting = clip({ durationSec: 3600, driftPpm: -500, projectedEndErrorMs: -1800 });
-    const on = planChunks([drifting], 0.5, { driftCorrected: true }).map((r) => r.chunkIndex);
-    const off = planChunks([drifting], 0.5, { driftCorrected: false }).map((r) => r.chunkIndex);
+    const drifting = clip({
+      durationSec: 3600,
+      driftPpm: -500,
+      projectedEndErrorMs: -1800,
+    });
+    const on = planChunks([drifting], 0.5, { driftCorrected: true }).map(
+      (r) => r.chunkIndex,
+    );
+    const off = planChunks([drifting], 0.5, { driftCorrected: false }).map(
+      (r) => r.chunkIndex,
+    );
     expect(new Set(on)).toEqual(new Set([0, 1]));
     expect(new Set(off)).toEqual(new Set([0, 1, 2]));
   });
@@ -117,7 +131,9 @@ describe("distanceToSpan", () => {
 });
 
 describe("chooseEvictions", () => {
-  function resident(over: Partial<ResidentChunk> & Pick<ResidentChunk, "chunkIndex">): ResidentChunk {
+  function resident(
+    over: Partial<ResidentChunk> & Pick<ResidentChunk, "chunkIndex">,
+  ): ResidentChunk {
     const startSec = over.startSec ?? over.chunkIndex * CHUNK_SEC;
     return {
       file: "/a.wav",

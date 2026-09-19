@@ -8,10 +8,19 @@ import { releaseNotes, type UpdateStatus } from "../update";
 
 describe("releaseNotes (D-095)", () => {
   it("returns the note an offer carries", () => {
-    expect(releaseNotes({ phase: "available", version: "0.6.0-beta.6", notes: "Nytt: en ting." }))
-      .toBe("Nytt: en ting.");
     expect(
-      releaseNotes({ phase: "readyToInstall", version: "0.6.0-beta.6", notes: "Nytt: en ting." }),
+      releaseNotes({
+        phase: "available",
+        version: "0.6.0-beta.6",
+        notes: "Nytt: en ting.",
+      }),
+    ).toBe("Nytt: en ting.");
+    expect(
+      releaseNotes({
+        phase: "readyToInstall",
+        version: "0.6.0-beta.6",
+        notes: "Nytt: en ting.",
+      }),
     ).toBe("Nytt: en ting.");
     // Assembled in the renderer from `update:progress`, so it can carry the note forward.
     expect(
@@ -26,22 +35,38 @@ describe("releaseNotes (D-095)", () => {
 
   it("keeps the note's own line breaks — they are its paragraphs", () => {
     expect(
-      releaseNotes({ phase: "available", version: "1.0.0", notes: "Første linje.\n\nAndre." }),
+      releaseNotes({
+        phase: "available",
+        version: "1.0.0",
+        notes: "Første linje.\n\nAndre.",
+      }),
     ).toBe("Første linje.\n\nAndre.");
   });
 
   it("treats absent, null and whitespace-only as nothing to show", () => {
     // A release from before the note mechanism: the backend omits the field entirely.
-    expect(releaseNotes({ phase: "available", version: "0.6.0-beta.5" })).toBeNull();
-    expect(releaseNotes({ phase: "available", version: "1.0.0", notes: null })).toBeNull();
-    expect(releaseNotes({ phase: "available", version: "1.0.0", notes: "" })).toBeNull();
-    expect(releaseNotes({ phase: "available", version: "1.0.0", notes: "  \n\t " })).toBeNull();
+    expect(
+      releaseNotes({ phase: "available", version: "0.6.0-beta.5" }),
+    ).toBeNull();
+    expect(
+      releaseNotes({ phase: "available", version: "1.0.0", notes: null }),
+    ).toBeNull();
+    expect(
+      releaseNotes({ phase: "available", version: "1.0.0", notes: "" }),
+    ).toBeNull();
+    expect(
+      releaseNotes({ phase: "available", version: "1.0.0", notes: "  \n\t " }),
+    ).toBeNull();
   });
 
   it("trims, so a leading blank line never opens the box with an empty row", () => {
-    expect(releaseNotes({ phase: "available", version: "1.0.0", notes: "\n Nytt. \n\n" })).toBe(
-      "Nytt.",
-    );
+    expect(
+      releaseNotes({
+        phase: "available",
+        version: "1.0.0",
+        notes: "\n Nytt. \n\n",
+      }),
+    ).toBe("Nytt.");
   });
 
   it("is null for every phase that is not an offer", () => {
@@ -57,7 +82,11 @@ describe("releaseNotes (D-095)", () => {
   it("survives a feed that sends something other than a string", () => {
     // Not reachable through the Rust command, which types the field — but the value comes
     // off the network and the renderer must not throw on a shape it did not expect.
-    const bogus = { phase: "available", version: "1.0.0", notes: 42 } as unknown as UpdateStatus;
+    const bogus = {
+      phase: "available",
+      version: "1.0.0",
+      notes: 42,
+    } as unknown as UpdateStatus;
     expect(releaseNotes(bogus)).toBeNull();
   });
 });

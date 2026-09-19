@@ -51,7 +51,12 @@ export function UnsyncedShelf({
             <span className="visually-hidden">
               {t.moveToDevice}: {basename(u.file)}
             </span>
-            <select value="" onChange={(e) => e.target.value && onOverride(u.file, e.target.value)}>
+            <select
+              value=""
+              onChange={(e) =>
+                e.target.value && onOverride(u.file, e.target.value)
+              }
+            >
               <option value="">{t.moveToDevice}</option>
               {deviceIds.map((id) => (
                 <option key={id} value={id}>

@@ -37,7 +37,9 @@ const LEVELS_EXPR =
 
 /** A healthy pyramid — resolves immediately, every level present. */
 function waveformMetaOk(): unknown {
-  return fn(`(args) => ({ totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} })`);
+  return fn(
+    `(args) => ({ totalSamples: ${TOTAL_SAMPLES}, levels: ${LEVELS_EXPR} })`,
+  );
 }
 
 /**
@@ -115,7 +117,11 @@ function regenerateSpyOk(): Fixtures {
 /** The D-046 activity-guard refusal a regenerate hits while a sync (or another
  *  maintenance pass) already holds the slot. */
 function regenerateBusy(): Fixtures {
-  return { regenerate_analysis: fn(`(args) => Promise.reject("busy: sync in progress")`) };
+  return {
+    regenerate_analysis: fn(
+      `(args) => Promise.reject("busy: sync in progress")`,
+    ),
+  };
 }
 
 async function reachResult(page: Page, waveformFixtures: Fixtures) {
@@ -144,24 +150,37 @@ function clipBox(page: Page) {
 }
 
 test.describe("per-clip waveforms (v0.3 S4)", () => {
-  test("a resolvable clip mounts a canvas inside its .clip__waveform slot", async ({ page }) => {
-    await reachResult(page, { waveform_meta: waveformMetaOk(), waveform_level: waveformLevelOk() });
+  test("a resolvable clip mounts a canvas inside its .clip__waveform slot", async ({
+    page,
+  }) => {
+    await reachResult(page, {
+      waveform_meta: waveformMetaOk(),
+      waveform_level: waveformLevelOk(),
+    });
 
     const slot = clipBox(page).locator(".clip__waveform");
     await expect(slot).toBeVisible();
     await expect(slot.locator("canvas")).toBeVisible();
     // No error affordance for a healthy pyramid.
-    await expect(clipBox(page).getByText(en.waveformUnavailable)).toHaveCount(0);
+    await expect(clipBox(page).getByText(en.waveformUnavailable)).toHaveCount(
+      0,
+    );
   });
 
-  test("a cache-miss clip shows the regenerate control, not a canvas", async ({ page }) => {
+  test("a cache-miss clip shows the regenerate control, not a canvas", async ({
+    page,
+  }) => {
     await reachResult(page, {
       waveform_meta: waveformMetaAlwaysCacheMissing(),
       waveform_level: waveformLevelOk(),
     });
 
-    await expect(clipBox(page).getByRole("button", { name: en.waveformRegenerate })).toBeVisible();
-    await expect(clipBox(page).locator(".clip__waveform canvas")).toHaveCount(0);
+    await expect(
+      clipBox(page).getByRole("button", { name: en.waveformRegenerate }),
+    ).toBeVisible();
+    await expect(clipBox(page).locator(".clip__waveform canvas")).toHaveCount(
+      0,
+    );
   });
 
   test("clicking regenerate calls regenerate_analysis and, once it succeeds, the canvas draws", async ({
@@ -173,14 +192,21 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
       ...regenerateSpyOk(),
     });
 
-    const regenerate = clipBox(page).getByRole("button", { name: en.waveformRegenerate });
+    const regenerate = clipBox(page).getByRole("button", {
+      name: en.waveformRegenerate,
+    });
     await expect(regenerate).toBeVisible();
 
     await regenerate.click();
 
     // regenerate_analysis really was invoked, with the clip's own file.
     await expect
-      .poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_REGENERATE__))
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as unknown as Record<string, unknown>).__E2E_REGENERATE__,
+        ),
+      )
       .toEqual([FILE]);
 
     // The cache-miss button is gone and a canvas has taken its place — no reload needed;
@@ -190,7 +216,9 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     await expect(clipBox(page).locator(".clip__waveform canvas")).toBeVisible();
   });
 
-  test("clicking regenerate does not also select the clip", async ({ page }) => {
+  test("clicking regenerate does not also select the clip", async ({
+    page,
+  }) => {
     // The regenerate control sits inside the clip's own clickable box (Clip.tsx's
     // `<button>`) — without `stopPropagation` this click would bubble and also fire
     // `onSelect`.
@@ -209,15 +237,26 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     const preview = page.locator(".preview");
     // D-092 ⑥: nothing marked is now a structured empty state, so the claim ("no clip is
     // selected") is the sentence's own element rather than the panel's whole text.
-    await expect(preview.locator(".preview__emptyline")).toHaveText(en.previewEmpty);
+    await expect(preview.locator(".preview__emptyline")).toHaveText(
+      en.previewEmpty,
+    );
 
-    await clipBox(page).getByRole("button", { name: en.waveformRegenerate }).click();
+    await clipBox(page)
+      .getByRole("button", { name: en.waveformRegenerate })
+      .click();
 
     // The rebuild really happened — otherwise this would pass by the click missing entirely.
     await expect
-      .poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_REGENERATE__))
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as unknown as Record<string, unknown>).__E2E_REGENERATE__,
+        ),
+      )
       .toEqual([FILE]);
-    await expect(preview.locator(".preview__emptyline")).toHaveText(en.previewEmpty);
+    await expect(preview.locator(".preview__emptyline")).toHaveText(
+      en.previewEmpty,
+    );
     // Still nothing selected: the frame that is there is the empty state's dashed
     // placeholder (D-092 ⑥), never the still of a clip this click did not mark.
     await expect(preview.locator(".preview__frame--empty")).toHaveCount(1);
@@ -234,7 +273,9 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
       ...regenerateBusy(),
     });
 
-    const regenerate = clipBox(page).getByRole("button", { name: en.waveformRegenerate });
+    const regenerate = clipBox(page).getByRole("button", {
+      name: en.waveformRegenerate,
+    });
     await expect(regenerate).toBeVisible();
     await regenerate.click();
 
@@ -246,11 +287,15 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     await expect(busy).toBeVisible();
     await expect(busy).not.toHaveAttribute("aria-disabled", "true");
     await expect(busy).toHaveAttribute("title", en.errBusySync);
-    await expect(clipBox(page).getByText(en.errUnknown("busy: sync in progress"))).toHaveCount(0);
+    await expect(
+      clipBox(page).getByText(en.errUnknown("busy: sync in progress")),
+    ).toHaveCount(0);
 
     // Retrying is the same action, still available — not a dead end.
     await busy.click();
-    await expect(clipBox(page).getByRole("button", { name: busyLabel })).toBeVisible();
+    await expect(
+      clipBox(page).getByRole("button", { name: busyLabel }),
+    ).toBeVisible();
   });
 
   test("a transient error is not a dead end — a zoom change brings the waveform back", async ({
@@ -269,8 +314,13 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     const status = clipBox(page).locator(".waveform__status");
     await expect(status).toHaveText(en.waveformUnavailable);
     // The raw engine detail is kept, on hover — never swallowed (§7.5).
-    await expect(status).toHaveAttribute("title", /Resource temporarily unavailable/);
-    await expect(clipBox(page).locator(".clip__waveform canvas")).toHaveCount(0);
+    await expect(status).toHaveAttribute(
+      "title",
+      /Resource temporarily unavailable/,
+    );
+    await expect(clipBox(page).locator(".clip__waveform canvas")).toHaveCount(
+      0,
+    );
 
     // The blip passes. Nothing tells the app so — that is the point: the clip is holding a
     // rejection and would hold it forever if a zoom change did not send it back to look.
@@ -283,7 +333,8 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     const zoomIn = page.getByRole("button", { name: en.zoomIn });
     for (let i = 0; i < 4; i++) {
       await zoomIn.click();
-      if ((await clipBox(page).locator(".clip__waveform canvas").count()) > 0) break;
+      if ((await clipBox(page).locator(".clip__waveform canvas").count()) > 0)
+        break;
     }
     await expect(clipBox(page).locator(".clip__waveform canvas")).toBeVisible();
     await expect(status).toHaveCount(0);
@@ -291,7 +342,9 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     // Recovery re-READS; it must never have re-extracted the source media behind the
     // user's back.
     expect(
-      await page.evaluate(() => (window as unknown as Record<string, unknown>).__E2E_REGENERATE__),
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).__E2E_REGENERATE__,
+      ),
     ).toBeUndefined();
   });
 
@@ -320,7 +373,9 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     // Both inside the clip box — nothing spills out of a box that is `overflow: hidden`
     // only because the stylesheet remembers to be.
     expect(nameBox.x).toBeGreaterThanOrEqual(clip.x - 0.5);
-    expect(controlBox.x + controlBox.width).toBeLessThanOrEqual(clip.x + clip.width + 0.5);
+    expect(controlBox.x + controlBox.width).toBeLessThanOrEqual(
+      clip.x + clip.width + 0.5,
+    );
     // And one line, not two: the clip is `clipHeightFor(lane)` tall — 33 px at the tightest
     // pitch there is — and the row must never wrap.
     expect(nameBox.height).toBeLessThan(clip.height);
@@ -334,7 +389,9 @@ test.describe("per-clip waveforms (v0.3 S4)", () => {
     // `.clip__waveform` is centred and fills the clip, so a control here would sit
     // exactly where the user aims to click the clip and would swallow that click.
     await reachResult(page, {
-      waveform_meta: fn(`(args) => Promise.reject("io: Resource temporarily unavailable")`),
+      waveform_meta: fn(
+        `(args) => Promise.reject("io: Resource temporarily unavailable")`,
+      ),
       waveform_level: waveformLevelOk(),
     });
 

@@ -21,9 +21,13 @@ export function ProgressBar({
    *  existing `run_sync` caller does not need to change. */
   idleLabel?: string;
 }) {
-  const label = progress ? stageLabel(t, progress.stage) : (idleLabel ?? t.syncing);
+  const label = progress
+    ? stageLabel(t, progress.stage)
+    : (idleLabel ?? t.syncing);
   const determinate = progress !== null && progress.total > 0;
-  const pct = determinate ? Math.round((progress.completed / progress.total) * 100) : null;
+  const pct = determinate
+    ? Math.round((progress.completed / progress.total) * 100)
+    : null;
 
   return (
     <div className="progress">

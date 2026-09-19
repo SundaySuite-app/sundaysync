@@ -78,7 +78,11 @@ function twoDeviceOutcome(camOver: Record<string, unknown> = {}) {
   };
 }
 
-async function reachResult(page: Page, outcome: Record<string, unknown>, extra = pcmWindow()) {
+async function reachResult(
+  page: Page,
+  outcome: Record<string, unknown>,
+  extra = pcmWindow(),
+) {
   await boot(page, {
     fixtures: {
       ...BOOT_FIXTURES,
@@ -102,7 +106,9 @@ const playButton = (page: Page) => page.getByRole("button", { name: en.play });
 /** Press play and wait until the engine says it is actually playing. */
 async function startPlaying(page: Page) {
   await playButton(page).click();
-  await page.waitForFunction(() => window.__SUNDAYSYNC_AUDIO__?.playing === true);
+  await page.waitForFunction(
+    () => window.__SUNDAYSYNC_AUDIO__?.playing === true,
+  );
 }
 
 const hook = (page: Page) =>
@@ -111,7 +117,10 @@ const hook = (page: Page) =>
 /** The first scheduled chunk of `file`. */
 function firstChunk(h: AudioHook, file: string) {
   const entry = h.scheduled.find((e) => e.file === file);
-  if (!entry) throw new Error(`nothing scheduled for ${file}: ${JSON.stringify(h.scheduled)}`);
+  if (!entry)
+    throw new Error(
+      `nothing scheduled for ${file}: ${JSON.stringify(h.scheduled)}`,
+    );
   return entry;
 }
 
@@ -134,7 +143,9 @@ function clipOriginSec(h: AudioHook, file: string): number {
   return h.playStartSec + e.whenOffset - sourcePositionSec / e.rate;
 }
 
-test("play schedules both devices exactly their offset apart", async ({ page }) => {
+test("play schedules both devices exactly their offset apart", async ({
+  page,
+}) => {
   // THE assertion of this stage. If this delta is wrong by a millisecond the operator
   // hears an echo and concludes the engine cannot sync — so it is checked against the
   // placement's own `offset_seconds`, not against a recorded number.
@@ -167,7 +178,10 @@ test("a drifting clip plays at the corrected rate, in the direction that cancels
 }) => {
   // +300 ppm over a 3550 s camera is 1065 ms of end error — 53 frames at 25 fps, well
   // past the exporter's half-frame gate, so playback must correct it too.
-  const outcome = twoDeviceOutcome({ drift_ppm: 300, projected_end_error_ms: 1065 });
+  const outcome = twoDeviceOutcome({
+    drift_ppm: 300,
+    projected_end_error_ms: 1065,
+  });
   await reachResult(page, outcome);
   await startPlaying(page);
 
@@ -183,16 +197,24 @@ test("a drifting clip plays at the corrected rate, in the direction that cancels
 
   // The start moved by half the projected end error (§4.3 places on the median), so the
   // corrected clip begins 532.5 ms EARLIER than its stored offset.
-  expect(clipOriginSec(h, CAM) - clipOriginSec(h, REC)).toBeCloseTo(4.2 - 1.065 / 2, 6);
+  expect(clipOriginSec(h, CAM) - clipOriginSec(h, REC)).toBeCloseTo(
+    4.2 - 1.065 / 2,
+    6,
+  );
 });
 
-test("drift correction turned off puts every source back at rate 1", async ({ page }) => {
+test("drift correction turned off puts every source back at rate 1", async ({
+  page,
+}) => {
   await boot(page, {
     fixtures: {
       ...BOOT_FIXTURES,
       "plugin:dialog|open": ["/Users/e2e/shoot"],
       scan_inputs: scanManifest(),
-      run_sync: twoDeviceOutcome({ drift_ppm: 300, projected_end_error_ms: 1065 }),
+      run_sync: twoDeviceOutcome({
+        drift_ppm: 300,
+        projected_end_error_ms: 1065,
+      }),
       ...pcmWindow(),
     },
     settings: { ...SETTLED_SETTINGS, playbackDriftCorrected: false },
@@ -217,7 +239,10 @@ test("the Settings toggle re-rates a RUNNING playback, without a restart (V03-S6
   // The thing worth a browser is the seam between them: flipping the checkbox while audio
   // is playing must rebuild the schedule, not wait for the next launch. A comparison you
   // have to relaunch the app to make is not a comparison anyone makes.
-  await reachResult(page, twoDeviceOutcome({ drift_ppm: 300, projected_end_error_ms: 1065 }));
+  await reachResult(
+    page,
+    twoDeviceOutcome({ drift_ppm: 300, projected_end_error_ms: 1065 }),
+  );
   await startPlaying(page);
   expect(firstChunk(await hook(page), CAM).rate).toBeCloseTo(1 / 1.0003, 9);
 
@@ -254,17 +279,24 @@ test("seeking during playback bumps the generation and rebuilds from the new pos
     before.generation,
   );
   // …and playback resumes from where the playhead now stands.
-  await page.waitForFunction(() => window.__SUNDAYSYNC_AUDIO__?.playing === true);
+  await page.waitForFunction(
+    () => window.__SUNDAYSYNC_AUDIO__?.playing === true,
+  );
   const after = await hook(page);
   expect(after.playStartSec).toBeGreaterThan(1);
   expect(after.generation).toBeGreaterThan(before.generation);
   // The schedule was rebuilt from the new position, not carried over — and the clips are
   // still exactly their offset apart there.
   expect(firstChunk(after, REC).chunkIndex).toBeGreaterThan(0);
-  expect(clipOriginSec(after, CAM) - clipOriginSec(after, REC)).toBeCloseTo(4.2, 4);
+  expect(clipOriginSec(after, CAM) - clipOriginSec(after, REC)).toBeCloseTo(
+    4.2,
+    4,
+  );
 });
 
-test("mute silences one device's bus and solo silences the others", async ({ page }) => {
+test("mute silences one device's bus and solo silences the others", async ({
+  page,
+}) => {
   await reachResult(page, twoDeviceOutcome());
   await startPlaying(page);
 
@@ -276,17 +308,19 @@ test("mute silences one device's bus and solo silences the others", async ({ pag
 
   // Un-mute, then solo the recorder: everything else drops out.
   await page.getByRole("button", { name: en.unmuteDevice("Camera A") }).click();
-  await page.getByRole("button", { name: en.soloDevice("Zoom recorder") }).click();
+  await page
+    .getByRole("button", { name: en.soloDevice("Zoom recorder") })
+    .click();
   await expect
     .poll(async () => (await hook(page)).deviceGains["cam-a"])
     .toBe(0);
   expect((await hook(page)).deviceGains["rec"]).toBe(1);
 
   // Mute beats solo: a soloed device that is also muted stays silent.
-  await page.getByRole("button", { name: en.muteDevice("Zoom recorder") }).click();
-  await expect
-    .poll(async () => (await hook(page)).deviceGains["rec"])
-    .toBe(0);
+  await page
+    .getByRole("button", { name: en.muteDevice("Zoom recorder") })
+    .click();
+  await expect.poll(async () => (await hook(page)).deviceGains["rec"]).toBe(0);
 });
 
 test("buffering is shown while the first windows are in flight, then playback starts", async ({
@@ -304,25 +338,41 @@ test("buffering is shown while the first windows are in flight, then playback st
 
   await playButton(page).click();
   await expect(page.getByText(en.buffering)).toBeVisible();
-  await page.waitForFunction(() => window.__SUNDAYSYNC_AUDIO__?.buffering === true);
+  await page.waitForFunction(
+    () => window.__SUNDAYSYNC_AUDIO__?.buffering === true,
+  );
   expect((await hook(page)).playing).toBe(false);
 
-  await page.evaluate(() => (window.__PCM_GATE__ ?? []).forEach((release) => release()));
-  await page.waitForFunction(() => window.__SUNDAYSYNC_AUDIO__?.playing === true);
+  await page.evaluate(() =>
+    (window.__PCM_GATE__ ?? []).forEach((release) => release()),
+  );
+  await page.waitForFunction(
+    () => window.__SUNDAYSYNC_AUDIO__?.playing === true,
+  );
   await expect(page.getByText(en.buffering)).toBeHidden();
 });
 
-test("Space toggles playback without disturbing the zoom keys", async ({ page }) => {
+test("Space toggles playback without disturbing the zoom keys", async ({
+  page,
+}) => {
   await reachResult(page, twoDeviceOutcome());
 
   await page.locator(".timeline").press(" ");
-  await page.waitForFunction(() => window.__SUNDAYSYNC_AUDIO__?.playing === true);
+  await page.waitForFunction(
+    () => window.__SUNDAYSYNC_AUDIO__?.playing === true,
+  );
 
   await page.locator(".timeline").press(" ");
-  await page.waitForFunction(() => window.__SUNDAYSYNC_AUDIO__?.playing === false);
+  await page.waitForFunction(
+    () => window.__SUNDAYSYNC_AUDIO__?.playing === false,
+  );
 
   // The pre-existing zoom bindings still work — Space was added last on purpose.
-  const width = () => page.locator(".clip").first().evaluate((el) => el.getBoundingClientRect().width);
+  const width = () =>
+    page
+      .locator(".clip")
+      .first()
+      .evaluate((el) => el.getBoundingClientRect().width);
   const before = await width();
   await page.locator(".timeline").press("+");
   await expect.poll(width).toBeGreaterThan(before);
@@ -354,16 +404,22 @@ test("a clip whose cache entry is gone is dropped, and the rest keeps playing", 
 test("stop returns the playhead to the start", async ({ page }) => {
   await reachResult(page, twoDeviceOutcome());
   await startPlaying(page);
-  await expect.poll(() => page.locator('[data-testid="transport-time"]').textContent()).not.toBe(
-    "00:00.000",
-  );
+  await expect
+    .poll(() => page.locator('[data-testid="transport-time"]').textContent())
+    .not.toBe("00:00.000");
 
   await page.getByRole("button", { name: en.stopPlayback }).click();
-  await page.waitForFunction(() => window.__SUNDAYSYNC_AUDIO__?.playing === false);
-  await expect(page.locator('[data-testid="transport-time"]')).toHaveText("00:00.000");
+  await page.waitForFunction(
+    () => window.__SUNDAYSYNC_AUDIO__?.playing === false,
+  );
+  await expect(page.locator('[data-testid="transport-time"]')).toHaveText(
+    "00:00.000",
+  );
 });
 
-test("the scheduled sources really do render in sync, sample for sample", async ({ page }) => {
+test("the scheduled sources really do render in sync, sample for sample", async ({
+  page,
+}) => {
   // The closest a headless run can get to listening. Everything above asserts the
   // *numbers* in the schedule; this takes the real `computeSchedule` output, builds the
   // graph the way `scheduler.ts` builds it, and renders it through an
@@ -376,13 +432,32 @@ test("the scheduled sources really do render in sync, sample for sample", async 
   await page.goto("/");
 
   const clips: PlacedClip[] = [
-    { file: "/a.wav", device: "rec", startSec: 0, durationSec: 30, driftPpm: null, projectedEndErrorMs: null },
-    { file: "/b.wav", device: "cam", startSec: 2, durationSec: 30, driftPpm: null, projectedEndErrorMs: null },
+    {
+      file: "/a.wav",
+      device: "rec",
+      startSec: 0,
+      durationSec: 30,
+      driftPpm: null,
+      projectedEndErrorMs: null,
+    },
+    {
+      file: "/b.wav",
+      device: "cam",
+      startSec: 2,
+      durationSec: 30,
+      driftPpm: null,
+      projectedEndErrorMs: null,
+    },
   ];
-  const schedule = computeSchedule(clips, 0, { has: () => true }, {
-    driftCorrected: true,
-    horizonAheadSec: 60,
-  });
+  const schedule = computeSchedule(
+    clips,
+    0,
+    { has: () => true },
+    {
+      driftCorrected: true,
+      horizonAheadSec: 60,
+    },
+  );
   expect(schedule.filter((e) => e.file === "/a.wav")).toHaveLength(2); // two chunks
 
   const impulses = await page.evaluate(
@@ -412,7 +487,8 @@ test("the scheduled sources really do render in sync, sample for sample", async 
       for (let ch = 0; ch < 2; ch += 1) {
         const data = rendered.getChannelData(ch);
         const hits: number[] = [];
-        for (let i = 0; i < data.length; i += 1) if (data[i] > 0.5) hits.push(i);
+        for (let i = 0; i < data.length; i += 1)
+          if (data[i] > 0.5) hits.push(i);
         found.push(hits);
       }
       return found;
@@ -441,5 +517,8 @@ test("the transport says what the audio actually is", async ({ page }) => {
   // its own 724 px at 1024. The claim is unchanged and the reading is stronger: an attribute
   // is the whole sentence, where a clipped caption was most of one.
   await reachResult(page, twoDeviceOutcome());
-  await expect(page.locator(".transport")).toHaveAttribute("title", en.playbackQualityNote);
+  await expect(page.locator(".transport")).toHaveAttribute(
+    "title",
+    en.playbackQualityNote,
+  );
 });

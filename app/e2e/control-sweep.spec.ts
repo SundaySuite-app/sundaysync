@@ -77,7 +77,9 @@ function spy(cmd: string, resultExpr = "undefined"): Fixtures {
 /** Every call made to `cmd` so far, in order. */
 async function calls(page: Page, cmd: string): Promise<Record<string, any>[]> {
   return page.evaluate(
-    (c) => ((window as unknown as Record<string, any>).__E2E_CALLS__?.[c] ?? []) as unknown[],
+    (c) =>
+      ((window as unknown as Record<string, any>).__E2E_CALLS__?.[c] ??
+        []) as unknown[],
     cmd,
   ) as Promise<Record<string, any>[]>;
 }
@@ -117,7 +119,8 @@ const CAM_B = "/Users/e2e/shoot/CamB/C0002.MP4";
 const SHOOT = "/Users/e2e/shoot";
 const FCPXML = "/Users/e2e/out/SundaySync.fcpxml";
 
-const sources = (page: Page) => page.getByRole("region", { name: en.sourcesTitle });
+const sources = (page: Page) =>
+  page.getByRole("region", { name: en.sourcesTitle });
 const inspector = (page: Page) => page.locator(".inspector");
 const strip = (page: Page) => page.locator(".app__header");
 const timeline = (page: Page) => page.locator(".timeline");
@@ -173,7 +176,9 @@ async function reachResult(
 }
 
 /** Two devices with a placement each — what mute/solo needs to have two buses to move. */
-function twoDeviceOutcome(over: Record<string, unknown> = {}): Record<string, unknown> {
+function twoDeviceOutcome(
+  over: Record<string, unknown> = {},
+): Record<string, unknown> {
   const base = syncOutcome();
   const placement = (file: string, device: string, offset: number) => ({
     file,
@@ -197,7 +202,9 @@ function twoDeviceOutcome(over: Record<string, unknown> = {}): Record<string, un
 }
 
 const audio = (page: Page) =>
-  page.evaluate(() => (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__);
+  page.evaluate(
+    () => (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__,
+  );
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // EMPTY PHASE
@@ -256,7 +263,9 @@ test.describe("empty phase", () => {
   test("the drag-drop events: over marks the zone, drop scans, leave clears it", async ({
     page,
   }) => {
-    await bootEmpty(page, { ...spy("scan_inputs", JSON.stringify(scanManifest())) });
+    await bootEmpty(page, {
+      ...spy("scan_inputs", JSON.stringify(scanManifest())),
+    });
     const zone = page.locator(".dropzone");
 
     await emit(page, "tauri://drag-over", { position: { x: 10, y: 10 } });
@@ -266,7 +275,10 @@ test.describe("empty phase", () => {
     expect(await calls(page, "scan_inputs")).toHaveLength(0);
 
     await emit(page, "tauri://drag-over", { position: { x: 10, y: 10 } });
-    await emit(page, "tauri://drag-drop", { paths: [SHOOT], position: { x: 10, y: 10 } });
+    await emit(page, "tauri://drag-drop", {
+      paths: [SHOOT],
+      position: { x: 10, y: 10 },
+    });
 
     await expect(sources(page)).toBeVisible();
     expect((await onlyCall(page, "scan_inputs")).inputs).toEqual([SHOOT]);
@@ -275,15 +287,22 @@ test.describe("empty phase", () => {
   });
 
   test("a drop of NOTHING is not a drop", async ({ page }) => {
-    await bootEmpty(page, { ...spy("scan_inputs", JSON.stringify(scanManifest())) });
+    await bootEmpty(page, {
+      ...spy("scan_inputs", JSON.stringify(scanManifest())),
+    });
 
-    await emit(page, "tauri://drag-drop", { paths: [], position: { x: 1, y: 1 } });
+    await emit(page, "tauri://drag-drop", {
+      paths: [],
+      position: { x: 1, y: 1 },
+    });
 
     expect(await calls(page, "scan_inputs")).toHaveLength(0);
     await expect(page.locator(".empty")).toBeVisible();
   });
 
-  test("the gear opens Settings, and its ✕ closes it again", async ({ page }) => {
+  test("the gear opens Settings, and its ✕ closes it again", async ({
+    page,
+  }) => {
     await bootEmpty(page);
 
     await strip(page).getByRole("button", { name: en.settings }).click();
@@ -303,7 +322,9 @@ test.describe("onboarding dialog", () => {
   /** First run: `onboardingDone` unset, language still pinned so the strings are known. */
   const firstRun = { lang: "en" as const };
 
-  test("every nav control moves the step, and the dots follow it", async ({ page }) => {
+  test("every nav control moves the step, and the dots follow it", async ({
+    page,
+  }) => {
     await boot(page, { fixtures: BOOT_FIXTURES, settings: firstRun });
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -312,33 +333,50 @@ test.describe("onboarding dialog", () => {
     const current = () => page.locator('.onboarding__dot[aria-current="step"]');
     await expect(page.locator(".onboarding__dot")).toHaveCount(3);
     await expect(activeDot()).toHaveCount(1);
-    await expect(page.getByRole("heading", { name: en.obTitle1 })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: en.obTitle1 }),
+    ).toBeVisible();
     // Step 1 has no Back — there is nowhere behind it.
-    await expect(dialog.getByRole("button", { name: en.obBack })).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: en.obBack })).toHaveCount(
+      0,
+    );
 
     await dialog.getByRole("button", { name: en.obNext }).click();
-    await expect(page.getByRole("heading", { name: en.obTitle2 })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: en.obTitle2 }),
+    ).toBeVisible();
     await expect(current()).toHaveCount(1);
 
     await dialog.getByRole("button", { name: en.obBack }).click();
-    await expect(page.getByRole("heading", { name: en.obTitle1 })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: en.obTitle1 }),
+    ).toBeVisible();
 
     await dialog.getByRole("button", { name: en.obNext }).click();
     await dialog.getByRole("button", { name: en.obNext }).click();
-    await expect(page.getByRole("heading", { name: en.obTitle3 })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: en.obTitle3 }),
+    ).toBeVisible();
     // Last step: Next has become the finishing button.
-    await expect(dialog.getByRole("button", { name: en.obNext })).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: en.obNext })).toHaveCount(
+      0,
+    );
     await expect(dialog.getByRole("button", { name: en.obDone })).toBeVisible();
   });
 
-  test("step 3 self-tests the engine, and «Check again» re-runs it", async ({ page }) => {
+  test("step 3 self-tests the engine, and «Check again» re-runs it", async ({
+    page,
+  }) => {
     await boot(page, {
       fixtures: {
         ...BOOT_FIXTURES,
-        ...spy("check_sidecar", `(() => {
+        ...spy(
+          "check_sidecar",
+          `(() => {
           if (!window.__E2E_SIDECAR_FIXED__) throw "ffmpeg sidecar unavailable: broken install";
           return { source: "bundled", path: "/Applications/SundaySync.app/ffmpeg" };
-        })()`),
+        })()`,
+        ),
       },
       settings: firstRun,
     });
@@ -349,7 +387,8 @@ test.describe("onboarding dialog", () => {
     // The reject path: the missing-ffmpeg flow, with its own retry.
     await expect(page.getByText(en.obFfmpegMissing)).toBeVisible();
     await page.evaluate(() => {
-      (window as unknown as Record<string, unknown>).__E2E_SIDECAR_FIXED__ = true;
+      (window as unknown as Record<string, unknown>).__E2E_SIDECAR_FIXED__ =
+        true;
     });
     await dialog.getByRole("button", { name: en.obCheckAgain }).click();
     await expect(page.getByText(en.obFfmpegBundled)).toBeVisible();
@@ -380,7 +419,8 @@ test.describe("onboarding dialog", () => {
       await expect
         .poll(() =>
           page.evaluate(
-            (k) => JSON.parse(window.localStorage.getItem(k) || "{}").onboardingDone,
+            (k) =>
+              JSON.parse(window.localStorage.getItem(k) || "{}").onboardingDone,
             SETTINGS_KEY,
           ),
         )
@@ -391,7 +431,12 @@ test.describe("onboarding dialog", () => {
 
 test.describe("consent card", () => {
   const undecided = {
-    telemetry_status: { consentVersion: null, granted: false, hasInstallId: true, queued: 0 },
+    telemetry_status: {
+      consentVersion: null,
+      granted: false,
+      hasInstallId: true,
+      queued: 0,
+    },
   };
 
   test("«Yes» and «No thanks» each record their own answer and close the card", async ({
@@ -418,16 +463,23 @@ test.describe("consent card", () => {
       await card.getByRole("button", { name: label }).click();
 
       await expect(card).toBeHidden();
-      expect((await onlyCall(page, "set_telemetry_consent")).granted).toBe(granted);
+      expect((await onlyCall(page, "set_telemetry_consent")).granted).toBe(
+        granted,
+      );
     }
   });
 
-  test("dismissing it records NOTHING — undecided is a state, not a no", async ({ page }) => {
+  test("dismissing it records NOTHING — undecided is a state, not a no", async ({
+    page,
+  }) => {
     await boot(page, {
       fixtures: {
         ...BOOT_FIXTURES,
         ...undecided,
-        ...spy("set_telemetry_consent", "{ consentVersion: 1, granted: false, hasInstallId: true, queued: 0 }"),
+        ...spy(
+          "set_telemetry_consent",
+          "{ consentVersion: 1, granted: false, hasInstallId: true, queued: 0 }",
+        ),
       },
       settings: SETTLED_SETTINGS,
     });
@@ -445,7 +497,9 @@ test.describe("consent card", () => {
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
 test.describe("scanning phase", () => {
-  test("the band reports the scan, and the gear still works underneath it", async ({ page }) => {
+  test("the band reports the scan, and the gear still works underneath it", async ({
+    page,
+  }) => {
     await bootEmpty(page, {
       "plugin:dialog|open": [SHOOT],
       scan_inputs: controlled("scan_inputs"),
@@ -457,7 +511,11 @@ test.describe("scanning phase", () => {
     await expect(page.locator(".band")).toBeVisible();
     await expect(page.locator(".band")).toContainText(en.scanningInputs);
     // …then the stage and the fraction it reports.
-    await emit(page, "scan:progress", { stage: "Probing", completed: 3, total: 9 });
+    await emit(page, "scan:progress", {
+      stage: "Probing",
+      completed: 3,
+      total: 9,
+    });
     await expect(page.locator(".band")).toContainText(en.stageProbing);
     await expect(page.locator(".band")).toContainText("3");
 
@@ -485,13 +543,20 @@ test.describe("scanning phase", () => {
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
     await page.waitForFunction(
-      () => ((window as unknown as Record<string, any>).__E2E_SCANS__ ?? []).length === 1,
+      () =>
+        ((window as unknown as Record<string, any>).__E2E_SCANS__ ?? [])
+          .length === 1,
     );
 
     // A second drop arrives while the first is still walking the card.
-    await emit(page, "tauri://drag-drop", { paths: ["/Users/e2e/other"], position: { x: 1, y: 1 } });
+    await emit(page, "tauri://drag-drop", {
+      paths: ["/Users/e2e/other"],
+      position: { x: 1, y: 1 },
+    });
     await page.waitForFunction(
-      () => ((window as unknown as Record<string, any>).__E2E_SCANS__ ?? []).length === 2,
+      () =>
+        ((window as unknown as Record<string, any>).__E2E_SCANS__ ?? [])
+          .length === 2,
     );
     const second = await page.evaluate(
       () => (window as unknown as Record<string, any>).__E2E_SCANS__[1].inputs,
@@ -544,8 +609,13 @@ test.describe("sources: the strip", () => {
       ...dialogOpenSequence([[SHOOT], ["/Users/e2e/second"]]),
     });
     // A second root, so removing one leaves something behind.
-    await strip(page).locator(".dropzone--compact").getByRole("button", { name: en.dropFolder }).click();
-    await expect.poll(async () => (await calls(page, "scan_inputs")).length).toBe(2);
+    await strip(page)
+      .locator(".dropzone--compact")
+      .getByRole("button", { name: en.dropFolder })
+      .click();
+    await expect
+      .poll(async () => (await calls(page, "scan_inputs")).length)
+      .toBe(2);
 
     await sources(page).locator(".popover--sources > summary").click();
     const panel = sources(page).locator(".popover--sources .popover__panel");
@@ -555,7 +625,9 @@ test.describe("sources: the strip", () => {
     await panel.getByLabel(`${en.removeRoot}: second`).click();
 
     // A removal is an input change, so it re-scans — with the survivor alone.
-    await expect.poll(async () => (await calls(page, "scan_inputs")).length).toBe(3);
+    await expect
+      .poll(async () => (await calls(page, "scan_inputs")).length)
+      .toBe(3);
     const scans = await calls(page, "scan_inputs");
     const last = scans[scans.length - 1];
     expect(last.inputs).toEqual([SHOOT]);
@@ -565,8 +637,14 @@ test.describe("sources: the strip", () => {
   test("«Clear all» empties the room, and «Remove» on the last root does too", async ({
     page,
   }) => {
-    await reachSources(page, dialogOpenSequence([[SHOOT], ["/Users/e2e/second"]]));
-    await strip(page).locator(".dropzone--compact").getByRole("button", { name: en.dropFolder }).click();
+    await reachSources(
+      page,
+      dialogOpenSequence([[SHOOT], ["/Users/e2e/second"]]),
+    );
+    await strip(page)
+      .locator(".dropzone--compact")
+      .getByRole("button", { name: en.dropFolder })
+      .click();
     await expect(sources(page).locator(".popover--sources")).toBeVisible();
     await sources(page).locator(".popover--sources > summary").click();
 
@@ -582,14 +660,22 @@ test.describe("sources: the strip", () => {
     await expect(page.locator(".empty")).toBeVisible();
   });
 
-  test("a file row marks that clip and shuts the panel behind it", async ({ page }) => {
+  test("a file row marks that clip and shuts the panel behind it", async ({
+    page,
+  }) => {
     await reachSources(page);
     await sources(page).locator(".popover--sources > summary").click();
 
-    await sources(page).locator(".filerow--pick", { hasText: "C0002.MP4" }).click();
+    await sources(page)
+      .locator(".filerow--pick", { hasText: "C0002.MP4" })
+      .click();
 
-    await expect(inspector(page).locator(".preview__name")).toHaveText("C0002.MP4");
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeHidden();
+    await expect(inspector(page).locator(".preview__name")).toHaveText(
+      "C0002.MP4",
+    );
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeHidden();
   });
 
   test("the problem chip lists what could not be read, and each ✕ takes its file out", async ({
@@ -597,13 +683,17 @@ test.describe("sources: the strip", () => {
   }) => {
     const broken = "/Users/e2e/shoot/broken.mp4";
     const silent = "/Users/e2e/shoot/silent.mp4";
-    await reachSources(page, {}, {
-      ...presyncScanManifest(),
-      unsynced: [
-        { file: broken, reason: "decode_error" },
-        { file: silent, reason: "no_audio" },
-      ],
-    });
+    await reachSources(
+      page,
+      {},
+      {
+        ...presyncScanManifest(),
+        unsynced: [
+          { file: broken, reason: "decode_error" },
+          { file: silent, reason: "no_audio" },
+        ],
+      },
+    );
 
     const chip = sources(page).locator(".popover--problems");
     await expect(chip.locator("summary")).toContainText(en.problemCount(2));
@@ -620,15 +710,23 @@ test.describe("sources: the strip", () => {
     await expect(sources(page).locator(".popover--problems")).toHaveCount(0);
   });
 
-  test("the pre-analysis tick is its own quiet line, not the progress bar", async ({ page }) => {
-    await reachSources(page, { prewarm_analysis: controlled("prewarm_analysis") });
+  test("the pre-analysis tick is its own quiet line, not the progress bar", async ({
+    page,
+  }) => {
+    await reachSources(page, {
+      prewarm_analysis: controlled("prewarm_analysis"),
+    });
 
     await emit(page, "prewarm:progress", { completed: 2, total: 7 });
-    await expect(sources(page).locator(".prewarm")).toHaveText(en.prewarmProgress(2, 7));
+    await expect(sources(page).locator(".prewarm")).toHaveText(
+      en.prewarmProgress(2, 7),
+    );
     await expect(page.locator(".band")).toBeHidden();
 
     await emit(page, "prewarm:progress", { completed: 7, total: 7 });
-    await expect(sources(page).locator(".prewarm")).toHaveText(en.prewarmProgress(7, 7));
+    await expect(sources(page).locator(".prewarm")).toHaveText(
+      en.prewarmProgress(7, 7),
+    );
   });
 
   test("«Sync» sends the whole request: sources, settings and every operator decision", async ({
@@ -641,9 +739,13 @@ test.describe("sources: the strip", () => {
 
     // Three decisions first, so the request has something of each to carry.
     await page.locator(`.clip[data-file="${WAV}"]`).click();
-    await inspector(page).getByLabel(`${en.makeReference}: ZOOM0001.WAV`).click();
+    await inspector(page)
+      .getByLabel(`${en.makeReference}: ZOOM0001.WAV`)
+      .click();
     await page.locator(`.clip[data-file="${CAM_B}"]`).click();
-    await inspector(page).getByLabel(`${en.moveToDevice}: C0002.MP4`).selectOption("cam-a");
+    await inspector(page)
+      .getByLabel(`${en.moveToDevice}: C0002.MP4`)
+      .selectOption("cam-a");
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
     await inspector(page).getByLabel(`${en.removeFile}: C0001.MP4`).click();
 
@@ -687,7 +789,9 @@ test.describe("sources: the strip", () => {
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
 test.describe("sources: the timeline", () => {
-  test("the three zoom buttons in the ruler's gutter each do what they say", async ({ page }) => {
+  test("the three zoom buttons in the ruler's gutter each do what they say", async ({
+    page,
+  }) => {
     await reachSources(page);
     const fitted = await clipWidth(page);
 
@@ -722,10 +826,9 @@ test.describe("sources: the timeline", () => {
       "aria-current",
       "time",
     );
-    await expect(page.locator(`.clip[data-file="${CAM_B}"]`)).not.toHaveAttribute(
-      "aria-current",
-      "time",
-    );
+    await expect(
+      page.locator(`.clip[data-file="${CAM_B}"]`),
+    ).not.toHaveAttribute("aria-current", "time");
 
     // Drag on into the later camera's clip: the playhead follows the pointer.
     await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2);
@@ -734,13 +837,14 @@ test.describe("sources: the timeline", () => {
       "aria-current",
       "time",
     );
-    await expect(page.locator(`.clip[data-file="${CAM_A}"]`)).not.toHaveAttribute(
-      "aria-current",
-      "time",
-    );
+    await expect(
+      page.locator(`.clip[data-file="${CAM_A}"]`),
+    ).not.toHaveAttribute("aria-current", "time");
   });
 
-  test("the scrollbar: thumb drag, trough press, and the keyboard", async ({ page }) => {
+  test("the scrollbar: thumb drag, trough press, and the keyboard", async ({
+    page,
+  }) => {
     await reachSources(page);
     // Zoom in far enough that there is something to scroll.
     for (let i = 0; i < 4; i += 1) {
@@ -755,13 +859,19 @@ test.describe("sources: the timeline", () => {
 
     // Trough press, to the right of the thumb: the window jumps there.
     const trough = (await bar.boundingBox())!;
-    await page.mouse.click(trough.x + trough.width * 0.8, trough.y + trough.height / 2);
+    await page.mouse.click(
+      trough.x + trough.width * 0.8,
+      trough.y + trough.height / 2,
+    );
     const afterTrough = await value();
     expect(afterTrough).toBeGreaterThan(0);
 
     // Thumb drag back to the left edge.
     const thumb = (await page.locator(".timeline__thumb").boundingBox())!;
-    await page.mouse.move(thumb.x + thumb.width / 2, thumb.y + thumb.height / 2);
+    await page.mouse.move(
+      thumb.x + thumb.width / 2,
+      thumb.y + thumb.height / 2,
+    );
     await page.mouse.down();
     await page.mouse.move(trough.x, thumb.y + thumb.height / 2, { steps: 6 });
     await page.mouse.up();
@@ -827,7 +937,8 @@ test.describe("sources: the timeline", () => {
       const y = r.y + r.height - 12;
       for (let x = r.x + r.width - 8; x > r.x + 40; x -= 12) {
         const at = document.elementFromPoint(x, y);
-        if (at && !at.closest(".clip") && !at.closest(".timeline__ruler")) return { x, y };
+        if (at && !at.closest(".clip") && !at.closest(".timeline__ruler"))
+          return { x, y };
       }
       return null;
     });
@@ -840,7 +951,9 @@ test.describe("sources: the timeline", () => {
     await expect.poll(() => clipLeft(page)).toBeLessThan(before);
   });
 
-  test("the timeline's keys: +, −, 0, F, the arrows, Home and End", async ({ page }) => {
+  test("the timeline's keys: +, −, 0, F, the arrows, Home and End", async ({
+    page,
+  }) => {
     await reachSources(page);
     const fitted = await clipWidth(page);
 
@@ -874,12 +987,16 @@ test.describe("sources: the timeline", () => {
     await expect(page.locator('.clip[aria-current="time"]')).toHaveCount(0);
   });
 
-  test("Space before a sync is a no-op, not a silent failure to play", async ({ page }) => {
+  test("Space before a sync is a no-op, not a silent failure to play", async ({
+    page,
+  }) => {
     // There is no schedule yet — `PlaybackEngine.play` returns immediately with no clips —
     // and the transport is not on screen at all. Asserted so a future change that starts an
     // AudioContext here has to say so out loud.
     await reachSources(page, pcmWindow());
-    await expect(page.getByRole("group", { name: en.transportAria })).toHaveCount(0);
+    await expect(
+      page.getByRole("group", { name: en.transportAria }),
+    ).toHaveCount(0);
 
     await timeline(page).press(" ");
     await page.waitForTimeout(100);
@@ -888,16 +1005,22 @@ test.describe("sources: the timeline", () => {
     await expect(page.locator(".timeline__overlay")).toHaveCount(0);
   });
 
-  test("a clip click marks it; the mix buttons do not exist before a sync", async ({ page }) => {
+  test("a clip click marks it; the mix buttons do not exist before a sync", async ({
+    page,
+  }) => {
     await reachSources(page);
     await expect(inspector(page).locator(".preview__empty")).toBeVisible();
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(inspector(page).locator(".preview__name")).toHaveText("C0001.MP4");
+    await expect(inspector(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
 
     // `showMix` is result-only: there is no schedule to mute (D-061).
     await expect(page.locator(".track__mix")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: en.muteDevice("Camera A") })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: en.muteDevice("Camera A") }),
+    ).toHaveCount(0);
   });
 });
 
@@ -933,20 +1056,32 @@ test.describe("sources: the inspector's three decisions", () => {
     await expect(auto).toHaveText(en.autoReferenceShort);
   });
 
-  test("the device select regroups the clip onto the other device's track", async ({ page }) => {
+  test("the device select regroups the clip onto the other device's track", async ({
+    page,
+  }) => {
     await reachSources(page);
-    await expect(page.getByRole("group", { name: en.trackAria("Camera B") })).toBeVisible();
+    await expect(
+      page.getByRole("group", { name: en.trackAria("Camera B") }),
+    ).toBeVisible();
 
     await page.locator(`.clip[data-file="${CAM_B}"]`).click();
-    await inspector(page).getByLabel(`${en.moveToDevice}: C0002.MP4`).selectOption("cam-a");
+    await inspector(page)
+      .getByLabel(`${en.moveToDevice}: C0002.MP4`)
+      .selectOption("cam-a");
 
     // The clip is on Camera A's row now, and Camera B — emptied by the overlay — is gone.
     const camA = page.getByRole("group", { name: en.trackAria("Camera A") });
     await expect(camA.locator(`.clip[data-file="${CAM_B}"]`)).toBeVisible();
-    await expect(page.getByRole("group", { name: en.trackAria("Camera B") })).toHaveCount(0);
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.deviceCount(2));
+    await expect(
+      page.getByRole("group", { name: en.trackAria("Camera B") }),
+    ).toHaveCount(0);
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.deviceCount(2),
+    );
     // The select keeps saying where the file is now, rather than snapping back.
-    await expect(inspector(page).getByLabel(`${en.moveToDevice}: C0002.MP4`)).toHaveValue("cam-a");
+    await expect(
+      inspector(page).getByLabel(`${en.moveToDevice}: C0002.MP4`),
+    ).toHaveValue("cam-a");
   });
 
   test("✕ removes, the slot's «Removed» chip counts it, and «Undo» puts it back", async ({
@@ -959,7 +1094,9 @@ test.describe("sources: the inspector's three decisions", () => {
     await inspector(page).getByLabel(`${en.removeFile}: C0002.MP4`).click();
 
     await expect(page.locator(".clip")).toHaveCount(2);
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.fileCount(2));
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.fileCount(2),
+    );
     const removed = page.locator(".slot__removed");
     await expect(removed.locator("summary")).toContainText(en.removedTitle(1));
     // The marked clip is gone, so the inspector stops describing it.
@@ -972,17 +1109,25 @@ test.describe("sources: the inspector's three decisions", () => {
     await expect(page.locator(".slot__removed")).toHaveCount(0);
   });
 
-  test("the «skipped» chip opens the list of what the walk never looked at", async ({ page }) => {
-    await reachSources(page, {}, {
-      ...presyncScanManifest(),
-      skipped: [
-        { file: "/Users/e2e/shoot/CamA/C0001.XML", reason: "sidecar" },
-        { file: "/Users/e2e/shoot/CamA/DSC0001.JPG", reason: "still_image" },
-      ],
-    });
+  test("the «skipped» chip opens the list of what the walk never looked at", async ({
+    page,
+  }) => {
+    await reachSources(
+      page,
+      {},
+      {
+        ...presyncScanManifest(),
+        skipped: [
+          { file: "/Users/e2e/shoot/CamA/C0001.XML", reason: "sidecar" },
+          { file: "/Users/e2e/shoot/CamA/DSC0001.JPG", reason: "still_image" },
+        ],
+      },
+    );
 
     const chip = page.locator(".slot__skipped");
-    await expect(chip.locator("summary")).toContainText(en.skippedSummary(1, 1));
+    await expect(chip.locator("summary")).toContainText(
+      en.skippedSummary(1, 1),
+    );
     await chip.locator("> summary").click();
     await expect(chip.locator(".filerow--skipped")).toHaveCount(2);
     await expect(chip).toContainText("C0001.XML");
@@ -995,33 +1140,52 @@ test.describe("sources: the inspector's three decisions", () => {
 
 test.describe("syncing phase", () => {
   async function reachSyncing(page: Page, extra: Fixtures = {}): Promise<void> {
-    await reachSources(page, { run_sync: controlled("run_sync"), ...extra }, scanManifest());
+    await reachSources(
+      page,
+      { run_sync: controlled("run_sync"), ...extra },
+      scanManifest(),
+    );
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForPending(page, "run_sync");
   }
 
-  test("the band shows the run, and «Cancel» calls cancel_sync exactly once", async ({ page }) => {
+  test("the band shows the run, and «Cancel» calls cancel_sync exactly once", async ({
+    page,
+  }) => {
     await reachSyncing(page, spy("cancel_sync"));
 
-    await emit(page, "sync:progress", { stage: "Correlating", completed: 2, total: 5 });
+    await emit(page, "sync:progress", {
+      stage: "Correlating",
+      completed: 2,
+      total: 5,
+    });
     await expect(page.locator(".band")).toContainText(en.stageCorrelating);
 
-    const cancel = page.locator(".band").getByRole("button", { name: en.cancel });
+    const cancel = page
+      .locator(".band")
+      .getByRole("button", { name: en.cancel });
     await cancel.click();
 
     expect(await calls(page, "cancel_sync")).toHaveLength(1);
     // While the request is in flight the button says so and refuses a second press.
-    await expect(page.locator(".band").getByRole("button", { name: en.cancelling })).toBeDisabled();
+    await expect(
+      page.locator(".band").getByRole("button", { name: en.cancelling }),
+    ).toBeDisabled();
   });
 
   test("a cancelled run lands back on the sources with a notice, never a red banner", async ({
     page,
   }) => {
     await reachSyncing(page, spy("cancel_sync"));
-    await page.locator(".band").getByRole("button", { name: en.cancel }).click();
+    await page
+      .locator(".band")
+      .getByRole("button", { name: en.cancel })
+      .click();
     await rejectControlled(page, "run_sync", "cancelled");
 
-    await expect(page.getByRole("button", { name: en.syncButton })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.syncButton }),
+    ).toBeVisible();
     const banner = page.locator(".banner");
     await expect(banner).toHaveClass(/banner--info/);
     await expect(banner).toContainText(en.noticeCancelled);
@@ -1038,16 +1202,28 @@ test.describe("syncing phase", () => {
     // Mark a clip BEFORE the run so the inspector has something to disable.
     await expect(sources(page)).toHaveAttribute("aria-busy", "true");
     await expect(sources(page)).toHaveClass(/strip__sources--busy/);
-    const inert = await sources(page).evaluate((el) => getComputedStyle(el).pointerEvents);
+    const inert = await sources(page).evaluate(
+      (el) => getComputedStyle(el).pointerEvents,
+    );
     expect(inert).toBe("none");
     // …and still readable: the summary line is right there, it is only not a control.
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.fileCount(2));
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.fileCount(2),
+    );
 
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await expect(inspector(page).locator(".preview__name")).toHaveText("C0001.MP4");
-    await expect(inspector(page).getByLabel(`${en.makeReference}: C0001.MP4`)).toBeDisabled();
-    await expect(inspector(page).getByLabel(`${en.moveToDevice}: C0001.MP4`)).toBeDisabled();
-    await expect(inspector(page).getByLabel(`${en.removeFile}: C0001.MP4`)).toBeDisabled();
+    await expect(inspector(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
+    await expect(
+      inspector(page).getByLabel(`${en.makeReference}: C0001.MP4`),
+    ).toBeDisabled();
+    await expect(
+      inspector(page).getByLabel(`${en.moveToDevice}: C0001.MP4`),
+    ).toBeDisabled();
+    await expect(
+      inspector(page).getByLabel(`${en.removeFile}: C0001.MP4`),
+    ).toBeDisabled();
   });
 
   test("looking still works mid-sync: the timeline dims but zoom, pan and keys are live", async ({
@@ -1086,7 +1262,9 @@ test.describe("result: the strip", () => {
     await expect(name).toHaveValue("SundaySync");
     await name.fill("Gudstjeneste 2026-08-23");
 
-    await expect(page.getByRole("button", { name: en.revealInFinder })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: en.revealInFinder }),
+    ).toHaveCount(0);
     await page.getByRole("button", { name: en.exportButton }).click();
 
     const save = (await onlyCall(page, "plugin:dialog|save")).options;
@@ -1112,10 +1290,14 @@ test.describe("result: the strip", () => {
     await expect(page.locator(".toasts .banner")).toHaveCount(0);
 
     await page.getByRole("button", { name: en.revealInFinder }).click();
-    expect((await onlyCall(page, "plugin:opener|reveal_item_in_dir")).paths).toEqual([FCPXML]);
+    expect(
+      (await onlyCall(page, "plugin:opener|reveal_item_in_dir")).paths,
+    ).toEqual([FCPXML]);
   });
 
-  test("a slash in the project name cannot become a path separator", async ({ page }) => {
+  test("a slash in the project name cannot become a path separator", async ({
+    page,
+  }) => {
     await reachResult(page, {
       ...spy("plugin:dialog|save", "null"),
       ...spy("export_timeline", "1"),
@@ -1124,13 +1306,15 @@ test.describe("result: the strip", () => {
 
     await page.getByRole("button", { name: en.exportButton }).click();
 
-    expect((await onlyCall(page, "plugin:dialog|save")).options.defaultPath).toBe(
-      "22-12- kveld.fcpxml",
-    );
+    expect(
+      (await onlyCall(page, "plugin:dialog|save")).options.defaultPath,
+    ).toBe("22-12- kveld.fcpxml");
     // The save was cancelled, so nothing was written and nothing is claimed.
     expect(await calls(page, "export_timeline")).toHaveLength(0);
     await expect(page.locator(".banner")).toBeHidden();
-    await expect(page.getByRole("button", { name: en.revealInFinder })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: en.revealInFinder }),
+    ).toHaveCount(0);
   });
 
   test("«Sync again» runs the engine a second time and clears a stale result", async ({
@@ -1138,24 +1322,36 @@ test.describe("result: the strip", () => {
   }) => {
     await reachResult(page, spy("run_sync", JSON.stringify(syncOutcome())));
     await expect(page.locator(".slot__stale")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeEnabled();
 
     // A decision after the run makes what is on screen a run of a different set of sources.
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
-    await inspector(page).getByLabel(`${en.moveToDevice}: C0001.MP4`).selectOption("rec");
+    await inspector(page)
+      .getByLabel(`${en.moveToDevice}: C0001.MP4`)
+      .selectOption("rec");
     await expect(page.locator(".slot__stale")).toHaveText(en.staleResult);
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeDisabled();
 
     await page.getByRole("button", { name: en.resyncButton }).click();
     await waitForResult(page);
 
     expect(await calls(page, "run_sync")).toHaveLength(2);
-    expect((await calls(page, "run_sync"))[1].args.deviceOverrides).toEqual({ [CAM_A]: "rec" });
+    expect((await calls(page, "run_sync"))[1].args.deviceOverrides).toEqual({
+      [CAM_A]: "rec",
+    });
     await expect(page.locator(".slot__stale")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeEnabled();
   });
 
-  test("typing in the project name does not zoom, fit or play", async ({ page }) => {
+  test("typing in the project name does not zoom, fit or play", async ({
+    page,
+  }) => {
     // The field sits on the strip, outside the timeline section — so the section's key
     // handler never sees it. Asserted rather than reasoned about: `f`, `+`, `0` and Space are
     // four of this app's own shortcuts and they are also four ordinary characters.
@@ -1169,14 +1365,20 @@ test.describe("result: the strip", () => {
 
     await expect(name).toHaveValue("f+0 sø 25");
     expect(await clipWidth(page)).toBeCloseTo(fitted, 0);
-    await expect.poll(async () => (await audio(page))?.playing ?? false).toBe(false);
+    await expect
+      .poll(async () => (await audio(page))?.playing ?? false)
+      .toBe(false);
   });
 });
 
 test.describe("result: the timeline and the gutter", () => {
-  test("the reference badge names the device the engine chose", async ({ page }) => {
+  test("the reference badge names the device the engine chose", async ({
+    page,
+  }) => {
     await reachResult(page);
-    const rec = page.getByRole("group", { name: en.trackAria("Zoom recorder") });
+    const rec = page.getByRole("group", {
+      name: en.trackAria("Zoom recorder"),
+    });
     await expect(rec.getByRole("img", { name: en.reference })).toBeVisible();
     await expect(page.locator(".badge--ref")).toHaveCount(1);
   });
@@ -1185,52 +1387,79 @@ test.describe("result: the timeline and the gutter", () => {
     await reachResult(page, { run_sync: twoDeviceOutcome(), ...pcmWindow() });
 
     const mute = page.getByRole("button", { name: en.muteDevice("Camera A") });
-    const solo = page.getByRole("button", { name: en.soloDevice("Zoom recorder") });
+    const solo = page.getByRole("button", {
+      name: en.soloDevice("Zoom recorder"),
+    });
     await expect(mute).toHaveAttribute("aria-pressed", "false");
 
     await mute.click();
-    await expect(page.getByRole("button", { name: en.unmuteDevice("Camera A") })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await expect.poll(async () => (await audio(page)).deviceGains["cam-a"]).toBe(0);
+    await expect(
+      page.getByRole("button", { name: en.unmuteDevice("Camera A") }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(async () => (await audio(page)).deviceGains["cam-a"])
+      .toBe(0);
     expect((await audio(page)).deviceGains["rec"]).toBe(1);
 
     // Solo the OTHER device: the unsoloed one goes quiet too.
     await solo.click();
-    await expect.poll(async () => (await audio(page)).deviceGains["rec"]).toBe(1);
+    await expect
+      .poll(async () => (await audio(page)).deviceGains["rec"])
+      .toBe(1);
     expect((await audio(page)).deviceGains["cam-a"]).toBe(0);
 
     // Solo the muted device as well — mute still wins.
     await page.getByRole("button", { name: en.soloDevice("Camera A") }).click();
-    await expect.poll(async () => (await audio(page)).deviceGains["cam-a"]).toBe(0);
+    await expect
+      .poll(async () => (await audio(page)).deviceGains["cam-a"])
+      .toBe(0);
 
     // …and un-muting it now lets the solo through.
-    await page.getByRole("button", { name: en.unmuteDevice("Camera A") }).click();
-    await expect.poll(async () => (await audio(page)).deviceGains["cam-a"]).toBe(1);
+    await page
+      .getByRole("button", { name: en.unmuteDevice("Camera A") })
+      .click();
+    await expect
+      .poll(async () => (await audio(page)).deviceGains["cam-a"])
+      .toBe(1);
   });
 
-  test("solo is hidden when there is only one device to solo", async ({ page }) => {
+  test("solo is hidden when there is only one device to solo", async ({
+    page,
+  }) => {
     const single = syncOutcome();
     (single.result as Record<string, unknown>).devices = [
       { id: "cam-a", label: "Camera A", kind: "video", files: [CAM_A] },
     ];
     await reachResult(page, { run_sync: single });
 
-    await expect(page.getByRole("button", { name: en.muteDevice("Camera A") })).toBeVisible();
-    await expect(page.getByRole("button", { name: en.soloDevice("Camera A") })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: en.muteDevice("Camera A") }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.soloDevice("Camera A") }),
+    ).toHaveCount(0);
   });
 
-  test("clicking a clip after the sync shows the engine's own answer for it", async ({ page }) => {
+  test("clicking a clip after the sync shows the engine's own answer for it", async ({
+    page,
+  }) => {
     await reachResult(page);
     await page.locator(`.clip[data-file="${CAM_A}"]`).click();
 
-    await expect(inspector(page).locator(".preview__name")).toHaveText("C0001.MP4");
-    await expect(inspector(page).locator(".preview__sync")).toContainText(en.offsetLabel);
-    await expect(inspector(page).locator(".preview__sync")).toContainText("4.200");
+    await expect(inspector(page).locator(".preview__name")).toHaveText(
+      "C0001.MP4",
+    );
+    await expect(inspector(page).locator(".preview__sync")).toContainText(
+      en.offsetLabel,
+    );
+    await expect(inspector(page).locator(".preview__sync")).toContainText(
+      "4.200",
+    );
   });
 
-  test("the warnings chip lists what the run wants to say about itself", async ({ page }) => {
+  test("the warnings chip lists what the run wants to say about itself", async ({
+    page,
+  }) => {
     const withWarnings = syncOutcome();
     (withWarnings.result as Record<string, unknown>).warnings = [
       { code: "mixed_fps" },
@@ -1245,7 +1474,9 @@ test.describe("result: the timeline and the gutter", () => {
     await expect(chip).toContainText(en.mixedFps);
   });
 
-  test("the problem popover's shelf can reassign a clip or take it out", async ({ page }) => {
+  test("the problem popover's shelf can reassign a clip or take it out", async ({
+    page,
+  }) => {
     const shelved = syncOutcome();
     (shelved.result as Record<string, unknown>).unsynced = [
       { file: CAM_A, reason: "device_overlap" },
@@ -1267,14 +1498,18 @@ test.describe("result: the timeline and the gutter", () => {
 });
 
 test.describe("result: the transport", () => {
-  test("play, pause, stop, the clock and the volume slider", async ({ page }) => {
+  test("play, pause, stop, the clock and the volume slider", async ({
+    page,
+  }) => {
     await reachResult(page, { run_sync: twoDeviceOutcome(), ...pcmWindow() });
     const transport = page.getByRole("group", { name: en.transportAria });
     await expect(transport).toBeVisible();
 
     await transport.getByRole("button", { name: en.play }).click();
     await page.waitForFunction(
-      () => (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__?.playing === true,
+      () =>
+        (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__
+          ?.playing === true,
     );
     // A schedule was really built for the clips on screen.
     expect((await audio(page)).scheduled.length).toBeGreaterThan(0);
@@ -1285,33 +1520,49 @@ test.describe("result: the transport", () => {
       .not.toBe("00:00.000");
     await transport.getByRole("button", { name: en.pause }).click();
     await page.waitForFunction(
-      () => (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__?.playing === false,
+      () =>
+        (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__
+          ?.playing === false,
     );
     // Paused, it holds its position rather than rewinding.
-    await expect(page.locator('[data-testid="transport-time"]')).not.toHaveText("00:00.000");
+    await expect(page.locator('[data-testid="transport-time"]')).not.toHaveText(
+      "00:00.000",
+    );
 
     await transport.getByRole("button", { name: en.stopPlayback }).click();
-    await expect(page.locator('[data-testid="transport-time"]')).toHaveText("00:00.000");
+    await expect(page.locator('[data-testid="transport-time"]')).toHaveText(
+      "00:00.000",
+    );
 
     const volume = transport.getByLabel(en.volumeAria);
     await volume.fill("0.4");
-    await expect.poll(async () => (await audio(page)).masterGain).toBeCloseTo(0.4, 2);
+    await expect
+      .poll(async () => (await audio(page)).masterGain)
+      .toBeCloseTo(0.4, 2);
   });
 
-  test("Space toggles the transport once there is something to play", async ({ page }) => {
+  test("Space toggles the transport once there is something to play", async ({
+    page,
+  }) => {
     await reachResult(page, { run_sync: twoDeviceOutcome(), ...pcmWindow() });
 
     await timeline(page).press(" ");
     await page.waitForFunction(
-      () => (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__?.playing === true,
+      () =>
+        (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__
+          ?.playing === true,
     );
     await timeline(page).press(" ");
     await page.waitForFunction(
-      () => (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__?.playing === false,
+      () =>
+        (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__
+          ?.playing === false,
     );
   });
 
-  test("«Loading audio …» is shown while the windows are in flight", async ({ page }) => {
+  test("«Loading audio …» is shown while the windows are in flight", async ({
+    page,
+  }) => {
     const gated = {
       read_audio_window: fn(`(args) => new Promise((resolve) => {
         window.__E2E_PCM_GATE__ = window.__E2E_PCM_GATE__ || [];
@@ -1326,31 +1577,45 @@ test.describe("result: the transport", () => {
     await expect(page.getByRole("button", { name: en.pause })).toBeVisible();
 
     await page.evaluate(() =>
-      ((window as unknown as Record<string, any>).__E2E_PCM_GATE__ ?? []).forEach((r: () => void) =>
-        r(),
-      ),
+      (
+        (window as unknown as Record<string, any>).__E2E_PCM_GATE__ ?? []
+      ).forEach((r: () => void) => r()),
     );
     await page.waitForFunction(
-      () => (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__?.playing === true,
+      () =>
+        (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__
+          ?.playing === true,
     );
     await expect(page.getByText(en.buffering)).toBeHidden();
   });
 
-  test("seeking on the ruler while playing rebuilds the schedule", async ({ page }) => {
+  test("seeking on the ruler while playing rebuilds the schedule", async ({
+    page,
+  }) => {
     await reachResult(page, { run_sync: twoDeviceOutcome(), ...pcmWindow() });
     await page.getByRole("button", { name: en.play }).click();
     await page.waitForFunction(
-      () => (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__?.playing === true,
+      () =>
+        (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__
+          ?.playing === true,
     );
     const before = (await audio(page)).generation;
 
     const ruler = (await page.locator(".timeline__ruler").boundingBox())!;
-    await page.mouse.click(ruler.x + ruler.width * 0.5, ruler.y + ruler.height / 2);
+    await page.mouse.click(
+      ruler.x + ruler.width * 0.5,
+      ruler.y + ruler.height / 2,
+    );
 
-    await expect.poll(async () => (await audio(page)).generation).toBeGreaterThan(before);
+    await expect
+      .poll(async () => (await audio(page)).generation)
+      .toBeGreaterThan(before);
     await page.waitForFunction(
-      (g) => ((window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__?.playing === true) &&
-        (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__.generation > g,
+      (g) =>
+        (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__
+          ?.playing === true &&
+        (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__
+          .generation > g,
       before,
     );
   });
@@ -1361,16 +1626,24 @@ test.describe("result: the transport", () => {
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
 test.describe("settings dialog", () => {
-  async function openSettings(page: Page, fixtures: Fixtures = {}): Promise<void> {
+  async function openSettings(
+    page: Page,
+    fixtures: Fixtures = {},
+  ): Promise<void> {
     await bootEmpty(page, fixtures);
     await strip(page).getByRole("button", { name: en.settings }).click();
     await expect(page.getByRole("dialog", { name: en.settings })).toBeVisible();
   }
 
   const readSettings = (page: Page) =>
-    page.evaluate((k) => JSON.parse(window.localStorage.getItem(k) || "{}"), SETTINGS_KEY);
+    page.evaluate(
+      (k) => JSON.parse(window.localStorage.getItem(k) || "{}"),
+      SETTINGS_KEY,
+    );
 
-  test("the language select changes the whole UI while it is open", async ({ page }) => {
+  test("the language select changes the whole UI while it is open", async ({
+    page,
+  }) => {
     await openSettings(page);
 
     await page.getByLabel(en.language).selectOption("nb");
@@ -1378,7 +1651,9 @@ test.describe("settings dialog", () => {
     await expect(page.getByRole("dialog", { name: nb.settings })).toBeVisible();
     await expect(page.getByText(nb.minPsr)).toBeVisible();
     await expect.poll(() => readSettings(page).then((s) => s.lang)).toBe("nb");
-    await expect.poll(() => page.evaluate(() => document.documentElement.lang)).toBe("nb");
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.lang))
+      .toBe("nb");
 
     // …and back, from the Norwegian label.
     await page.getByLabel(nb.language).selectOption("en");
@@ -1407,31 +1682,49 @@ test.describe("settings dialog", () => {
     await expect.poll(() => readSettings(page).then((s) => s.minPsr)).toBe(18);
 
     await dialog.getByLabel(en.segmentCount).selectOption("3");
-    await expect.poll(() => readSettings(page).then((s) => s.segmentCount)).toBe(3);
+    await expect
+      .poll(() => readSettings(page).then((s) => s.segmentCount))
+      .toBe(3);
     await dialog.getByLabel(en.segmentCount).selectOption("");
-    await expect.poll(() => readSettings(page).then((s) => s.segmentCount)).toBeNull();
+    await expect
+      .poll(() => readSettings(page).then((s) => s.segmentCount))
+      .toBeNull();
 
     await dialog.getByRole("checkbox", { name: en.driftCorrect }).uncheck();
-    await expect.poll(() => readSettings(page).then((s) => s.correctDrift)).toBe(false);
+    await expect
+      .poll(() => readSettings(page).then((s) => s.correctDrift))
+      .toBe(false);
 
-    await dialog.getByRole("checkbox", { name: en.playbackDriftCorrect }).uncheck();
-    await expect.poll(() => readSettings(page).then((s) => s.playbackDriftCorrected)).toBe(false);
+    await dialog
+      .getByRole("checkbox", { name: en.playbackDriftCorrect })
+      .uncheck();
+    await expect
+      .poll(() => readSettings(page).then((s) => s.playbackDriftCorrected))
+      .toBe(false);
     // The two switches are deliberately independent (D-055).
-    await expect(dialog.getByRole("checkbox", { name: en.driftCorrect })).not.toBeChecked();
+    await expect(
+      dialog.getByRole("checkbox", { name: en.driftCorrect }),
+    ).not.toBeChecked();
   });
 
   test("the cache section: the folder, the picker, the cap and the two-step clear", async ({
     page,
   }) => {
     await openSettings(page, {
-      cache_status: { dir: "/Users/e2e/Library/Caches/SundaySync", entries: 12, bytes: 3_400_000 },
+      cache_status: {
+        dir: "/Users/e2e/Library/Caches/SundaySync",
+        entries: 12,
+        bytes: 3_400_000,
+      },
       ...spy("plugin:dialog|open", JSON.stringify("/Volumes/Scratch/cache")),
       ...spy("clear_cache", "3400000"),
       ...spy("enforce_cache_cap", "{ entries: 2, bytes: 1000 }"),
     });
     const dialog = page.getByRole("dialog", { name: en.settings });
 
-    await expect(dialog).toContainText(en.cacheUsage(12, formatBytes(3_400_000)));
+    await expect(dialog).toContainText(
+      en.cacheUsage(12, formatBytes(3_400_000)),
+    );
 
     // Choosing a folder: a directory picker, and the choice is persisted.
     await dialog.getByRole("button", { name: en.cachePick }).click();
@@ -1439,9 +1732,9 @@ test.describe("settings dialog", () => {
       directory: true,
       multiple: false,
     });
-    await expect.poll(() => readSettings(page).then((s) => s.cacheDir)).toBe(
-      "/Volumes/Scratch/cache",
-    );
+    await expect
+      .poll(() => readSettings(page).then((s) => s.cacheDir))
+      .toBe("/Volumes/Scratch/cache");
 
     // The cap is enforced there and then, not at the next launch.
     const cap = dialog.getByLabel(en.cacheCap);
@@ -1451,7 +1744,9 @@ test.describe("settings dialog", () => {
       dir: "/Volumes/Scratch/cache",
       maxBytes: 250 * 1024 * 1024,
     });
-    await expect(page.locator(".banner")).toContainText(en.cacheEvicted(2, formatBytes(1000)));
+    await expect(page.locator(".banner")).toContainText(
+      en.cacheEvicted(2, formatBytes(1000)),
+    );
 
     // Clearing asks first, can be backed out of, and only then calls the command.
     await dialog.getByRole("button", { name: en.cacheClear }).click();
@@ -1461,16 +1756,28 @@ test.describe("settings dialog", () => {
 
     await dialog.getByRole("button", { name: en.cacheClear }).click();
     await dialog.getByRole("button", { name: en.cacheClear }).click();
-    expect((await onlyCall(page, "clear_cache")).dir).toBe("/Volumes/Scratch/cache");
-    await expect(page.locator(".banner--ok")).toContainText(en.cacheCleared(formatBytes(3_400_000)));
+    expect((await onlyCall(page, "clear_cache")).dir).toBe(
+      "/Volumes/Scratch/cache",
+    );
+    await expect(page.locator(".banner--ok")).toContainText(
+      en.cacheCleared(formatBytes(3_400_000)),
+    );
   });
 
-  test("«Clear cache» is unavailable when there is nothing in it", async ({ page }) => {
+  test("«Clear cache» is unavailable when there is nothing in it", async ({
+    page,
+  }) => {
     await openSettings(page, {
-      cache_status: { dir: "/Users/e2e/Library/Caches/SundaySync", entries: 0, bytes: 0 },
+      cache_status: {
+        dir: "/Users/e2e/Library/Caches/SundaySync",
+        entries: 0,
+        bytes: 0,
+      },
     });
     await expect(
-      page.getByRole("dialog", { name: en.settings }).getByRole("button", { name: en.cacheClear }),
+      page
+        .getByRole("dialog", { name: en.settings })
+        .getByRole("button", { name: en.cacheClear }),
     ).toBeDisabled();
   });
 
@@ -1484,7 +1791,9 @@ test.describe("settings dialog", () => {
       cache_status: { dir: "/Users/e2e/cache", entries: 4, bytes: 1000 },
       clear_cache: fn(`() => { throw "busy: sync in progress"; }`),
       "plugin:dialog|save": "/Users/e2e/out/diag.json",
-      export_diagnostics: fn(`() => { throw "failed to read /Users/e2e/out: Permission denied"; }`),
+      export_diagnostics: fn(
+        `() => { throw "failed to read /Users/e2e/out: Permission denied"; }`,
+      ),
     });
     const dialog = page.getByRole("dialog", { name: en.settings });
     await dialog.getByRole("button", { name: en.cacheClear }).click();
@@ -1523,7 +1832,9 @@ test.describe("settings dialog", () => {
     const dialog = page.getByRole("dialog", { name: en.settings });
     await dialog.getByRole("button", { name: en.cacheClear }).click();
     await dialog.getByRole("button", { name: en.cacheClear }).click();
-    await expect(page.locator(".banner--ok")).toContainText(en.cacheCleared(formatBytes(1000)));
+    await expect(page.locator(".banner--ok")).toContainText(
+      en.cacheCleared(formatBytes(1000)),
+    );
 
     // The banner really is over the scrim — while the dialog is still open. The banner's
     // BODY is deliberately click-through (`.toasts` pointer-events choreography), which
@@ -1536,7 +1847,10 @@ test.describe("settings dialog", () => {
       .locator(".banner--ok .banner__dismiss")
       .evaluate((el) => {
         const r = el.getBoundingClientRect();
-        const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        const at = document.elementFromPoint(
+          r.x + r.width / 2,
+          r.y + r.height / 2,
+        );
         return at instanceof HTMLElement && (el === at || el.contains(at));
       });
     expect(onTop).toBe(true);
@@ -1552,7 +1866,12 @@ test.describe("settings dialog", () => {
     page,
   }) => {
     await openSettings(page, {
-      telemetry_status: { consentVersion: 1, granted: false, hasInstallId: true, queued: 2 },
+      telemetry_status: {
+        consentVersion: 1,
+        granted: false,
+        hasInstallId: true,
+        queued: 2,
+      },
       ...spy(
         "set_telemetry_consent",
         "{ consentVersion: 1, granted: !!args.granted, hasInstallId: true, queued: 2 }",
@@ -1562,14 +1881,18 @@ test.describe("settings dialog", () => {
     });
     const dialog = page.getByRole("dialog", { name: en.settings });
 
-    const toggle = dialog.getByRole("checkbox", { name: en.telemetryToggleLabel });
+    const toggle = dialog.getByRole("checkbox", {
+      name: en.telemetryToggleLabel,
+    });
     await expect(toggle).not.toBeChecked();
     await toggle.check();
     expect((await onlyCall(page, "set_telemetry_consent")).granted).toBe(true);
     await expect(toggle).toBeChecked();
 
     await dialog.getByRole("button", { name: en.telemetryShowPreview }).click();
-    const preview = page.getByRole("dialog", { name: en.telemetryPreviewTitle });
+    const preview = page.getByRole("dialog", {
+      name: en.telemetryPreviewTitle,
+    });
     await expect(preview).toContainText("sync_completed");
     await preview.getByRole("button", { name: en.close }).click();
     await expect(preview).toBeHidden();
@@ -1583,7 +1906,9 @@ test.describe("settings dialog", () => {
     await dialog.getByRole("button", { name: en.telemetryDelete }).click();
     await dialog.getByRole("button", { name: en.telemetryDelete }).click();
     expect(await calls(page, "request_telemetry_deletion")).toHaveLength(1);
-    await expect(page.locator(".banner--ok")).toContainText(en.telemetryDeleted);
+    await expect(page.locator(".banner--ok")).toContainText(
+      en.telemetryDeleted,
+    );
   });
 
   test("«Show the consent text again» closes Settings rather than stacking a second modal", async ({
@@ -1596,7 +1921,9 @@ test.describe("settings dialog", () => {
       .click();
 
     await expect(page.getByRole("dialog", { name: en.settings })).toBeHidden();
-    await expect(page.getByRole("dialog", { name: en.consentTitle })).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: en.consentTitle }),
+    ).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(1);
   });
 
@@ -1605,13 +1932,18 @@ test.describe("settings dialog", () => {
   }) => {
     await openSettings(page, {
       ...spy("update_check", '{ phase: "available", version: "0.6.1" }'),
-      ...spy("update_download_install", '{ phase: "readyToInstall", version: "0.6.1" }'),
+      ...spy(
+        "update_download_install",
+        '{ phase: "readyToInstall", version: "0.6.1" }',
+      ),
     });
     const dialog = page.getByRole("dialog", { name: en.settings });
 
     const beta = dialog.getByRole("checkbox", { name: en.betaChannelLabel });
     await beta.check();
-    await expect.poll(() => readSettings(page).then((s) => s.betaChannel)).toBe(true);
+    await expect
+      .poll(() => readSettings(page).then((s) => s.betaChannel))
+      .toBe(true);
 
     await dialog.getByRole("button", { name: en.updateCheck }).click();
     await expect(dialog).toContainText(en.updateAvailable("0.6.1"));
@@ -1619,9 +1951,13 @@ test.describe("settings dialog", () => {
     const checks = await calls(page, "update_check");
     expect(checks[checks.length - 1].beta).toBe(true);
 
-    await dialog.getByRole("button", { name: en.updateDownload("0.6.1") }).click();
+    await dialog
+      .getByRole("button", { name: en.updateDownload("0.6.1") })
+      .click();
     await expect(dialog).toContainText(en.updateReady("0.6.1"));
-    await expect(dialog.getByRole("button", { name: en.updateRestart })).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: en.updateRestart }),
+    ).toBeVisible();
   });
 
   test("«Show the introduction again» reopens onboarding without re-running first run", async ({
@@ -1634,10 +1970,14 @@ test.describe("settings dialog", () => {
       .click();
 
     await expect(page.getByRole("dialog", { name: en.settings })).toBeHidden();
-    await expect(page.getByRole("heading", { name: en.obTitle1 })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: en.obTitle1 }),
+    ).toBeVisible();
   });
 
-  test("«Export diagnostics» asks for a JSON path and writes there", async ({ page }) => {
+  test("«Export diagnostics» asks for a JSON path and writes there", async ({
+    page,
+  }) => {
     await openSettings(page, {
       ...spy("plugin:dialog|save", JSON.stringify("/Users/e2e/out/diag.json")),
       ...spy("export_diagnostics"),
@@ -1650,8 +1990,12 @@ test.describe("settings dialog", () => {
     expect((await onlyCall(page, "plugin:dialog|save")).options).toMatchObject({
       defaultPath: "sundaysync-diagnostics.json",
     });
-    expect((await onlyCall(page, "export_diagnostics")).path).toBe("/Users/e2e/out/diag.json");
-    await expect(page.locator(".banner--ok")).toContainText(en.diagnosticsSaved);
+    expect((await onlyCall(page, "export_diagnostics")).path).toBe(
+      "/Users/e2e/out/diag.json",
+    );
+    await expect(page.locator(".banner--ok")).toContainText(
+      en.diagnosticsSaved,
+    );
   });
 
   test("it closes three ways — ✕, Escape and the backdrop — and each gives the focus back", async ({
@@ -1663,7 +2007,8 @@ test.describe("settings dialog", () => {
       await openSettings(page);
       const dialog = page.getByRole("dialog", { name: en.settings });
 
-      if (how === "close") await dialog.getByRole("button", { name: en.close }).click();
+      if (how === "close")
+        await dialog.getByRole("button", { name: en.close }).click();
       else if (how === "escape") await page.keyboard.press("Escape");
       else {
         const box = (await page.locator(".dialog-backdrop").boundingBox())!;
@@ -1685,10 +2030,14 @@ test.describe("settings dialog", () => {
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
 test.describe("banners and popovers", () => {
-  test("a failing scan says so, and the ✕ dismisses the banner", async ({ page }) => {
+  test("a failing scan says so, and the ✕ dismisses the banner", async ({
+    page,
+  }) => {
     await bootEmpty(page, {
       "plugin:dialog|open": [SHOOT],
-      scan_inputs: fn(`() => { throw "failed to read /Users/e2e/shoot: No such file"; }`),
+      scan_inputs: fn(
+        `() => { throw "failed to read /Users/e2e/shoot: No such file"; }`,
+      ),
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
 
@@ -1709,7 +2058,9 @@ test.describe("banners and popovers", () => {
     // measured here is about the layer, not about which message is in it.
     await reachResult(page, {
       ...spy("plugin:dialog|save", JSON.stringify(FCPXML)),
-      export_timeline: fn(`() => { throw "io error: /Users/e2e/out is read-only"; }`),
+      export_timeline: fn(
+        `() => { throw "io error: /Users/e2e/out is read-only"; }`,
+      ),
     });
     const before = (await page.locator(".timeline__frame").boundingBox())!;
 
@@ -1725,18 +2076,26 @@ test.describe("banners and popovers", () => {
     expect(after.y).toBeCloseTo(before.y, 0);
   });
 
-  test("Escape closes a popover and gives the summary its focus back", async ({ page }) => {
+  test("Escape closes a popover and gives the summary its focus back", async ({
+    page,
+  }) => {
     await reachSources(page);
     const summary = sources(page).locator(".popover--sources > summary");
     await summary.click();
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeVisible();
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeVisible();
 
     await page.keyboard.press("Escape");
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeHidden();
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeHidden();
     await expect(summary).toBeFocused();
   });
 
-  test("a press outside closes it; a press inside it does not", async ({ page }) => {
+  test("a press outside closes it; a press inside it does not", async ({
+    page,
+  }) => {
     await reachSources(page);
     const panel = sources(page).locator(".popover--sources .popover__panel");
     await sources(page).locator(".popover--sources > summary").click();
@@ -1749,13 +2108,25 @@ test.describe("banners and popovers", () => {
     await expect(panel).toBeHidden();
   });
 
-  test("opening one popover closes the other — by mouse and by keyboard", async ({ page }) => {
-    await reachSources(page, {}, {
-      ...presyncScanManifest(),
-      unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
-    });
-    const sourcesPanel = sources(page).locator(".popover--sources .popover__panel");
-    const problemPanel = sources(page).locator(".popover--problems .popover__panel");
+  test("opening one popover closes the other — by mouse and by keyboard", async ({
+    page,
+  }) => {
+    await reachSources(
+      page,
+      {},
+      {
+        ...presyncScanManifest(),
+        unsynced: [
+          { file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" },
+        ],
+      },
+    );
+    const sourcesPanel = sources(page).locator(
+      ".popover--sources .popover__panel",
+    );
+    const problemPanel = sources(page).locator(
+      ".popover--problems .popover__panel",
+    );
 
     await sources(page).locator(".popover--sources > summary").click();
     await expect(sourcesPanel).toBeVisible();
@@ -1775,7 +2146,11 @@ test.describe("banners and popovers", () => {
     // Nothing closes a `<details>` on a phase change, and nothing needs to: the panel floats
     // over the stage (D-078) and its content is derived from the same manifest either side of
     // the transition. Asserted so a change of mind here is a deliberate one.
-    await reachSources(page, { run_sync: controlled("run_sync") }, scanManifest());
+    await reachSources(
+      page,
+      { run_sync: controlled("run_sync") },
+      scanManifest(),
+    );
     const panel = sources(page).locator(".popover--sources .popover__panel");
     await sources(page).locator(".popover--sources > summary").click();
     await expect(panel).toBeVisible();
@@ -1809,19 +2184,29 @@ test.describe("banners and popovers", () => {
 test.describe("at the smallest window the app allows (1024×600)", () => {
   test.use({ viewport: { width: 1024, height: 600 } });
 
-  test("the strip's and the slot's controls all hit-test to themselves", async ({ page }) => {
+  test("the strip's and the slot's controls all hit-test to themselves", async ({
+    page,
+  }) => {
     await reachResult(page, { run_sync: twoDeviceOutcome(), ...pcmWindow() });
 
     // Nothing overflows the room sideways — the whole point of the strip's ellipsising.
     const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
     );
-    expect(overflow, `${overflow} px of horizontal overflow`).toBeLessThanOrEqual(1);
+    expect(
+      overflow,
+      `${overflow} px of horizontal overflow`,
+    ).toBeLessThanOrEqual(1);
 
     const reachable = async (locator: ReturnType<Page["locator"]>) =>
       locator.evaluate((el) => {
         const r = el.getBoundingClientRect();
-        const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        const at = document.elementFromPoint(
+          r.x + r.width / 2,
+          r.y + r.height / 2,
+        );
         return at !== null && (el.contains(at) || at.contains(el));
       });
 
@@ -1835,12 +2220,17 @@ test.describe("at the smallest window the app allows (1024×600)", () => {
       page.getByRole("button", { name: en.stopPlayback }),
       page.getByRole("button", { name: en.zoomFitAria }),
     ]) {
-      expect(await reachable(control), await control.evaluate((el) => el.outerHTML)).toBe(true);
+      expect(
+        await reachable(control),
+        await control.evaluate((el) => el.outerHTML),
+      ).toBe(true);
     }
 
     // …and the two that are easiest to lose to a cramped row still work when pressed.
     await page.getByRole("button", { name: en.zoomFitAria }).click();
     await sources(page).locator(".popover--sources > summary").click();
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeVisible();
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeVisible();
   });
 });

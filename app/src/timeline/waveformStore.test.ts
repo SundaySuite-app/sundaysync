@@ -33,7 +33,9 @@ describe("classifyWaveformError", () => {
     expect(nbBusy.text).not.toBe(nb.errUnknown(BUSY_SYNC));
     expect(nbBusy.text).not.toContain("Noe gikk galt");
     expect(nbBusy.text).not.toContain(BUSY_SYNC);
-    expect(classifyWaveformError(BUSY_MAINTENANCE, nb).text).toBe(nb.errBusyMaintenance);
+    expect(classifyWaveformError(BUSY_MAINTENANCE, nb).text).toBe(
+      nb.errBusyMaintenance,
+    );
     expect(classifyWaveformError(BUSY_SYNC, en).text).toBe(en.errBusySync);
   });
 

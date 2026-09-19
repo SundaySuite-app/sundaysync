@@ -2,7 +2,11 @@ import { memo, useMemo } from "react";
 import type { Strings } from "../../i18n";
 import { formatDuration } from "../../i18n";
 import { visibleClips, type TimelineView } from "../../timeline/geometry";
-import { roomBeforeNext, trackHeightFor, UNSYNCED_ROW_PX } from "../../timeline/hop";
+import {
+  roomBeforeNext,
+  trackHeightFor,
+  UNSYNCED_ROW_PX,
+} from "../../timeline/hop";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import type { PrewarmStatus } from "../../state";
 import type { TimeSource } from "../../timeline/recordingTime";
@@ -213,7 +217,9 @@ export const Track = memo(function Track({
                 <button
                   type="button"
                   className={`mixbtn${soloed ? " mixbtn--on mixbtn--solo" : ""}`}
-                  aria-label={soloed ? t.unsoloDevice(name) : t.soloDevice(name)}
+                  aria-label={
+                    soloed ? t.unsoloDevice(name) : t.soloDevice(name)
+                  }
                   aria-pressed={soloed}
                   onClick={() => onToggleSolo(device.id)}
                 >
@@ -247,7 +253,10 @@ export const Track = memo(function Track({
       </div>
       <div className="track__lanes">
         {rows.length === 0 ? (
-          <div className="track__lane track__lane--empty" style={{ height: `${laneHeight}px` }}>
+          <div
+            className="track__lane track__lane--empty"
+            style={{ height: `${laneHeight}px` }}
+          >
             <span className="lane__empty">{t.emptyLane}</span>
           </div>
         ) : (

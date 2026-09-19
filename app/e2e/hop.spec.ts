@@ -51,7 +51,11 @@ const CAM_A = "/Users/e2e/shoot/CamA/C0001.MP4";
 const CAM_B = "/Users/e2e/shoot/CamB/C0002.MP4";
 
 /** Durations, straight from `presyncScanManifest()`. */
-const DURATIONS: Record<string, number> = { [WAV]: 3600, [CAM_A]: 1800, [CAM_B]: 1800 };
+const DURATIONS: Record<string, number> = {
+  [WAV]: 3600,
+  [CAM_A]: 1800,
+  [CAM_B]: 1800,
+};
 
 /**
  * Where the sync says each file really was, as `offset_seconds` — i.e. relative to the
@@ -63,9 +67,17 @@ const DURATIONS: Record<string, number> = { [WAV]: 3600, [CAM_A]: 1800, [CAM_B]:
  * the sync and would have nothing to hop. A drop where one card started early is also just
  * what a multi-camera service looks like.
  */
-const SOLVED: Record<string, number> = { [WAV]: 0, [CAM_A]: -60, [CAM_B]: 1900 };
+const SOLVED: Record<string, number> = {
+  [WAV]: 0,
+  [CAM_A]: -60,
+  [CAM_B]: 1900,
+};
 
-const DEVICE_OF: Record<string, string> = { [WAV]: "rec", [CAM_A]: "cam-a", [CAM_B]: "cam-b" };
+const DEVICE_OF: Record<string, string> = {
+  [WAV]: "rec",
+  [CAM_A]: "cam-a",
+  [CAM_B]: "cam-b",
+};
 
 function placement(file: string) {
   return {
@@ -100,7 +112,9 @@ function hopOutcome(omit?: string) {
         { id: "cam-b", label: "Camera B", kind: "video", files: [CAM_B] },
       ],
       placements: files.map(placement),
-      unsynced: omit ? [{ file: omit, device: DEVICE_OF[omit], reason: "no_peak" }] : [],
+      unsynced: omit
+        ? [{ file: omit, device: DEVICE_OF[omit], reason: "no_peak" }]
+        : [],
       sequence: { fps: "25/1", duration_seconds: 3700 },
       warnings: [],
     },
@@ -218,12 +232,19 @@ async function watchTimeline(page: Page) {
       for (const record of records) {
         if (record.type === "childList") {
           for (const node of Array.from(record.addedNodes)) {
-            if (node instanceof HTMLElement && node.classList.contains("clip--ghost")) {
+            if (
+              node instanceof HTMLElement &&
+              node.classList.contains("clip--ghost")
+            ) {
               seen.ghosts += 1;
             }
           }
         }
-        if (record.type !== "attributes" || !(record.target instanceof HTMLElement)) continue;
+        if (
+          record.type !== "attributes" ||
+          !(record.target instanceof HTMLElement)
+        )
+          continue;
         const el = record.target;
         if (record.attributeName === "class") {
           const file = el.dataset.file ?? "";
@@ -330,7 +351,9 @@ async function expectNothingLeftOnTheClips(page: Page) {
   const leftovers = await page.$$eval(".clip", (els) =>
     els
       .map((el) => (el as HTMLElement).getAttribute("style") ?? "")
-      .filter((style) => style.includes("--hop-") || style.includes("transform")),
+      .filter(
+        (style) => style.includes("--hop-") || style.includes("transform"),
+      ),
   );
   expect(leftovers).toEqual([]);
 }
@@ -356,7 +379,10 @@ test.describe("the clips hop into place when the sync lands", () => {
       // one. This is the assertion that catches a hop which set an offset it could not then
       // animate away (which is precisely what would happen if the reduced-motion gate were
       // on the CSS alone: `styles.css` kills the animation, the offset stays).
-      await expect(page.locator(".timeline")).not.toHaveAttribute("data-hop", /.*/);
+      await expect(page.locator(".timeline")).not.toHaveAttribute(
+        "data-hop",
+        /.*/,
+      );
       await expect(page.locator(".clip--ghost")).toHaveCount(0);
       await expectNothingLeftOnTheClips(page);
 
@@ -382,7 +408,9 @@ test.describe("the clips hop into place when the sync lands", () => {
       const pxPerMs = fitPxPerMs(resultSpanMs(), widthPx, FIT_PADDING_PX);
 
       for (const file of [WAV, CAM_A, CAM_B]) {
-        const box = (await page.locator(`.clip[data-file="${file}"]`).boundingBox())!;
+        const box = (await page
+          .locator(`.clip[data-file="${file}"]`)
+          .boundingBox())!;
         expect(box.x - laneBox.x).toBeCloseTo(localStartMs(file) * pxPerMs, 0);
       }
     });
@@ -449,11 +477,16 @@ test.describe("the clips hop into place when the sync lands", () => {
     // The sequence cleans up after itself: no animations left running, no custom properties,
     // no leftover class on the section.
     await expectNothingLeftOnTheClips(page);
-    await expect(page.locator(".timeline")).not.toHaveClass(/timeline--hopping/);
-    for (const clip of await clipStates(page)) expect(anatomy(clip)).toEqual(GREEN);
+    await expect(page.locator(".timeline")).not.toHaveClass(
+      /timeline--hopping/,
+    );
+    for (const clip of await clipStates(page))
+      expect(anatomy(clip)).toEqual(GREEN);
   });
 
-  test("the clips travel BLUE and land green, each on its own delay", async ({ page }) => {
+  test("the clips travel BLUE and land green, each on its own delay", async ({
+    page,
+  }) => {
     // The three owner choices of D-090, caught in flight. Read in ONE round trip a few
     // milliseconds after the outcome lands — no clip can have finished by then (the shortest
     // possible number is 800 ms) — so this is a statement about a state, not about an
@@ -488,10 +521,13 @@ test.describe("the clips hop into place when the sync lands", () => {
     // And it ends: the blue is a state with an end, not a repaint.
     await waitForResult(page);
     await expect(page.locator(".clip--travelling")).toHaveCount(0);
-    for (const clip of await clipStates(page)) expect(anatomy(clip)).toEqual(GREEN);
+    for (const clip of await clipStates(page))
+      expect(anatomy(clip)).toEqual(GREEN);
   });
 
-  test("a clip that lost its place fades out instead of blinking away", async ({ page }) => {
+  test("a clip that lost its place fades out instead of blinking away", async ({
+    page,
+  }) => {
     await reachSources(page);
     await watchTimeline(page);
     await page.getByRole("button", { name: en.syncButton }).click();
@@ -505,7 +541,9 @@ test.describe("the clips hop into place when the sync lands", () => {
     // which is not.
     const ghost = page.locator(`.clip--ghost[data-file="${CAM_B}"]`);
     await expect(ghost).toBeAttached();
-    expect(await ghost.evaluate((el) => getComputedStyle(el).animationDelay)).toBe("0.15s");
+    expect(
+      await ghost.evaluate((el) => getComputedStyle(el).animationDelay),
+    ).toBe("0.15s");
 
     await waitForResult(page);
     const observed = await seen(page);
@@ -528,13 +566,19 @@ test.describe("the clips hop into place when the sync lands", () => {
     await expect(page.locator(".clip--travelling").first()).toBeAttached();
     const body = page.locator(".timeline__body");
     const box = (await body.boundingBox())!;
-    await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 120));
+    await page.mouse.move(
+      box.x + box.width / 2,
+      box.y + Math.min(box.height / 2, 120),
+    );
     await page.keyboard.down("Shift");
     await page.mouse.wheel(0, 300);
     await page.keyboard.up("Shift");
 
     // Cancelled on the spot — not merely finished early.
-    await expect(page.locator(".timeline")).not.toHaveAttribute("data-hop", /.*/);
+    await expect(page.locator(".timeline")).not.toHaveAttribute(
+      "data-hop",
+      /.*/,
+    );
     await expectNothingLeftOnTheClips(page);
     // D-090: and the colour goes with it. A cancelled number is a finished number as far as
     // the answer is concerned — the engine placed these files, whether or not the operator
@@ -547,12 +591,13 @@ test.describe("the clips hop into place when the sync lands", () => {
 
     // And the view stays where the operator left it: the interrupted fit does not creep
     // back afterwards.
-    const settled = (await page.locator(`.clip[data-file="${CAM_A}"]`).boundingBox())!.x;
+    const settled = (await page
+      .locator(`.clip[data-file="${CAM_A}"]`)
+      .boundingBox())!.x;
     await page.waitForTimeout(600);
-    expect((await page.locator(`.clip[data-file="${CAM_A}"]`).boundingBox())!.x).toBeCloseTo(
-      settled,
-      0,
-    );
+    expect(
+      (await page.locator(`.clip[data-file="${CAM_A}"]`).boundingBox())!.x,
+    ).toBeCloseTo(settled, 0);
   });
 
   // ── R5: the hop with the tracks SCROLLED (V05-W3) ────────────────────────────────────

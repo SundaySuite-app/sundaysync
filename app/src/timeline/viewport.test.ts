@@ -75,7 +75,9 @@ describe("fitPxPerMs", () => {
     // …and the whole span really lands inside the lane.
     expect(sixteenHoursMs * fitted).toBeLessThanOrEqual(LANE_PX);
     // The floor's own reach, stated in the unit the decision was made in.
-    expect((LANE_PX - FIT_PADDING_PX) / MIN_PX_PER_MS / 3_600_000).toBeGreaterThan(19);
+    expect(
+      (LANE_PX - FIT_PADDING_PX) / MIN_PX_PER_MS / 3_600_000,
+    ).toBeGreaterThan(19);
   });
 
   it("survives a viewport narrower than its own padding", () => {
@@ -153,7 +155,10 @@ describe("scrollbarMetrics", () => {
     // ...and it is strictly monotonic the whole way, never stalling anywhere.
     let previous = -1;
     for (let i = 0; i <= 100; i++) {
-      const m = scrollbarMetrics({ ...v, scrollMs: (maxScroll * i) / 100 }, span);
+      const m = scrollbarMetrics(
+        { ...v, scrollMs: (maxScroll * i) / 100 },
+        span,
+      );
       expect(m.offsetFrac).toBeGreaterThan(previous);
       expect(m.offsetFrac + m.thumbFrac).toBeLessThanOrEqual(1 + 1e-12);
       previous = m.offsetFrac;
@@ -189,10 +194,9 @@ describe("thumbOffsetFracToScrollMs (finding 5)", () => {
     for (let i = 0; i <= 20; i++) {
       const scrollMs = (maxScroll * i) / 20;
       const { offsetFrac } = scrollbarMetrics({ ...v, scrollMs }, span);
-      expect(thumbOffsetFracToScrollMs(offsetFrac, { ...v, scrollMs }, span)).toBeCloseTo(
-        scrollMs,
-        6,
-      );
+      expect(
+        thumbOffsetFracToScrollMs(offsetFrac, { ...v, scrollMs }, span),
+      ).toBeCloseTo(scrollMs, 6);
     }
   });
 
@@ -204,8 +208,10 @@ describe("thumbOffsetFracToScrollMs (finding 5)", () => {
     const maxScroll = span - v.widthPx / v.pxPerMs;
     for (const scrollMs of [0, maxScroll * 0.13, maxScroll * 0.99, maxScroll]) {
       const { offsetFrac } = scrollbarMetrics({ ...v, scrollMs }, span);
-      expect(thumbOffsetFracToScrollMs(offsetFrac, { ...v, scrollMs }, span) / maxScroll)
-        .toBeCloseTo(scrollMs / maxScroll, 9);
+      expect(
+        thumbOffsetFracToScrollMs(offsetFrac, { ...v, scrollMs }, span) /
+          maxScroll,
+      ).toBeCloseTo(scrollMs / maxScroll, 9);
     }
   });
 
@@ -221,10 +227,9 @@ describe("thumbOffsetFracToScrollMs (finding 5)", () => {
     for (const withinThumb of [0, bar.thumbFrac / 2, bar.thumbFrac]) {
       const pointerFrac = bar.offsetFrac + withinThumb;
       const grabOffset = pointerFrac - bar.offsetFrac;
-      expect(thumbOffsetFracToScrollMs(pointerFrac - grabOffset, v, span)).toBeCloseTo(
-        v.scrollMs,
-        6,
-      );
+      expect(
+        thumbOffsetFracToScrollMs(pointerFrac - grabOffset, v, span),
+      ).toBeCloseTo(v.scrollMs, 6);
     }
 
     // …and the old mapping demonstrably does not: grabbing the left edge moves it.

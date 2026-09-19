@@ -160,9 +160,15 @@ const TICK_GAP_PX = 16;
  * labels are all the same width anyway. Asking about the end of the visible range therefore
  * costs one `Date` and answers for the whole ruler.
  */
-function widestLabelPx(view: TimelineView, intervalMs: number, originEpochMs: number | null): number {
+function widestLabelPx(
+  view: TimelineView,
+  intervalMs: number,
+  originEpochMs: number | null,
+): number {
   const [, end] = visibleRange(view);
-  return tickLabel(Math.max(0, end), intervalMs, originEpochMs).length * TICK_CHAR_PX;
+  return (
+    tickLabel(Math.max(0, end), intervalMs, originEpochMs).length * TICK_CHAR_PX
+  );
 }
 
 /**
@@ -184,7 +190,10 @@ export function tickIntervalMs(
   originEpochMs: number | null = null,
 ): number {
   for (const interval of NICE_INTERVALS_MS) {
-    const need = Math.max(minPxBetween, widestLabelPx(view, interval, originEpochMs) + TICK_GAP_PX);
+    const need = Math.max(
+      minPxBetween,
+      widestLabelPx(view, interval, originEpochMs) + TICK_GAP_PX,
+    );
     if (interval * view.pxPerMs >= need) return interval;
   }
   return NICE_INTERVALS_MS[NICE_INTERVALS_MS.length - 1];
@@ -236,7 +245,8 @@ export function tickLabel(
   intervalMs: number,
   originEpochMs: number | null = null,
 ): string {
-  if (originEpochMs !== null) return wallClockLabel(originEpochMs + ms, intervalMs);
+  if (originEpochMs !== null)
+    return wallClockLabel(originEpochMs + ms, intervalMs);
   const full = formatTimecode(ms);
   return intervalMs >= 1000 ? full.slice(0, -4) : full;
 }

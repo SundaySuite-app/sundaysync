@@ -29,8 +29,12 @@ describe("skipped-files summary (D-066)", () => {
   it("counts both classes, in both languages", () => {
     // The owner's wedding, as measured: eight DJI `.LRF` proxies plus three other sidecars,
     // and one `IMG_4164.HEIC`.
-    expect(nb.skippedSummary(11, 1)).toBe("11 følgefiler og 1 stillbilde ble hoppet over");
-    expect(en.skippedSummary(11, 1)).toBe("11 sidecar files and 1 still image were skipped");
+    expect(nb.skippedSummary(11, 1)).toBe(
+      "11 følgefiler og 1 stillbilde ble hoppet over",
+    );
+    expect(en.skippedSummary(11, 1)).toBe(
+      "11 sidecar files and 1 still image were skipped",
+    );
   });
 
   it("says nothing about a class that has no members", () => {
@@ -46,14 +50,18 @@ describe("skipped-files summary (D-066)", () => {
     expect(nb.skippedSummary(0, 1)).toBe("1 stillbilde ble hoppet over");
     expect(en.skippedSummary(0, 1)).toBe("1 still image was skipped");
     // One of each is still a plural subject: "were", not "was".
-    expect(en.skippedSummary(1, 1)).toBe("1 sidecar file and 1 still image were skipped");
+    expect(en.skippedSummary(1, 1)).toBe(
+      "1 sidecar file and 1 still image were skipped",
+    );
   });
 
   it("labels each reason in the operator's own words, never the wire spelling", () => {
     for (const t of [nb, en]) {
       expect(t.skippedReason("sidecar")).not.toContain("_");
       expect(t.skippedReason("still_image")).not.toContain("_");
-      expect(t.skippedReason("sidecar")).not.toBe(t.skippedReason("still_image"));
+      expect(t.skippedReason("sidecar")).not.toBe(
+        t.skippedReason("still_image"),
+      );
     }
     expect(nb.skippedReason("still_image")).toBe("stillbilde");
     expect(en.skippedReason("still_image")).toBe("still image");

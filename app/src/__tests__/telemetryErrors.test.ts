@@ -13,9 +13,9 @@ import {
 
 describe("scrubPaths — the consent copy's 'never filenames/folders' promise", () => {
   it("replaces a macOS home-directory path with a placeholder", () => {
-    expect(scrubPaths("ENOENT: /Users/richard/Documents/service.mov not found")).toBe(
-      "ENOENT: <path> not found",
-    );
+    expect(
+      scrubPaths("ENOENT: /Users/richard/Documents/service.mov not found"),
+    ).toBe("ENOENT: <path> not found");
   });
 
   it("replaces a Linux home-directory path", () => {
@@ -28,7 +28,9 @@ describe("scrubPaths — the consent copy's 'never filenames/folders' promise", 
     expect(scrubPaths("C:\\Users\\richard\\Videos\\a.mp4 is locked")).toBe(
       "<path> is locked",
     );
-    expect(scrubPaths("C:/Users/richard/Videos/a.mp4 is locked")).toBe("<path> is locked");
+    expect(scrubPaths("C:/Users/richard/Videos/a.mp4 is locked")).toBe(
+      "<path> is locked",
+    );
   });
 
   it("leaves ordinary text untouched", () => {
@@ -58,7 +60,10 @@ describe("truncateMessage", () => {
 
 describe("shapeErrorPayload", () => {
   it("scrubs and truncates in one pass", () => {
-    const { kind, message } = shapeErrorPayload("error", "boom at /Users/richard/x.mov");
+    const { kind, message } = shapeErrorPayload(
+      "error",
+      "boom at /Users/richard/x.mov",
+    );
     expect(kind).toBe("error");
     expect(message).toBe("boom at <path>");
   });
@@ -74,25 +79,45 @@ describe("shapeErrorPayload", () => {
 
 describe("gateErrorReport — dedupe + rate cap", () => {
   it("allows the first occurrence of an error", () => {
-    const { allow } = gateErrorReport(initialErrorGateState, "error", "boom", 0);
+    const { allow } = gateErrorReport(
+      initialErrorGateState,
+      "error",
+      "boom",
+      0,
+    );
     expect(allow).toBe(true);
   });
 
   it("suppresses an identical repeat within the dedupe window", () => {
     const first = gateErrorReport(initialErrorGateState, "error", "boom", 0);
-    const second = gateErrorReport(first.state, "error", "boom", DEDUPE_WINDOW_MS - 1);
+    const second = gateErrorReport(
+      first.state,
+      "error",
+      "boom",
+      DEDUPE_WINDOW_MS - 1,
+    );
     expect(second.allow).toBe(false);
   });
 
   it("allows the same error again once the dedupe window has passed", () => {
     const first = gateErrorReport(initialErrorGateState, "error", "boom", 0);
-    const second = gateErrorReport(first.state, "error", "boom", DEDUPE_WINDOW_MS + 1);
+    const second = gateErrorReport(
+      first.state,
+      "error",
+      "boom",
+      DEDUPE_WINDOW_MS + 1,
+    );
     expect(second.allow).toBe(true);
   });
 
   it("treats different kinds/messages as distinct — no cross-suppression", () => {
     const first = gateErrorReport(initialErrorGateState, "error", "boom", 0);
-    const second = gateErrorReport(first.state, "unhandledrejection", "boom", 0);
+    const second = gateErrorReport(
+      first.state,
+      "unhandledrejection",
+      "boom",
+      0,
+    );
     expect(second.allow).toBe(true);
   });
 
@@ -113,10 +138,13 @@ describe("gateErrorReport — dedupe + rate cap", () => {
       state = gateErrorReport(state, "error", `distinct-${i}`, 0).state;
     }
     // Capped at t=0.
-    expect(gateErrorReport(state, "error", "distinct-overflow", 0).allow).toBe(false);
-    // Past the rate window, the old hits have aged out and a new report is allowed again.
-    expect(gateErrorReport(state, "error", "distinct-overflow", RATE_WINDOW_MS + 1).allow).toBe(
-      true,
+    expect(gateErrorReport(state, "error", "distinct-overflow", 0).allow).toBe(
+      false,
     );
+    // Past the rate window, the old hits have aged out and a new report is allowed again.
+    expect(
+      gateErrorReport(state, "error", "distinct-overflow", RATE_WINDOW_MS + 1)
+        .allow,
+    ).toBe(true);
   });
 });

@@ -32,7 +32,9 @@ export function invokeWithTimeout<T>(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      reject(new Error(`${INVOKE_TIMEOUT}: ${cmd} did not answer within ${ms} ms`));
+      reject(
+        new Error(`${INVOKE_TIMEOUT}: ${cmd} did not answer within ${ms} ms`),
+      );
     }, ms);
 
     invoke<T>(cmd, args).then(

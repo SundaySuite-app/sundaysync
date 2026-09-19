@@ -31,7 +31,9 @@ describe("invokeWithTimeout (F11/F14)", () => {
 
   it("maps the timeout error to a recoverable NOTICE, not a red crash", async () => {
     invokeMock.mockReturnValue(new Promise(() => {}));
-    const call = invokeWithTimeout("check_sidecar", undefined, 5_000).catch((e: unknown) => e);
+    const call = invokeWithTimeout("check_sidecar", undefined, 5_000).catch(
+      (e: unknown) => e,
+    );
 
     await vi.advanceTimersByTimeAsync(5_000);
     const err = await call;

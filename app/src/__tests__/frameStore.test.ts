@@ -172,7 +172,9 @@ describe("fetchFrame", () => {
   // layer further out than where it was guarded.
   it("never hands back a grab the shell has already superseded", async () => {
     let rejectA!: (e: unknown) => void;
-    invokeMock.mockImplementationOnce(() => new Promise((_res, rej) => (rejectA = rej)));
+    invokeMock.mockImplementationOnce(
+      () => new Promise((_res, rej) => (rejectA = rej)),
+    );
     const first = fetchFrame(FILE_A, 30);
 
     // The operator clicks B. This grab's own `install_thumbnail_cancel` has now killed A's
@@ -196,7 +198,9 @@ describe("fetchFrame", () => {
     // back with real bytes after a newer grab for the same file has already settled. The
     // newer answer is the one that describes the cache as it is now.
     let resolveA!: (v: unknown) => void;
-    invokeMock.mockImplementationOnce(() => new Promise((res) => (resolveA = res)));
+    invokeMock.mockImplementationOnce(
+      () => new Promise((res) => (resolveA = res)),
+    );
     const doomed = fetchFrame(FILE_A, 30);
 
     invokeMock.mockImplementationOnce(() => new Promise(() => {}));
@@ -234,7 +238,9 @@ describe("hasFrame / peekFrame", () => {
 describe("cancelFramesExcept", () => {
   it("fires cancel_thumbnail for a grab the selection has moved past", () => {
     invokeMock.mockImplementation((cmd: string) =>
-      cmd === "video_frame" ? new Promise(() => {}) : Promise.resolve(undefined),
+      cmd === "video_frame"
+        ? new Promise(() => {})
+        : Promise.resolve(undefined),
     );
 
     void fetchFrame(FILE_A, 30);
@@ -249,7 +255,9 @@ describe("cancelFramesExcept", () => {
   // with a perfectly good picture in it.
   it("never cancels the grab for the file that is still selected", () => {
     invokeMock.mockImplementation((cmd: string) =>
-      cmd === "video_frame" ? new Promise(() => {}) : Promise.resolve(undefined),
+      cmd === "video_frame"
+        ? new Promise(() => {})
+        : Promise.resolve(undefined),
     );
 
     void fetchFrame(FILE_A, 30);
@@ -270,7 +278,9 @@ describe("cancelFramesExcept", () => {
 
   it("fires once, not once per entry — the shell holds a single cancel token", () => {
     invokeMock.mockImplementation((cmd: string) =>
-      cmd === "video_frame" ? new Promise(() => {}) : Promise.resolve(undefined),
+      cmd === "video_frame"
+        ? new Promise(() => {})
+        : Promise.resolve(undefined),
     );
     void fetchFrame(FILE_A, 30);
     void fetchFrame(FILE_B, 30);

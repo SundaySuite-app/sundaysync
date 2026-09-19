@@ -166,25 +166,44 @@ function currentManifest(phase: Phase): ScanManifest | null {
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "inputs/add": {
-      const inputs = Array.from(new Set([...currentInputs(state.phase), ...action.paths]));
+      const inputs = Array.from(
+        new Set([...currentInputs(state.phase), ...action.paths]),
+      );
       // Any input change invalidates a shown result (stale) and triggers a re-scan.
       return {
         ...state,
         banner: null,
-        phase: { name: "scanning", inputs, previous: currentManifest(state.phase), progress: null },
+        phase: {
+          name: "scanning",
+          inputs,
+          previous: currentManifest(state.phase),
+          progress: null,
+        },
         scanSeq: state.scanSeq + 1,
       };
     }
 
     case "inputs/removeRoot": {
-      const inputs = currentInputs(state.phase).filter((p) => p !== action.path);
+      const inputs = currentInputs(state.phase).filter(
+        (p) => p !== action.path,
+      );
       if (inputs.length === 0) {
-        return { ...state, banner: null, ...clearedSources, phase: { name: "empty" } };
+        return {
+          ...state,
+          banner: null,
+          ...clearedSources,
+          phase: { name: "empty" },
+        };
       }
       return {
         ...state,
         banner: null,
-        phase: { name: "scanning", inputs, previous: currentManifest(state.phase), progress: null },
+        phase: {
+          name: "scanning",
+          inputs,
+          previous: currentManifest(state.phase),
+          progress: null,
+        },
         scanSeq: state.scanSeq + 1,
       };
     }
@@ -218,14 +237,19 @@ export function reducer(state: AppState, action: Action): AppState {
         Object.entries(state.overrides).filter(([file]) => files.has(file)),
       );
       const reference =
-        state.reference !== null && files.has(state.reference) ? state.reference : null;
+        state.reference !== null && files.has(state.reference)
+          ? state.reference
+          : null;
       // Exclusions are pruned by the same philosophy, against a WIDER set: a file can be
       // removed from the problem group too, and that removal is about a path the scan
       // reported as unusable, not as a source. Keeping an exclusion for a path this scan
       // no longer knows about would send the engine a filter nothing matches, and would
       // keep a row in the "removed" group that the operator can no longer relate to
       // anything on screen.
-      const known = new Set([...files, ...action.manifest.unsynced.map((u) => u.file)]);
+      const known = new Set([
+        ...files,
+        ...action.manifest.unsynced.map((u) => u.file),
+      ]);
       const excluded = state.excluded.filter((file) => known.has(file));
       // Every file this scan found is about to be handed to `prewarm_analysis` (App.tsx),
       // so they all start out pending. An excluded file is not prewarmed — it is not part
@@ -242,7 +266,11 @@ export function reducer(state: AppState, action: Action): AppState {
         excluded,
         prewarm,
         prewarmProgress: null,
-        phase: { name: "sources", inputs: state.phase.inputs, manifest: action.manifest },
+        phase: {
+          name: "sources",
+          inputs: state.phase.inputs,
+          manifest: action.manifest,
+        },
       };
     }
 
@@ -271,7 +299,11 @@ export function reducer(state: AppState, action: Action): AppState {
     }
 
     case "reference/set":
-      return { ...state, reference: action.file, phase: markStale(state.phase) };
+      return {
+        ...state,
+        reference: action.file,
+        phase: markStale(state.phase),
+      };
 
     case "files/exclude": {
       if (state.excluded.includes(action.file)) return state;
@@ -317,7 +349,10 @@ export function reducer(state: AppState, action: Action): AppState {
       if (!(action.file in state.prewarm)) return state;
       return {
         ...state,
-        prewarm: { ...state.prewarm, [action.file]: action.ok ? "ready" : "failed" },
+        prewarm: {
+          ...state.prewarm,
+          [action.file]: action.ok ? "ready" : "failed",
+        },
       };
 
     case "prewarm/progress":
@@ -398,9 +433,13 @@ export function reducer(state: AppState, action: Action): AppState {
       // and the dot says so), and the one phase where a rebuild is not refused outright.
       if (state.phase.name !== "sources") return state;
       if (state.excluded.includes(action.file)) return state;
-      if (!state.phase.manifest.files.some((f) => f.file === action.file)) return state;
+      if (!state.phase.manifest.files.some((f) => f.file === action.file))
+        return state;
       if (state.prewarm[action.file] === "ready") return state;
-      return { ...state, prewarm: { ...state.prewarm, [action.file]: "ready" } };
+      return {
+        ...state,
+        prewarm: { ...state.prewarm, [action.file]: "ready" },
+      };
     }
 
     case "sync/start": {

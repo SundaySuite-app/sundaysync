@@ -39,7 +39,9 @@ export async function getTelemetryStatus(): Promise<TelemetryStatus | null> {
   }
 }
 
-export async function setTelemetryConsent(granted: boolean): Promise<TelemetryStatus | null> {
+export async function setTelemetryConsent(
+  granted: boolean,
+): Promise<TelemetryStatus | null> {
   try {
     return await invoke<TelemetryStatus>("set_telemetry_consent", { granted });
   } catch {
@@ -75,7 +77,10 @@ export async function requestTelemetryDeletion(): Promise<boolean> {
 }
 
 /** Best-effort — an error reporter must never itself throw or reject. */
-export async function reportFrontendError(kind: string, message: string): Promise<void> {
+export async function reportFrontendError(
+  kind: string,
+  message: string,
+): Promise<void> {
   try {
     await invoke("report_frontend_error", { kind, message });
   } catch {

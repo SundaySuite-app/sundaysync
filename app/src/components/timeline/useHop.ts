@@ -132,7 +132,13 @@ const HOP_ANIMATION = "clip-shuffle-bounce";
 
 /** The five properties `styles.css` reads the number's shape out of. Listed once so
  *  `release` cannot forget one and leave a clip carrying a stale delta into the next hop. */
-const HOP_PROPS = ["--hop-dx", "--hop-dy", "--hop-jx", "--hop-jy", "--hop-delay"] as const;
+const HOP_PROPS = [
+  "--hop-dx",
+  "--hop-dy",
+  "--hop-jx",
+  "--hop-jy",
+  "--hop-delay",
+] as const;
 
 /** On the section for the length of the clips' travel only — it relaxes the lane clipping
  *  so a clip can cross a track boundary (see `styles.css`). */
@@ -156,7 +162,8 @@ export const HOP_ATTR = "data-hop";
  * safe answer to "may I animate?" without an answer is no.
  */
 export function motionAllowed(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function")
+    return false;
   return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
@@ -281,7 +288,10 @@ export function useHop({
     for (const node of current.nodes) release(node);
     current.nodes.clear();
     if (current.onAnimationEnd && bodyRef.current) {
-      bodyRef.current.removeEventListener("animationend", current.onAnimationEnd);
+      bodyRef.current.removeEventListener(
+        "animationend",
+        current.onAnimationEnd,
+      );
     }
     sectionRef.current?.classList.remove(HOPPING_CLASS);
     sectionRef.current?.removeAttribute(HOP_ATTR);
@@ -294,7 +304,12 @@ export function useHop({
       const section = sectionRef.current;
       if (!body || !section) return;
 
-      const current: HopRun = { nodes: new Set(), timers: [], raf: null, onAnimationEnd: null };
+      const current: HopRun = {
+        nodes: new Set(),
+        timers: [],
+        raf: null,
+        onAnimationEnd: null,
+      };
       run.current = current;
       frozen.current = true;
       section.setAttribute(HOP_ATTR, "");
@@ -330,9 +345,14 @@ export function useHop({
             // the same size of step — and a linear ramp between two px/ms values crawls at
             // one end and lurches at the other whenever they differ by more than a little,
             // which after a sync they routinely do.
-            const pxPerMs = origin.pxPerMs * Math.pow(targetPxPerMs / origin.pxPerMs, eased);
+            const pxPerMs =
+              origin.pxPerMs * Math.pow(targetPxPerMs / origin.pxPerMs, eased);
             const scrollMs = origin.scrollMs * (1 - eased);
-            return { ...v, pxPerMs, scrollMs: clampScroll(scrollMs, pxPerMs, v.widthPx, span) };
+            return {
+              ...v,
+              pxPerMs,
+              scrollMs: clampScroll(scrollMs, pxPerMs, v.widthPx, span),
+            };
           });
           if (p < 1) current.raf = requestAnimationFrame(step);
           else settle();
@@ -346,8 +366,20 @@ export function useHop({
       // answered differently for the two. A single lane height here would compute the "old"
       // y-positions against a stack the DOM never drew — which is D-083's silent breakage,
       // arriving through the new door rather than the old one.
-      const deltas = hopDeltas(from.tracks, from.view, from.laneHeight, to.tracks, to.view, to.laneHeight);
-      const exits = hopExits(from.tracks, from.view, from.laneHeight, to.tracks);
+      const deltas = hopDeltas(
+        from.tracks,
+        from.view,
+        from.laneHeight,
+        to.tracks,
+        to.view,
+        to.laneHeight,
+      );
+      const exits = hopExits(
+        from.tracks,
+        from.view,
+        from.laneHeight,
+        to.tracks,
+      );
       // The clips' DRAWN widths, under the frozen view they are about to be animated in.
       // Arithmetic, not `offsetWidth`: reading a width off a node inside the same loop that
       // writes its custom properties would interleave a layout read with a style write once
@@ -375,7 +407,10 @@ export function useHop({
         // wave, and the eye reads that as the clip that went wrong.
         const node = byFile.get(file);
         if (!node) continue;
-        const choreography = hopChoreography(file, widths.get(file)?.width ?? 0);
+        const choreography = hopChoreography(
+          file,
+          widths.get(file)?.width ?? 0,
+        );
         node.style.willChange = "transform";
         // FLIP: the node is RENDERED at its solved position, so this offset is what puts it
         // back on its old one. `styles.css` animates from here to `translate(0, 0)`, by way
@@ -420,9 +455,11 @@ export function useHop({
       // ceremony, and the ghosts' fade became an animation for the same reason (D-090). So
       // the whole sequence is now style writes only: nothing here reads layout.
       section.classList.add(HOPPING_CLASS);
-      for (const node of current.nodes) node.classList.add(HOP_CLASS, TRAVELLING_CLASS);
+      for (const node of current.nodes)
+        node.classList.add(HOP_CLASS, TRAVELLING_CLASS);
       if (ghosts) {
-        for (const ghost of Array.from(ghosts.children)) ghost.classList.add(FADE_CLASS);
+        for (const ghost of Array.from(ghosts.children))
+          ghost.classList.add(FADE_CLASS);
       }
 
       const finish = () => {
@@ -444,7 +481,9 @@ export function useHop({
         // No surviving clip has a node to animate — every one of them is outside the
         // virtualization window, or the run placed nothing that was here before. The ghosts
         // still need their fade, but the view need not wait for it.
-        current.timers.push(setTimeout(finish, ghosts && exits.size > 0 ? FADE_MS : 0));
+        current.timers.push(
+          setTimeout(finish, ghosts && exits.size > 0 ? FADE_MS : 0),
+        );
         return;
       }
 

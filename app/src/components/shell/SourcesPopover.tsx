@@ -5,11 +5,7 @@ import { requestReveal } from "../../timeline/reveal";
 import { basename } from "../../types";
 import type { ScanManifest } from "../../types";
 import { CameraIcon, MicIcon } from "../icons";
-import {
-  groupDuration,
-  groupFiles,
-  isVideoGroup,
-} from "./sourcesModel";
+import { groupDuration, groupFiles, isVideoGroup } from "./sourcesModel";
 import { usePopoverDismiss } from "./usePopoverDismiss";
 
 /**
@@ -118,7 +114,8 @@ export function SourcesPopover({
                 {t.deviceLabel(group.device.id, group.device.label)}
               </span>
               <span className="device-group__meta">
-                {t.fileCount(group.files.length)} · {formatDuration(groupDuration(group))}
+                {t.fileCount(group.files.length)} ·{" "}
+                {formatDuration(groupDuration(group))}
               </span>
             </div>
             {group.files.map((entry) => (
@@ -131,7 +128,9 @@ export function SourcesPopover({
               >
                 <span className="filerow__name">{basename(entry.file)}</span>
                 <span className="filerow__badges">
-                  <span className="badge">{formatDuration(entry.duration_seconds)}</span>
+                  <span className="badge">
+                    {formatDuration(entry.duration_seconds)}
+                  </span>
                 </span>
               </button>
             ))}

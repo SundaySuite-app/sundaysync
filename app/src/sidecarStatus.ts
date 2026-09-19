@@ -14,7 +14,10 @@ export interface SidecarDescription {
   path: string | null;
 }
 
-export function describeSidecar(status: SidecarStatus, t: Strings): SidecarDescription {
+export function describeSidecar(
+  status: SidecarStatus,
+  t: Strings,
+): SidecarDescription {
   if (status.source === "bundled") {
     return { label: t.obFfmpegBundled, path: null };
   }

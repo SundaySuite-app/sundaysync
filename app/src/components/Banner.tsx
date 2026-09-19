@@ -20,7 +20,10 @@ export function BannerRegion({
   return (
     <div aria-live="polite">
       {banner && (
-        <p className={`banner banner--${banner.kind}`} role={banner.kind === "error" ? "alert" : undefined}>
+        <p
+          className={`banner banner--${banner.kind}`}
+          role={banner.kind === "error" ? "alert" : undefined}
+        >
           <span>{banner.text}</span>
           <button
             type="button"

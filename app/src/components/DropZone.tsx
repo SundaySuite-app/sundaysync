@@ -52,7 +52,9 @@ export function DropZone({
       className={`dropzone${compact ? " dropzone--compact" : ""}${over ? " dropzone--over" : ""}`}
     >
       <div>
-        <p className="dropzone__title">{compact ? t.addSources : t.dropTitle}</p>
+        <p className="dropzone__title">
+          {compact ? t.addSources : t.dropTitle}
+        </p>
         {!compact && <p className="dropzone__hint">{t.dropHint}</p>}
       </div>
       {/* V06-R1 (D-086): compact is a STRIP control now, so the two choosers are icons with
@@ -86,7 +88,13 @@ export function DropZone({
 
 function FolderIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      focusable="false"
+    >
       <path
         d="M1.5 3.5h4l1.2 1.6h7.8v7.4H1.5z"
         fill="none"
@@ -100,7 +108,13 @@ function FolderIcon() {
 
 function FilesIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      focusable="false"
+    >
       <path
         d="M4.5 1.8h4.2l3 3v9.4h-7.2z"
         fill="none"
@@ -108,7 +122,12 @@ function FilesIcon() {
         strokeWidth="1.3"
         strokeLinejoin="round"
       />
-      <path d="M8.6 1.8v3.1h3.1" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M8.6 1.8v3.1h3.1"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+      />
     </svg>
   );
 }

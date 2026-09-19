@@ -54,7 +54,11 @@ const startedAt = (offsetSeconds: number): string =>
  * three-hour service — the shape of the owner's wedding drop, parameterised so the same
  * builder can produce the two ends of the range the lane rule has to cover.
  */
-function card(devices: number, perDevice: number, clipSec = 90): Record<string, unknown> {
+function card(
+  devices: number,
+  perDevice: number,
+  clipSec = 90,
+): Record<string, unknown> {
   const spacing = perDevice > 1 ? (SPAN_SEC - clipSec) / (perDevice - 1) : 0;
   const deviceList: Record<string, unknown>[] = [];
   const files: Record<string, unknown>[] = [];
@@ -107,7 +111,11 @@ const WEDDING_TOTAL = WEDDING_DEVICES * WEDDING_PER_DEVICE; // 400
 /** …and its opposite: three files, three devices, a whole window to put them in. */
 const TINY_DEVICES = 3;
 
-async function drop(page: Page, scan: Record<string, unknown>, total: number): Promise<void> {
+async function drop(
+  page: Page,
+  scan: Record<string, unknown>,
+  total: number,
+): Promise<void> {
   await boot(page, {
     fixtures: {
       ...BOOT_FIXTURES,
@@ -198,13 +206,17 @@ test.describe("a clip is a drawing (D-091)", () => {
     await drop(page, dense(), DENSE_TOTAL);
 
     const wanted = "/nas/cam0/c0_002.mp4";
-    const box = (await page.locator(`.clip[data-file="${wanted}"]`).boundingBox())!;
+    const box = (await page
+      .locator(`.clip[data-file="${wanted}"]`)
+      .boundingBox())!;
     // The box really is a sliver at this zoom — if it were not, the test would be proving
     // nothing about the case the review found.
     expect(box.width).toBeLessThan(CLIP_DRAWING_MIN_PX);
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 
-    await expect(page.locator(".inspector .preview__name")).toHaveText("c0_002.mp4");
+    await expect(page.locator(".inspector .preview__name")).toHaveText(
+      "c0_002.mp4",
+    );
   });
 
   test("under the threshold a clip is a two-pixel tick, and still its state's colour", async ({
@@ -277,11 +289,21 @@ test.describe("the lanes grow into the room (D-091)", () => {
   async function stage(page: Page) {
     return page.evaluate(() => {
       const el = document.querySelector(".timeline__scroll") as HTMLElement;
-      const ruler = parseFloat(getComputedStyle(el).getPropertyValue("--tl-ruler-h"));
+      const ruler = parseFloat(
+        getComputedStyle(el).getPropertyValue("--tl-ruler-h"),
+      );
       const available = el.clientHeight - ruler;
       const lanes = Array.from(document.querySelectorAll(".track__lane"));
-      const used = lanes.reduce((n, l) => n + l.getBoundingClientRect().height, 0);
-      return { available, used, rows: lanes.length, dead: 1 - Math.min(1, used / available) };
+      const used = lanes.reduce(
+        (n, l) => n + l.getBoundingClientRect().height,
+        0,
+      );
+      return {
+        available,
+        used,
+        rows: lanes.length,
+        dead: 1 - Math.min(1, used / available),
+      };
     });
   }
 
@@ -304,7 +326,9 @@ test.describe("the lanes grow into the room (D-091)", () => {
     expect(s.used).toBeGreaterThan(2 * TINY_DEVICES * LANE_MIN_PX);
   });
 
-  test("sixteen devices fall back to the floor, and fill the room doing it", async ({ page }) => {
+  test("sixteen devices fall back to the floor, and fill the room doing it", async ({
+    page,
+  }) => {
     await drop(page, card(WEDDING_DEVICES, WEDDING_PER_DEVICE), WEDDING_TOTAL);
     const s = await stage(page);
     expect(s.rows).toBe(WEDDING_DEVICES);
@@ -327,7 +351,8 @@ test.describe("the lanes grow into the room (D-091)", () => {
       const s = await stage(page);
       const lane = laneHeightFor(s.rows, s.available);
       expect(s.rows).toBe(devices);
-      if (lane > LANE_MIN_PX) expect(s.rows * lane).toBeLessThanOrEqual(s.available);
+      if (lane > LANE_MIN_PX)
+        expect(s.rows * lane).toBeLessThanOrEqual(s.available);
       for (const l of await lanes(page)) expect(l.height).toBe(lane);
     }
   });
@@ -336,7 +361,9 @@ test.describe("the lanes grow into the room (D-091)", () => {
 test.describe("the hop still lands pixel-true at a grown lane height (D-091)", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("clips land exactly one grown lane apart after the sync", async ({ page }) => {
+  test("clips land exactly one grown lane apart after the sync", async ({
+    page,
+  }) => {
     // D-083's hazard, in the form the per-render pitch creates: `Track` draws the lanes and
     // `clipBoxes` sums the pitch for the hop's y-arithmetic, and if the two ever disagreed
     // every clip below the first device would fly to a row it is not in — with no error
@@ -386,8 +413,17 @@ test.describe("the hop still lands pixel-true at a grown lane height (D-091)", (
 
 /** An outcome that places every file of `scan` on its own device, the reference at zero. */
 function solved(scan: Record<string, unknown>): Record<string, unknown> {
-  const devices = scan.devices as { id: string; label: string; kind: string; files: string[] }[];
-  const files = scan.files as { file: string; device: string; duration_seconds: number }[];
+  const devices = scan.devices as {
+    id: string;
+    label: string;
+    kind: string;
+    files: string[];
+  }[];
+  const files = scan.files as {
+    file: string;
+    device: string;
+    duration_seconds: number;
+  }[];
   const reference = files[0];
   const durations: Record<string, number> = {};
   for (const f of files) durations[f.file] = f.duration_seconds;

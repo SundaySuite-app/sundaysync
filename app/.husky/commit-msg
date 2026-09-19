@@ -1,0 +1,4 @@
+# Git gir meldingsfila relativt til roten; gjør den absolutt før vi bytter mappe.
+msg="$1"
+case "$msg" in /*) ;; *) msg="$PWD/$msg" ;; esac
+cd app && npx --no -- commitlint --edit "$msg"

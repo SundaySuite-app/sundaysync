@@ -84,9 +84,16 @@ function load(): Settings {
     return {
       lang: p.lang === "nb" || p.lang === "en" ? p.lang : null,
       minPsr: isPositiveNumber(p.minPsr) ? p.minPsr : null,
-      segmentCount: isPositiveNumber(p.segmentCount) ? Math.round(p.segmentCount) : null,
-      cacheDir: typeof p.cacheDir === "string" && p.cacheDir.length > 0 ? p.cacheDir : null,
-      cacheCapMb: isPositiveNumber(p.cacheCapMb) ? Math.round(p.cacheCapMb) : null,
+      segmentCount: isPositiveNumber(p.segmentCount)
+        ? Math.round(p.segmentCount)
+        : null,
+      cacheDir:
+        typeof p.cacheDir === "string" && p.cacheDir.length > 0
+          ? p.cacheDir
+          : null,
+      cacheCapMb: isPositiveNumber(p.cacheCapMb)
+        ? Math.round(p.cacheCapMb)
+        : null,
       // Defaults to on: only an explicit stored `false` disables it, so a fresh or corrupt
       // blob keeps drift correction (D-042's on-by-default).
       correctDrift: p.correctDrift !== false,

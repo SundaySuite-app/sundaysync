@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import type { TimelineView as View } from "../../timeline/geometry";
 import type { ClipSpan } from "../../timeline/laneLayout";
-import { REVEAL_MS, revealScrollTop, revealTarget, subscribeReveal } from "../../timeline/reveal";
+import {
+  REVEAL_MS,
+  revealScrollTop,
+  revealTarget,
+  subscribeReveal,
+} from "../../timeline/reveal";
 import { clampScroll } from "../../timeline/viewport";
 import type { Device, Unsynced } from "../../types";
 import { motionAllowed } from "./useHop";
@@ -84,14 +89,19 @@ export interface RevealTrack {
  * and a placed file is the common case, so it is the one that is answered without walking the
  * refusals.
  */
-function findHome(tracks: readonly RevealTrack[], file: string): RevealHome | null {
+function findHome(
+  tracks: readonly RevealTrack[],
+  file: string,
+): RevealHome | null {
   for (const { device, rows } of tracks) {
     for (const row of rows) {
-      for (const span of row) if (span.file === file) return { device: device.id, span };
+      for (const span of row)
+        if (span.file === file) return { device: device.id, span };
     }
   }
   for (const { device, unsynced } of tracks) {
-    for (const u of unsynced) if (u.file === file) return { device: device.id, span: null };
+    for (const u of unsynced)
+      if (u.file === file) return { device: device.id, span: null };
   }
   return null;
 }
@@ -103,7 +113,11 @@ function findHome(tracks: readonly RevealTrack[], file: string): RevealHome | nu
  * and `[data-file="…"]` built from one is a parse error on exactly the drops that are hardest
  * to reproduce. The same rule `useHop` follows for the very same reason.
  */
-function byData(root: HTMLElement, attribute: "file" | "device", value: string): HTMLElement | null {
+function byData(
+  root: HTMLElement,
+  attribute: "file" | "device",
+  value: string,
+): HTMLElement | null {
   for (const el of root.querySelectorAll<HTMLElement>(`[data-${attribute}]`)) {
     if (el.dataset[attribute] === value) return el;
   }
@@ -222,7 +236,8 @@ export function useReveal({
       // ---- The horizontal half ---------------------------------------------------------
       // A refused file has no span and therefore no x to travel to; its row is what was
       // asked for, and the scroll above has already given it.
-      const target = home.span === null ? null : revealTarget(home.span, from, span);
+      const target =
+        home.span === null ? null : revealTarget(home.span, from, span);
       if (target === null) {
         // Already comfortable (or nothing to be comfortable about). Not an optimisation —
         // it is the behaviour: picking a file that is on screen and legible must not move
@@ -231,7 +246,11 @@ export function useReveal({
         return;
       }
       if (!motionAllowed()) {
-        setView((v) => ({ ...v, pxPerMs: target.pxPerMs, scrollMs: target.scrollMs }));
+        setView((v) => ({
+          ...v,
+          pxPerMs: target.pxPerMs,
+          scrollMs: target.scrollMs,
+        }));
         run.current = null;
         return;
       }
@@ -245,9 +264,15 @@ export function useReveal({
         // vocabulary rather than two moves that happen to take the same time.
         const eased = 1 - Math.pow(1 - p, 3);
         setView((v) => {
-          const pxPerMs = from.pxPerMs * Math.pow(target.pxPerMs / from.pxPerMs, eased);
-          const scrollMs = from.scrollMs + (target.scrollMs - from.scrollMs) * eased;
-          return { ...v, pxPerMs, scrollMs: clampScroll(scrollMs, pxPerMs, v.widthPx, span) };
+          const pxPerMs =
+            from.pxPerMs * Math.pow(target.pxPerMs / from.pxPerMs, eased);
+          const scrollMs =
+            from.scrollMs + (target.scrollMs - from.scrollMs) * eased;
+          return {
+            ...v,
+            pxPerMs,
+            scrollMs: clampScroll(scrollMs, pxPerMs, v.widthPx, span),
+          };
         });
         if (p < 1) {
           current.raf = requestAnimationFrame(step);

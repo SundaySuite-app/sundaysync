@@ -114,7 +114,8 @@ export function sourceSpans(
   const haveOrigin = Number.isFinite(origin);
 
   const byId = new Map<string, SourceTrack>();
-  for (const device of manifest.devices) byId.set(device.id, { device, spans: [] });
+  for (const device of manifest.devices)
+    byId.set(device.id, { device, spans: [] });
 
   const unknownStart = new Set<string>();
   const outsideWindow = new Set<string>();
@@ -128,13 +129,20 @@ export function sourceSpans(
     const deviceId = overrides[entry.file] ?? entry.device;
     const track = byId.get(deviceId);
     if (!track) continue;
-    const time = times.get(entry.file) ?? { startMs: null, source: "none" as const };
+    const time = times.get(entry.file) ?? {
+      startMs: null,
+      source: "none" as const,
+    };
     timeSource.set(entry.file, time.source);
     const durationMs = Math.max(0, entry.duration_seconds) * 1000;
 
     if (time.startMs !== null && haveOrigin) {
       const startMs = time.startMs - origin;
-      track.spans.push({ file: entry.file, startMs, endMs: startMs + durationMs });
+      track.spans.push({
+        file: entry.file,
+        startMs,
+        endMs: startMs + durationMs,
+      });
       continue;
     }
 
@@ -160,7 +168,9 @@ export function sourceSpans(
     if (!track) continue;
     let cursor = 0;
     for (const span of track.spans) cursor = Math.max(cursor, span.endMs);
-    const order = new Map(sortNatural(files.map((f) => f.file)).map((f, i) => [f, i]));
+    const order = new Map(
+      sortNatural(files.map((f) => f.file)).map((f, i) => [f, i]),
+    );
     const ordered = [...files].sort(
       (a, b) => (order.get(a.file) ?? 0) - (order.get(b.file) ?? 0),
     );
