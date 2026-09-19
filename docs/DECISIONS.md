@@ -5813,3 +5813,22 @@ Samme verktøykjede som i resten av suiten, satt opp for at `package.json` bor i
   egne typer (`release`, `design`, `polish`, `ops`, `eng`) og har ingen lengdegrense.
   Overskriftene bærer D- og PR-nummer, og sjekken skal håndheve formen, ikke skrive om vanene.
 - CI-jobben «Playwright e2e» kjører nå også `lint` og `format:check`.
+
+## D-102 — ffmpeg 8.1.2 → 9.0.1 i sidecarene
+
+Rammeverk-runden for desktop-appene (19.09) tok FFmpeg-sidecarene fra 8.1.2 til 9.0.1, i takt med
+SundayRec. Eieren valgte å gå rett på 9.0.x i stedet for å vente.
+
+- **Hvorfor 9.0.1 og ikke 9.0.2:** 9.0.2 er ute på ffmpeg.org, men ingen av byggserverne sync
+  henter fra (martin-riedl for macOS/Linux, gyan.dev for Windows, se D-031) har bygget den ennå.
+  9.0.1 er den nyeste 9.0.x som begge publiserer (sjekket 19.09). 9.0 ble holdt igjen i august
+  fordi den var dager gammel. Nå har den to punktutgivelser.
+- **Pinning i to lag, som før.** Arkiv-kontrollsummene er lest fra utgivernes `.sha256`-filer. Kilden
+  er kontrollert: 8.1.2-filen gir nøyaktig pinnen som sto. Binærpinnene i
+  `app/scripts/ffmpeg-checksums.json` er identiske med SundayRec sine, fordi arkivene er de samme.
+  Alle seks er pinnet på forhånd, ikke fra CI-logger.
+- **Bevis.** Motor-suiten kjørt med 9.0.1 først i `PATH` og `SUNDAYSYNC_REQUIRE_FFMPEG=1`, slik at en
+  manglende ffmpeg er en feil og ikke en stille hopp: 341 grønne. Tauri-skallet med de ekte
+  9.0.1-sidecarene: 120 grønne. CI-motorjobben bruker fortsatt runnerens apt-ffmpeg (upinnet, se
+  notatet i `ci.yml`). Det er den bundlede sidecaren som når brukerne, og den er 9.0.1.
+- **Før stabil:** synk av et kjent klipp og en eksport fra beta-bygget (sjekkpunktet i runden).
