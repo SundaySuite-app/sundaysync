@@ -168,11 +168,19 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     const value = argv[i + 1];
-    if (flag === "--binary") ((out.binary = value), (i += 1));
-    else if (flag === "--out") ((out.out = value), (i += 1));
-    else if (flag === "--hold-ms") ((out.holdMs = Number(value)), (i += 1));
-    else if (flag === "--timeout-ms")
-      ((out.timeoutMs = Number(value)), (i += 1));
+    if (flag === "--binary") {
+      out.binary = value;
+      i += 1;
+    } else if (flag === "--out") {
+      out.out = value;
+      i += 1;
+    } else if (flag === "--hold-ms") {
+      out.holdMs = Number(value);
+      i += 1;
+    } else if (flag === "--timeout-ms") {
+      out.timeoutMs = Number(value);
+      i += 1;
+    }
   }
   return out;
 }
