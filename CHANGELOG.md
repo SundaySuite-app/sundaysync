@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.8.0
+- **FFmpeg 8.1.2 → 9.0.1** i de bundlede sidecarene, i takt med SundayRec (D-102). Samme to lag
+  pinning som før: arkivet mot utgiverens SHA-256, og binæren mot `ffmpeg-checksums.json`. Alle
+  seks binærpinnene er satt på forhånd. Motor-suiten er kjørt med 9.0.1 først i `PATH` og
+  `SUNDAYSYNC_REQUIRE_FFMPEG=1` (341 grønne), og Tauri-skallet med de ekte sidecarene (120 grønne).
+- **Sync-løftet (D-101).** Vite 6 → 8 og @vitejs/plugin-react 4 → 6 som par, React 18 → 19,
+  jsdom 25 → 30, Vitest 5 og TypeScript 7 med side-om-side-aliasene. Hookene som tar refs, tar
+  `RefObject<T | null>`, som betyr nøyaktig det `RefObject<T>` betydde i React 18.
+- **Verktøy som i resten av suiten.** ESLint 10, Prettier og commitlint/husky/lint-staged. Commit-
+  sjekken godtar syncs egne typer. Dependabot er slått på (den manglet, og derfor hadde sync sakket
+  akterut), og Rust er pinnet til 1.98.1.
+- **Avhengigheter.** `cargo update` i motoren og skallet, dirs 7 og resten av minor/patch.
+
 ## v0.7.0
 - **Korte klipp får nå lov til å skaffe seg bevis.** Et klipp under 45 sekunder ble
   korrelert i ett stykke, og da fantes det ingen driftregresjon å bedømme det på — så det
