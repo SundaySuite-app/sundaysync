@@ -1,0 +1,75 @@
+# Managed dependency updates. Weekly; minor/patch grouped to limit PR noise.
+# Samme mal som resten av suiten (sundayrec/.github/dependabot.yml), tilpasset
+# sync sitt oppsett: motoren er sitt eget cargo-workspace i roten, mens
+# Tauri-skallet i app/ har egen package.json og eget Cargo.lock (app/src-tauri).
+# fuzz/ er utelatt med vilje (nightly-only, eget lock).
+version: 2
+
+# Tauri bumpes i ÉN PR på tvers av npm og cargo. `tauri build` nekter å bygge
+# når npm-pakken og craten står på ulik major/minor («version mismatched Tauri
+# packages»), så en cargo-PR alene blir rød hver gang en plugin får ny minor
+# (sundaypaper#47). Tauri-pakkene er derfor ignorert i de vanlige oppføringene
+# under og samlet i denne gruppa.
+multi-ecosystem-groups:
+  tauri:
+    schedule:
+      interval: "weekly"
+
+updates:
+  - package-ecosystem: "npm"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "@tauri-apps/*" # → tauri-gruppa
+  - package-ecosystem: "npm"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+    multi-ecosystem-group: "tauri"
+    patterns: ["@tauri-apps/*"]
+  # Motoren (crates/core, cli, fixturegen) — ingen Tauri her.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
+  # Tauri-skallet.
+  - package-ecosystem: "cargo"
+    directory: "/app/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      cargo-app-minor-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "tauri" # → tauri-gruppa
+      - dependency-name: "tauri-*"
+  - package-ecosystem: "cargo"
+    directory: "/app/src-tauri"
+    schedule:
+      interval: "weekly"
+    multi-ecosystem-group: "tauri"
+    patterns: ["tauri", "tauri-*"]
+  # Actions er SHA-pinnet i sync; Dependabot oppdaterer SHA + versjonskommentar.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-all:
+        patterns: ["*"]
+    ignore:
+      # dtolnay/rust-toolchain: toolchainen er bevisst pinnet likt i hele suiten
+      # (universal-bygg-fella), og action-repoet har forhåndslagde grener for
+      # Rust-versjoner som ikke finnes ennå (1.120.0 → 404 i rustup).
+      # Bumpes for hånd. Samme regel som sundayrec#196.
+      - dependency-name: "dtolnay/rust-toolchain"
