@@ -1,0 +1,2 @@
+# package.json bor i app/, git-roten er ett nivå opp (husky kjører herfra).
+cd app && npx lint-staged

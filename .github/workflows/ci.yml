@@ -328,6 +328,12 @@ jobs:
       - name: Typecheck e2e
         working-directory: app
         run: npm run typecheck:e2e
+      - name: Lint
+        working-directory: app
+        run: npm run lint
+      - name: Format
+        working-directory: app
+        run: npm run format:check
       - name: Unit tests
         working-directory: app
         run: npm test
