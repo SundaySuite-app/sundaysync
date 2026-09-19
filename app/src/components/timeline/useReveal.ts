@@ -138,11 +138,11 @@ export function useReveal({
   view: View;
   contentSpanMs: number;
   /** The `.timeline` section — where `data-reveal` goes. */
-  sectionRef: RefObject<HTMLElement>;
+  sectionRef: RefObject<HTMLElement | null>;
   /** `.timeline__scroll`, the ONE box whose `scrollTop` is written. */
-  stageRef: RefObject<HTMLDivElement>;
+  stageRef: RefObject<HTMLDivElement | null>;
   /** `.timeline__body` — the tracks and the clips are looked up inside it. */
-  bodyRef: RefObject<HTMLDivElement>;
+  bodyRef: RefObject<HTMLDivElement | null>;
   setView: (update: (v: View) => View) => void;
   cancelHop: () => void;
 }): RevealHandle {

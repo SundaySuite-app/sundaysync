@@ -65,7 +65,7 @@ export type ClipWaveformStatus =
   | { kind: "info"; className: string; label: string; detail: string | null };
 
 export interface ClipWaveform {
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   status: ClipWaveformStatus;
   /** Is this clip wide enough for a waveform to mean anything (`MIN_WAVEFORM_PX`, D-072)?
    *  False suppresses the `<canvas>` as well as the read behind it — the element, its
