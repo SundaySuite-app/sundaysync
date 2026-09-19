@@ -20,7 +20,10 @@ import { en } from "../src/i18n";
 const STALE_EXPORT_MSG =
   "the sources changed since this timeline was synced — run the sync again before exporting";
 
-async function reachResult(page: import("@playwright/test").Page, extra: Record<string, unknown> = {}) {
+async function reachResult(
+  page: import("@playwright/test").Page,
+  extra: Record<string, unknown> = {},
+) {
   await boot(page, {
     fixtures: {
       ...BOOT_FIXTURES,
@@ -69,7 +72,9 @@ test.describe("export", () => {
 
     // …and the receipt IS the control that opens the file: at 1024 the exported strip could
     // not hold both it and a separate «Vis i Finder», and the two were always one object.
-    await expect(page.getByRole("button", { name: en.revealInFinder })).toHaveCount(1);
+    await expect(
+      page.getByRole("button", { name: en.revealInFinder }),
+    ).toHaveCount(1);
     await expect(receipt).toHaveAttribute(
       "aria-label",
       new RegExp(`${en.revealInFinder}$`),
@@ -79,7 +84,9 @@ test.describe("export", () => {
     await expect(page.locator(".toasts .banner")).toHaveCount(0);
   });
 
-  test("the timeline's first row is not covered by anything the export said", async ({ page }) => {
+  test("the timeline's first row is not covered by anything the export said", async ({
+    page,
+  }) => {
     // The finding, expressed as the thing it broke: after an export, the top of the timeline
     // — the ruler and the first device's lane — must be exactly as reachable as before it.
     await reachResult(page, {
@@ -93,7 +100,9 @@ test.describe("export", () => {
 
     // Nothing in the toast layer overlaps the ruler, because there is nothing in it.
     const overlaps = await page.evaluate(() => {
-      const ruler = document.querySelector(".timeline__ruler")!.getBoundingClientRect();
+      const ruler = document
+        .querySelector(".timeline__ruler")!
+        .getBoundingClientRect();
       return Array.from(document.querySelectorAll(".toasts .banner"))
         .map((el) => el.getBoundingClientRect())
         .filter(
@@ -119,7 +128,9 @@ test.describe("export", () => {
     await expect(page.locator(".preview__name")).toBeVisible();
   });
 
-  test("an error toast is still opaque and still inert (D-082, V06-R3)", async ({ page }) => {
+  test("an error toast is still opaque and still inert (D-082, V06-R3)", async ({
+    page,
+  }) => {
     // The toast layer did not go away — it carries what the app has to SAY when something
     // failed, and both of R3's findings about it are still claims about that layer:
     //
@@ -130,15 +141,21 @@ test.describe("export", () => {
     //    meant a clip there could not be marked at all. Its ✕ turns them back on for itself.
     await reachResult(page, {
       "plugin:dialog|save": "/Users/e2e/out/SundaySync.fcpxml",
-      export_timeline: fn(`() => { throw ${JSON.stringify(STALE_EXPORT_MSG)}; }`),
+      export_timeline: fn(
+        `() => { throw ${JSON.stringify(STALE_EXPORT_MSG)}; }`,
+      ),
     });
     await page.getByRole("button", { name: en.exportButton }).click();
     const banner = page.locator(".banner--error");
     await expect(banner).toBeVisible();
 
     // Opaque: no alpha channel left in the painted background.
-    const bg = await banner.evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(bg, `banner background ${bg}`).not.toMatch(/rgba\([^)]*,\s*0?\.\d+\s*\)/);
+    const bg = await banner.evaluate(
+      (el) => getComputedStyle(el).backgroundColor,
+    );
+    expect(bg, `banner background ${bg}`).not.toMatch(
+      /rgba\([^)]*,\s*0?\.\d+\s*\)/,
+    );
 
     // Inert: a hit test in the middle of the banner resolves to whatever is UNDERNEATH it.
     // Asked of the browser directly rather than inferred from two boxes overlapping — how
@@ -146,18 +163,26 @@ test.describe("export", () => {
     // row, is a function of the platform's font metrics; whether it eats a press is not.
     const overBody = await banner.evaluate((el) => {
       const r = el.getBoundingClientRect();
-      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      const at = document.elementFromPoint(
+        r.x + r.width / 2,
+        r.y + r.height / 2,
+      );
       return at !== null && el.contains(at);
     });
     expect(overBody).toBe(false);
 
     // …and the ✕ is the one thing in there that IS a control: it hit-tests to itself, and it
     // works.
-    const overDismiss = await page.locator(".banner__dismiss").evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-      return at !== null && el.contains(at);
-    });
+    const overDismiss = await page
+      .locator(".banner__dismiss")
+      .evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const at = document.elementFromPoint(
+          r.x + r.width / 2,
+          r.y + r.height / 2,
+        );
+        return at !== null && el.contains(at);
+      });
     expect(overDismiss).toBe(true);
 
     await page.locator(".clip").first().click();
@@ -167,7 +192,9 @@ test.describe("export", () => {
     await expect(banner).toBeHidden();
   });
 
-  test("cancelling the save dialog never calls export_timeline", async ({ page }) => {
+  test("cancelling the save dialog never calls export_timeline", async ({
+    page,
+  }) => {
     await reachResult(page, {
       "plugin:dialog|save": null,
       export_timeline: fn(`() => {
@@ -179,7 +206,9 @@ test.describe("export", () => {
     await page.getByRole("button", { name: en.exportButton }).click();
 
     await expect(page.locator(".banner")).toBeHidden();
-    expect(await page.evaluate(() => (window as any).__E2E_EXPORT_CALLED__)).toBeUndefined();
+    expect(
+      await page.evaluate(() => (window as any).__E2E_EXPORT_CALLED__),
+    ).toBeUndefined();
   });
 
   test("a stale-sources refusal from the backend shows the localized copy (F6/D-036)", async ({
@@ -187,7 +216,9 @@ test.describe("export", () => {
   }) => {
     await reachResult(page, {
       "plugin:dialog|save": "/Users/e2e/out/SundaySync.fcpxml",
-      export_timeline: fn(`() => { throw ${JSON.stringify(STALE_EXPORT_MSG)}; }`),
+      export_timeline: fn(
+        `() => { throw ${JSON.stringify(STALE_EXPORT_MSG)}; }`,
+      ),
     });
 
     await page.getByRole("button", { name: en.exportButton }).click();
@@ -196,6 +227,8 @@ test.describe("export", () => {
     await expect(banner).toHaveClass(/banner--error/);
     await expect(banner.locator("span").first()).toHaveText(en.errStaleExport);
     // Never the raw backend string leaking through unlocalized.
-    await expect(banner.locator("span").first()).not.toHaveText(STALE_EXPORT_MSG);
+    await expect(banner.locator("span").first()).not.toHaveText(
+      STALE_EXPORT_MSG,
+    );
   });
 });

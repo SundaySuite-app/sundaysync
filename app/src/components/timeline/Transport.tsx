@@ -24,7 +24,15 @@ import { getPlayheadMs, usePlayheadMs } from "../../timeline/playhead";
  * reason `playhead.ts` exists: the playhead moves 60×/s, and re-rendering the timeline at
  * that rate to move a number would be the most expensive text in the app.
  */
-export function Transport({ t, clips, fps }: { t: Strings; clips: PlacedClip[]; fps?: number }) {
+export function Transport({
+  t,
+  clips,
+  fps,
+}: {
+  t: Strings;
+  clips: PlacedClip[];
+  fps?: number;
+}) {
   const engine = getPlaybackEngine();
   const state = useSyncExternalStore(engine.subscribe, engine.getSnapshot);
   const playheadMs = usePlayheadMs();
@@ -105,7 +113,13 @@ export function Transport({ t, clips, fps }: { t: Strings; clips: PlacedClip[]; 
 
 function PlayIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      aria-hidden="true"
+      focusable="false"
+    >
       <path d="M3 1.5 12 7l-9 5.5z" fill="currentColor" />
     </svg>
   );
@@ -113,7 +127,13 @@ function PlayIcon() {
 
 function PauseIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      aria-hidden="true"
+      focusable="false"
+    >
       <path d="M3 2h3v10H3zM8 2h3v10H8z" fill="currentColor" />
     </svg>
   );
@@ -121,7 +141,13 @@ function PauseIcon() {
 
 function StopIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      aria-hidden="true"
+      focusable="false"
+    >
       <path d="M3 3h8v8H3z" fill="currentColor" />
     </svg>
   );
@@ -129,7 +155,13 @@ function StopIcon() {
 
 function VolumeIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      aria-hidden="true"
+      focusable="false"
+    >
       <path d="M2 5.5h2.5L7.5 3v8L4.5 8.5H2z" fill="currentColor" />
       <path
         d="M9.5 5a3 3 0 0 1 0 4"

@@ -18,8 +18,12 @@ import {
 
 describe("the composite thresholds are what the parts add up to", () => {
   it("names its arithmetic rather than hiding two magic numbers", () => {
-    expect(NAME_AND_TEXT_MIN_PX).toBe(NAME_MIN_PX + NAME_PLUS_STATUS_GAP_PX + STATUS_TEXT_MIN_PX);
-    expect(NAME_AND_ICON_MIN_PX).toBe(NAME_MIN_PX + NAME_PLUS_STATUS_GAP_PX + STATUS_ICON_MIN_PX);
+    expect(NAME_AND_TEXT_MIN_PX).toBe(
+      NAME_MIN_PX + NAME_PLUS_STATUS_GAP_PX + STATUS_TEXT_MIN_PX,
+    );
+    expect(NAME_AND_ICON_MIN_PX).toBe(
+      NAME_MIN_PX + NAME_PLUS_STATUS_GAP_PX + STATUS_ICON_MIN_PX,
+    );
     expect(NAME_AND_TEXT_MIN_PX).toBe(188);
     expect(NAME_AND_ICON_MIN_PX).toBe(60);
   });
@@ -27,8 +31,14 @@ describe("the composite thresholds are what the parts add up to", () => {
 
 describe("a clip with nothing to say", () => {
   it("shows its name from NAME_MIN_PX up, and nothing below it", () => {
-    expect(clipChrome(NAME_MIN_PX - 1, "none")).toEqual({ name: "none", status: "none" });
-    expect(clipChrome(NAME_MIN_PX, "none")).toEqual({ name: "ellipsis", status: "none" });
+    expect(clipChrome(NAME_MIN_PX - 1, "none")).toEqual({
+      name: "none",
+      status: "none",
+    });
+    expect(clipChrome(NAME_MIN_PX, "none")).toEqual({
+      name: "ellipsis",
+      status: "none",
+    });
   });
 
   it("a 3 px sliver is a coloured tick, not a smear of text", () => {
@@ -39,7 +49,10 @@ describe("a clip with nothing to say", () => {
   });
 
   it("still shows the name at any width above the floor", () => {
-    expect(clipChrome(1200, "none")).toEqual({ name: "ellipsis", status: "none" });
+    expect(clipChrome(1200, "none")).toEqual({
+      name: "ellipsis",
+      status: "none",
+    });
   });
 });
 
@@ -54,8 +67,14 @@ describe("a control — the operator has to be able to act", () => {
   it("becomes an icon at exactly the icon floor, and keeps it over the name", () => {
     // Between 22 and 60 the name would technically fit on its own (NAME_MIN_PX is 30) —
     // but a button nobody can press is worth less than a name nobody asked for.
-    expect(clipChrome(STATUS_ICON_MIN_PX, "control")).toEqual({ name: "none", status: "icon" });
-    expect(clipChrome(NAME_MIN_PX, "control")).toEqual({ name: "none", status: "icon" });
+    expect(clipChrome(STATUS_ICON_MIN_PX, "control")).toEqual({
+      name: "none",
+      status: "icon",
+    });
+    expect(clipChrome(NAME_MIN_PX, "control")).toEqual({
+      name: "none",
+      status: "icon",
+    });
     expect(clipChrome(NAME_AND_ICON_MIN_PX - 1, "control")).toEqual({
       name: "none",
       status: "icon",
@@ -78,7 +97,10 @@ describe("a control — the operator has to be able to act", () => {
       name: "ellipsis",
       status: "text",
     });
-    expect(clipChrome(1200, "control")).toEqual({ name: "ellipsis", status: "text" });
+    expect(clipChrome(1200, "control")).toEqual({
+      name: "ellipsis",
+      status: "text",
+    });
   });
 });
 
@@ -90,12 +112,22 @@ describe("an informational line — never at the filename's expense", () => {
       name: "ellipsis",
       status: "none",
     });
-    expect(clipChrome(NAME_MIN_PX, "info")).toEqual({ name: "ellipsis", status: "none" });
-    expect(clipChrome(NAME_MIN_PX - 1, "info")).toEqual({ name: "none", status: "none" });
+    expect(clipChrome(NAME_MIN_PX, "info")).toEqual({
+      name: "ellipsis",
+      status: "none",
+    });
+    expect(clipChrome(NAME_MIN_PX - 1, "info")).toEqual({
+      name: "none",
+      status: "none",
+    });
   });
 
   it("never takes the icon form — there is nothing to press", () => {
-    for (const w of [STATUS_ICON_MIN_PX, NAME_AND_ICON_MIN_PX, NAME_AND_TEXT_MIN_PX - 1]) {
+    for (const w of [
+      STATUS_ICON_MIN_PX,
+      NAME_AND_ICON_MIN_PX,
+      NAME_AND_TEXT_MIN_PX - 1,
+    ]) {
       expect(clipChrome(w, "info").status).not.toBe("icon");
     }
   });
@@ -112,7 +144,10 @@ describe("widths that are not measurements", () => {
   it("treats a NaN or infinite width as no room, never as room", () => {
     // A clip whose geometry has not settled must not smuggle a `true` through a `>=`.
     for (const kind of ["none", "control", "info"] as const) {
-      expect(clipChrome(Number.NaN, kind)).toEqual({ name: "none", status: "none" });
+      expect(clipChrome(Number.NaN, kind)).toEqual({
+        name: "none",
+        status: "none",
+      });
     }
     expect(clipChrome(Number.POSITIVE_INFINITY, "control")).toEqual({
       name: "none",
@@ -121,7 +156,10 @@ describe("widths that are not measurements", () => {
   });
 
   it("treats a negative width as no room", () => {
-    expect(clipChrome(-40, "control")).toEqual({ name: "none", status: "none" });
+    expect(clipChrome(-40, "control")).toEqual({
+      name: "none",
+      status: "none",
+    });
   });
 });
 
@@ -152,7 +190,8 @@ describe("waveformFits", () => {
     // clip draws bars and no name — which is deliberate, not an accident of two constants.
     expect(MIN_WAVEFORM_PX).toBeLessThan(NAME_MIN_PX);
     for (let w = 0; w <= 60; w += 0.5) {
-      if (clipChrome(w, "none").name !== "none") expect(waveformFits(w)).toBe(true);
+      if (clipChrome(w, "none").name !== "none")
+        expect(waveformFits(w)).toBe(true);
     }
   });
 

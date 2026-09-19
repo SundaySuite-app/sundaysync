@@ -24,7 +24,9 @@ async function reachResult(page: import("@playwright/test").Page) {
     settings: SETTLED_SETTINGS,
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
-  await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: en.sourcesTitle }),
+  ).toBeVisible();
   await page.getByRole("button", { name: en.syncButton }).click();
   // Since V04-U3 (D-061) `.clip` boxes exist from the sources phase on — the pre-sync
   // ones carry `clip--pre` — so their presence no longer means the
@@ -33,13 +35,19 @@ async function reachResult(page: import("@playwright/test").Page) {
 }
 
 test.describe("override after sync marks the result stale", () => {
-  test("a fresh result is not stale: export is enabled, no warning banner", async ({ page }) => {
+  test("a fresh result is not stale: export is enabled, no warning banner", async ({
+    page,
+  }) => {
     await reachResult(page);
     await expect(page.getByText(en.staleResult)).toBeHidden();
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeEnabled();
   });
 
-  test("reassigning the placed clip's device marks the result stale", async ({ page }) => {
+  test("reassigning the placed clip's device marks the result stale", async ({
+    page,
+  }) => {
     await reachResult(page);
 
     await page.locator(".clip", { hasText: "C0001.MP4" }).click();
@@ -55,7 +63,9 @@ test.describe("override after sync marks the result stale", () => {
     await expect(preview.getByLabel(en.moveToDevice)).toHaveValue("rec");
 
     await expect(page.getByText(en.staleResult)).toBeVisible();
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeDisabled();
     // The re-sync action still reads "Sync again" — that label is a property of being
     // in the result phase at all, not new here, but the cached-analysis hint is the
     // part of the promise this scenario is actually about (D-027): a re-assign should
@@ -66,10 +76,9 @@ test.describe("override after sync marks the result stale", () => {
     // a second line of body text because the 44 px strip has no second line. So the assertion
     // asks the button rather than the page; a page-wide text match would now pass for a
     // tooltip on anything at all.
-    await expect(page.getByRole("button", { name: en.resyncButton })).toHaveAttribute(
-      "title",
-      en.resyncHint,
-    );
+    await expect(
+      page.getByRole("button", { name: en.resyncButton }),
+    ).toHaveAttribute("title", en.resyncHint);
   });
 
   test("reassigning via the unsynced shelf's own selector also marks it stale", async ({
@@ -81,7 +90,9 @@ test.describe("override after sync marks the result stale", () => {
       result: {
         ...(base.result as Record<string, unknown>),
         placements: [],
-        unsynced: [{ file: "/Users/e2e/shoot/CamA/C0001.MP4", reason: "low_confidence" }],
+        unsynced: [
+          { file: "/Users/e2e/shoot/CamA/C0001.MP4", reason: "low_confidence" },
+        ],
       },
     };
     await boot(page, {
@@ -105,9 +116,13 @@ test.describe("override after sync marks the result stale", () => {
     await expect(shelf).toBeVisible();
     await expect(page.getByText(en.staleResult)).toBeHidden();
 
-    await shelf.getByLabel(`${en.moveToDevice}: C0001.MP4`).selectOption("cam-a");
+    await shelf
+      .getByLabel(`${en.moveToDevice}: C0001.MP4`)
+      .selectOption("cam-a");
 
     await expect(page.getByText(en.staleResult)).toBeVisible();
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeDisabled();
   });
 });

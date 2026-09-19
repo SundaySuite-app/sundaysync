@@ -27,7 +27,10 @@ import { en } from "../src/i18n";
 //      metadata guess to the solved placement: a view that unmounted could only cut.
 
 /** Drop the mixed-timestamp fixture and land on the sources phase. */
-async function reachSources(page: Page, fixtures: Record<string, unknown> = {}) {
+async function reachSources(
+  page: Page,
+  fixtures: Record<string, unknown> = {},
+) {
   await boot(page, {
     fixtures: {
       ...BOOT_FIXTURES,
@@ -38,7 +41,9 @@ async function reachSources(page: Page, fixtures: Record<string, unknown> = {}) 
     settings: SETTLED_SETTINGS,
   });
   await page.getByRole("button", { name: en.dropFolder }).click();
-  await expect(page.getByRole("region", { name: en.sourcesTitle })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: en.sourcesTitle }),
+  ).toBeVisible();
 }
 
 /** A clip box addressed by the file it stands for — the identity that survives the sync. */
@@ -58,7 +63,9 @@ test.describe("clips appear on the timeline before any sync", () => {
 
     // No sync has run — no `run_sync` fixture is even installed, so an app that tried
     // would fail loudly (harness.ts's "no Tauri backend" rejection) rather than quietly.
-    await expect(page.getByRole("button", { name: en.syncButton })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.syncButton }),
+    ).toBeVisible();
     await expect(page.locator(".timeline__body")).toBeVisible();
     await expect(page.locator(".clip")).toHaveCount(3);
 
@@ -81,9 +88,13 @@ test.describe("clips appear on the timeline before any sync", () => {
     await clip(page, CAM_A).click();
     const preview = page.locator(".preview");
     await expect(preview.locator(".preview__name")).toHaveText("C0001.MP4");
-    await expect(preview.getByText(en.previewVideoStream("h264", 1920, 1080, "25/1"))).toBeVisible();
+    await expect(
+      preview.getByText(en.previewVideoStream("h264", 1920, 1080, "25/1")),
+    ).toBeVisible();
     await expect(preview.getByText(en.directMatch)).toHaveCount(0);
-    await expect(preview.getByText(en.offsetLabel, { exact: true })).toHaveCount(0);
+    await expect(
+      preview.getByText(en.offsetLabel, { exact: true }),
+    ).toHaveCount(0);
 
     // Camera A is the earliest stamp, so it anchors t=0; the WAV has no stamp at all and
     // sits at the same place; Camera B rolled ten minutes later and is drawn to the right
@@ -99,12 +110,15 @@ test.describe("clips appear on the timeline before any sync", () => {
     // …and by roughly the right amount: 600 s of a 2400 s span (the WAV's hour is the
     // longest thing on the timeline) is a quarter of the fitted width, give or take the
     // fit padding. Loose on purpose — the exact zoom is `fitPxPerMs`'s business.
-    const laneWidth = (await page.locator("#timeline-viewport").boundingBox())!.width;
+    const laneWidth = (await page.locator("#timeline-viewport").boundingBox())!
+      .width;
     const expectedX = a.x + (PRESYNC_B_OFFSET_SEC / 3600) * laneWidth;
     expect(Math.abs(b.x - expectedX)).toBeLessThan(laneWidth * 0.05);
   });
 
-  test("a file with no recording time says so instead of pretending", async ({ page }) => {
+  test("a file with no recording time says so instead of pretending", async ({
+    page,
+  }) => {
     await reachSources(page);
 
     // Same intent as before V05-W3 — a file the app cannot time must SAY so rather than
@@ -119,7 +133,12 @@ test.describe("clips appear on the timeline before any sync", () => {
     // this app before, so losing either would be losing the legend.
     const legend = page.locator(".timeline__note").first();
     await expect(legend).toHaveText(
-      en.presyncLegendShort({ placed: 2, estimated: 0, ordered: 1, offSession: 0 }),
+      en.presyncLegendShort({
+        placed: 2,
+        estimated: 0,
+        ordered: 1,
+        offSession: 0,
+      }),
     );
     await expect(legend).toHaveAttribute(
       "title",
@@ -133,7 +152,10 @@ test.describe("clips appear on the timeline before any sync", () => {
     await expect(clip(page, WAV)).toHaveClass(/clip--seq/);
     // The timestamped ones read their own start instead, and are NOT marked as estimates:
     // a container stamp is the top rung.
-    await expect(clip(page, CAM_B)).toHaveAttribute("aria-label", new RegExp(en.presyncStart));
+    await expect(clip(page, CAM_B)).toHaveAttribute(
+      "aria-label",
+      new RegExp(en.presyncStart),
+    );
     await expect(clip(page, CAM_B)).not.toHaveClass(/clip--est/);
   });
 
@@ -167,7 +189,12 @@ test.describe("clips appear on the timeline before any sync", () => {
     );
     const legend = page.locator(".timeline__note").first();
     await expect(legend).toHaveText(
-      en.presyncLegendShort({ placed: 0, estimated: 0, ordered: 2, offSession: 0 }),
+      en.presyncLegendShort({
+        placed: 0,
+        estimated: 0,
+        ordered: 2,
+        offSession: 0,
+      }),
     );
     await expect(legend).toHaveAttribute(
       "title",
@@ -218,7 +245,12 @@ test.describe("clips appear on the timeline before any sync", () => {
     // lumping it in with the WAV that carries nothing at all. Two files, two sentences.
     const notes = page.locator(".timeline__note");
     await expect(notes.first()).toHaveText(
-      en.presyncLegendShort({ placed: 2, estimated: 0, ordered: 1, offSession: 1 }),
+      en.presyncLegendShort({
+        placed: 2,
+        estimated: 0,
+        ordered: 1,
+        offSession: 1,
+      }),
     );
     await expect(notes.first()).toHaveAttribute(
       "title",
@@ -245,22 +277,31 @@ test.describe("clips appear on the timeline before any sync", () => {
     expect(b.x + b.width).toBeLessThanOrEqual(lane.x + lane.width + 1);
   });
 
-  test("moving a file to another device moves its clip too", async ({ page }) => {
+  test("moving a file to another device moves its clip too", async ({
+    page,
+  }) => {
     // The panel and the timeline are two views of ONE decision (D-027/D-028) — if the
     // override overlay only reached the list, they would disagree in front of the user.
     await reachSources(page);
 
-    await expect(page.getByRole("group", { name: en.trackAria("Camera B") })).toBeVisible();
+    await expect(
+      page.getByRole("group", { name: en.trackAria("Camera B") }),
+    ).toBeVisible();
     // V06-R2a (D-077 #10): the reassign `<select>` is the inspector's, so the clip is marked
     // first. The claim is unchanged — the overlay must reach the timeline, not only a list —
     // and this is now the operator's actual gesture: point at the clip, then move it.
     await page.locator(`.clip[data-file="${CAM_B}"]`).click();
     await expect(page.locator(".preview__name")).toHaveText("C0002.MP4");
-    await page.locator(".inspector").getByLabel(`${en.moveToDevice}: C0002.MP4`).selectOption("cam-a");
+    await page
+      .locator(".inspector")
+      .getByLabel(`${en.moveToDevice}: C0002.MP4`)
+      .selectOption("cam-a");
 
     // Camera B is empty now, so its track is gone — the same rule the groups apply —
     // and its clip has moved onto Camera A's track.
-    await expect(page.getByRole("group", { name: en.trackAria("Camera B") })).toBeHidden();
+    await expect(
+      page.getByRole("group", { name: en.trackAria("Camera B") }),
+    ).toBeHidden();
     const camA = page.getByRole("group", { name: en.trackAria("Camera A") });
     await expect(camA.locator(`.clip[data-file="${CAM_B}"]`)).toBeVisible();
   });
@@ -304,7 +345,12 @@ test.describe("a drop with one file per rung of the recording-time ladder", () =
     // two carrying stamps from other days. 1 + 3 + 1 + 2 = the seven clips above.
     const legend = page.locator(".timeline__note").first();
     await expect(legend).toHaveText(
-      en.presyncLegendShort({ placed: 1, estimated: 3, ordered: 1, offSession: 2 }),
+      en.presyncLegendShort({
+        placed: 1,
+        estimated: 3,
+        ordered: 1,
+        offSession: 2,
+      }),
     );
     // …and the sentence that explains what each number MEANS is still there, one hover away
     // (D-083). The counts sum to the seven clips either way.
@@ -328,12 +374,17 @@ test.describe("a drop with one file per rung of the recording-time ladder", () =
     await expect(clip(page, DRONE)).toHaveClass(/clip--offsession/);
   });
 
-  test("each rung marks its clips as the kind of evidence they are", async ({ page }) => {
+  test("each rung marks its clips as the kind of evidence they are", async ({
+    page,
+  }) => {
     await reachLadder(page);
 
     // The top rung is a measurement and is not marked as an estimate.
     await expect(clip(page, FUJI)).not.toHaveClass(/clip--est/);
-    await expect(clip(page, FUJI)).toHaveAttribute("aria-label", new RegExp(en.presyncStart));
+    await expect(clip(page, FUJI)).toHaveAttribute(
+      "aria-label",
+      new RegExp(en.presyncStart),
+    );
 
     // The three lower rungs are, and each says which one in words.
     for (const [file, words] of [
@@ -344,7 +395,9 @@ test.describe("a drop with one file per rung of the recording-time ladder", () =
       await expect(clip(page, file)).toHaveClass(/clip--est/);
       // `toContain` rather than a regex: these sentences contain `+` and `—`, and
       // `new RegExp(...)` on a translated string is a metacharacter waiting to happen.
-      expect(await clip(page, file).getAttribute("aria-label")).toContain(words);
+      expect(await clip(page, file).getAttribute("aria-label")).toContain(
+        words,
+      );
       expect(await clip(page, file).getAttribute("aria-label")).toContain(
         en.presyncStartEstimated,
       );
@@ -373,7 +426,9 @@ test.describe("a drop with one file per rung of the recording-time ladder", () =
     expect(await x(F6)).toBeLessThan(await x(FUJI));
   });
 
-  test("a device laid out in order gets ONE lane, not one lane per file", async ({ page }) => {
+  test("a device laid out in order gets ONE lane, not one lane per file", async ({
+    page,
+  }) => {
     await reachLadder(page);
     // The 14-lane Zoom stack of the old layout: end-to-end clips do not overlap, so
     // `stackClips` returns a single row and the stack disappears as arithmetic.
@@ -389,7 +444,9 @@ test.describe("a drop with one file per rung of the recording-time ladder", () =
     expect(ordered.x).toBeGreaterThanOrEqual(placed.x + placed.width - 1);
   });
 
-  test("the tracks scroll inside the frame instead of growing the room", async ({ page }) => {
+  test("the tracks scroll inside the frame instead of growing the room", async ({
+    page,
+  }) => {
     // Six devices is already more than fits comfortably; twelve is a real drop. The frame
     // had `overflow: hidden` and no height, so the BODY grew and pushed the sync button
     // off a laptop screen.
@@ -406,14 +463,18 @@ test.describe("a drop with one file per rung of the recording-time ladder", () =
     await page.setViewportSize({ width: 1280, height: 400 });
     await reachLadder(page);
     const scroller = page.locator(".timeline__scroll");
-    const overflows = await scroller.evaluate((el) => el.scrollHeight > el.clientHeight);
+    const overflows = await scroller.evaluate(
+      (el) => el.scrollHeight > el.clientHeight,
+    );
     expect(overflows).toBe(true);
     const box = (await scroller.boundingBox())!;
     const slot = (await page.locator(".slot").boundingBox())!;
     expect(box.y + box.height).toBeLessThanOrEqual(slot.y + 1);
     // The sync button is still reachable without scrolling anything to it — it is in the
     // strip, which is the whole point of the strip.
-    await expect(page.getByRole("button", { name: en.syncButton })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.syncButton }),
+    ).toBeVisible();
     // …and the ruler stays put when the tracks are scrolled — it is the only thing on
     // screen that says what the horizontal axis means.
     const rulerBefore = (await page.locator(".track--ruler").boundingBox())!;
@@ -437,33 +498,42 @@ test.describe("the timeline stays mounted through the sync", () => {
     await reachSources(page, { run_sync: controlled("run_sync") });
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForPending(page, "run_sync");
-    await expect(page.locator("section.timeline")).toHaveClass(/timeline--busy/);
+    await expect(page.locator("section.timeline")).toHaveClass(
+      /timeline--busy/,
+    );
 
     const before = (await clip(page, CAM_B).boundingBox())!;
     await page.getByRole("button", { name: en.zoomIn }).click();
-    await expect.poll(async () => (await clip(page, CAM_B).boundingBox())!.width).toBeGreaterThan(
-      before.width,
-    );
+    await expect
+      .poll(async () => (await clip(page, CAM_B).boundingBox())!.width)
+      .toBeGreaterThan(before.width);
 
     const zoomed = (await clip(page, CAM_B).boundingBox())!;
     const body = (await page.locator(".timeline__body").boundingBox())!;
-    await page.mouse.move(body.x + body.width / 2, body.y + Math.min(body.height / 2, 120));
+    await page.mouse.move(
+      body.x + body.width / 2,
+      body.y + Math.min(body.height / 2, 120),
+    );
     await page.keyboard.down("Shift");
     await page.mouse.wheel(0, 300);
     await page.keyboard.up("Shift");
-    await expect.poll(async () => (await clip(page, CAM_B).boundingBox())!.x).toBeLessThan(
-      zoomed.x,
-    );
+    await expect
+      .poll(async () => (await clip(page, CAM_B).boundingBox())!.x)
+      .toBeLessThan(zoomed.x);
   });
 
-  test("the clips survive sources → syncing → result without a remount", async ({ page }) => {
+  test("the clips survive sources → syncing → result without a remount", async ({
+    page,
+  }) => {
     await reachSources(page, { run_sync: controlled("run_sync") });
 
     // Tag the live DOM nodes. If the timeline (or a clip) is unmounted and rebuilt at any
     // point, the tag goes with it — which is exactly the regression this guards.
     const tagged = async () =>
       page.evaluate(() => {
-        const section = document.querySelector("section.timeline") as HTMLElement | null;
+        const section = document.querySelector(
+          "section.timeline",
+        ) as HTMLElement | null;
         if (section) section.dataset.e2eMountTag = "sources";
         for (const el of document.querySelectorAll<HTMLElement>(".clip")) {
           el.dataset.e2eMountTag = el.getAttribute("data-file") ?? "";
@@ -478,13 +548,18 @@ test.describe("the timeline stays mounted through the sync", () => {
     // there — dimmed and inert, not replaced by a spinner on an empty screen.
     await expect(page.locator(".progress__label")).toHaveText(en.syncing);
     await expect(page.getByRole("button", { name: en.cancel })).toBeVisible();
-    await expect(page.locator("section.timeline")).toHaveClass(/timeline--busy/);
+    await expect(page.locator("section.timeline")).toHaveClass(
+      /timeline--busy/,
+    );
     await expect(page.locator(".clip")).toHaveCount(3);
     await expect(page.locator("section.timeline")).toHaveAttribute(
       "data-e2e-mount-tag",
       "sources",
     );
-    await expect(clip(page, CAM_A)).toHaveAttribute("data-e2e-mount-tag", CAM_A);
+    await expect(clip(page, CAM_A)).toHaveAttribute(
+      "data-e2e-mount-tag",
+      CAM_A,
+    );
 
     await resolveControlled(page, "run_sync", presyncOutcome());
     await waitForResult(page);
@@ -509,7 +584,9 @@ function presyncOutcome(): Record<string, unknown> {
   return {
     result: {
       ...result,
-      devices: (presyncScanManifest().devices as Record<string, unknown>[]).map((d) => d),
+      devices: (presyncScanManifest().devices as Record<string, unknown>[]).map(
+        (d) => d,
+      ),
       placements: [
         {
           file: CAM_A,

@@ -35,7 +35,12 @@ describe("settings persistence (D-029)", () => {
   it("validates field by field — one bad field does not discard the rest", () => {
     localStorage.setItem(
       KEY,
-      JSON.stringify({ lang: "de", minPsr: -3, segmentCount: 7, onboardingDone: true }),
+      JSON.stringify({
+        lang: "de",
+        minPsr: -3,
+        segmentCount: 7,
+        onboardingDone: true,
+      }),
     );
     const loaded = reloadSettingsForTest();
     expect(loaded.lang).toBeNull(); // "de" is not a Lang

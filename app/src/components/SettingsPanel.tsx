@@ -49,7 +49,9 @@ function updateStatusText(t: Strings, u: UpdateStatus): string {
       // again («Kunne ikke oppdatere: Motoren svarte ikke i tide»); only the §7.5 fallback
       // needs the frame, and `unmapped` is how it says so.
       const mapped = mapEngineError(u.message, t);
-      return mapped.kind === "error" && mapped.unmapped ? t.updateError(u.message) : mapped.text;
+      return mapped.kind === "error" && mapped.unmapped
+        ? t.updateError(u.message)
+        : mapped.text;
     }
   }
 }
@@ -79,9 +81,15 @@ function updateStatusText(t: Strings, u: UpdateStatus): string {
  * itself. It has its own sentence now, and its own banner colour — hence the KIND travelling
  * with the text (R, D-094). A wait is not a failure and must not be painted red.
  */
-function engineError(e: unknown, t: Strings): { kind: Banner["kind"]; text: string } {
+function engineError(
+  e: unknown,
+  t: Strings,
+): { kind: Banner["kind"]; text: string } {
   const mapped = mapEngineError(String(e), t);
-  return { kind: mapped.kind === "notice" ? "info" : "error", text: mapped.text };
+  return {
+    kind: mapped.kind === "notice" ? "info" : "error",
+    text: mapped.text,
+  };
 }
 
 export function SettingsPanel({
@@ -114,7 +122,9 @@ export function SettingsPanel({
   );
   const [cacheCapError, setCacheCapError] = useState(false);
   const [correctDrift, setCorrectDrift] = useState(settings.correctDrift);
-  const [playbackDrift, setPlaybackDrift] = useState(settings.playbackDriftCorrected);
+  const [playbackDrift, setPlaybackDrift] = useState(
+    settings.playbackDriftCorrected,
+  );
   const [telemetry, setTelemetry] = useState<TelemetryStatus | null>(null);
   const [telemetryBusy, setTelemetryBusy] = useState(false);
   const [telemetryPreview, setTelemetryPreview] = useState<string | null>(null);
@@ -198,7 +208,12 @@ export function SettingsPanel({
     setUpdateBusy(true);
     setUpdate((s) =>
       s.phase === "available"
-        ? { phase: "downloading", version: s.version, percent: 0, notes: releaseNotes(s) }
+        ? {
+            phase: "downloading",
+            version: s.version,
+            percent: 0,
+            notes: releaseNotes(s),
+          }
         : s,
     );
     const status = await downloadAndInstall(getSettings().betaChannel);
@@ -228,7 +243,10 @@ export function SettingsPanel({
   const deleteTelemetryData = async () => {
     setConfirmTelemetryDelete(false);
     const ok = await requestTelemetryDeletion();
-    onNotice(ok ? "ok" : "error", ok ? t.telemetryDeleted : t.telemetryDeleteFailed);
+    onNotice(
+      ok ? "ok" : "error",
+      ok ? t.telemetryDeleted : t.telemetryDeleteFailed,
+    );
     if (ok) {
       const status = await getTelemetryStatus();
       if (status) setTelemetry(status);
@@ -256,7 +274,9 @@ export function SettingsPanel({
   const clearCache = async () => {
     setConfirmClear(false);
     try {
-      const freed = await invoke<number>("clear_cache", { dir: getSettings().cacheDir });
+      const freed = await invoke<number>("clear_cache", {
+        dir: getSettings().cacheDir,
+      });
       onNotice("ok", t.cacheCleared(formatBytes(freed)));
       refreshCache();
     } catch (e) {
@@ -286,11 +306,15 @@ export function SettingsPanel({
     const rounded = Math.round(mb);
     saveSettings({ cacheCapMb: rounded });
     try {
-      const ev = await invoke<{ entries: number; bytes: number }>("enforce_cache_cap", {
-        dir: getSettings().cacheDir,
-        maxBytes: rounded * 1024 * 1024,
-      });
-      if (ev.entries > 0) onNotice("ok", t.cacheEvicted(ev.entries, formatBytes(ev.bytes)));
+      const ev = await invoke<{ entries: number; bytes: number }>(
+        "enforce_cache_cap",
+        {
+          dir: getSettings().cacheDir,
+          maxBytes: rounded * 1024 * 1024,
+        },
+      );
+      if (ev.entries > 0)
+        onNotice("ok", t.cacheEvicted(ev.entries, formatBytes(ev.bytes)));
       refreshCache();
     } catch (e) {
       {
@@ -320,301 +344,339 @@ export function SettingsPanel({
   return (
     <>
       <Dialog titleId="settings-title" onClose={onClose} closeLabel={t.close}>
-      <h2 id="settings-title">{t.settings}</h2>
-      <div className="settings">
-        <label className="field">
-          <span>{t.language}</span>
-          <select
-            value={settings.lang ?? ""}
-            onChange={(e) => {
-              const lang = e.target.value === "" ? null : (e.target.value as Lang);
-              saveSettings({ lang });
-              onLangChange(lang);
-            }}
-          >
-            <option value="">Auto</option>
-            <option value="nb">Norsk</option>
-            <option value="en">English</option>
-          </select>
-        </label>
-
-        <label className="field">
-          <span>{t.minPsr}</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={minPsrDraft}
-            placeholder="15"
-            onChange={(e) => setMinPsrDraft(e.target.value)}
-            onBlur={commitMinPsr}
-            onKeyDown={(e) => e.key === "Enter" && commitMinPsr()}
-            aria-invalid={minPsrError}
-          />
-          {minPsrError && <span className="field__error">{t.minPsrInvalid}</span>}
-          <small>{t.minPsrHint}</small>
-        </label>
-
-        <label className="field">
-          <span>{t.segmentCount}</span>
-          <select
-            value={settings.segmentCount ?? ""}
-            onChange={(e) =>
-              saveSettings({
-                segmentCount: e.target.value === "" ? null : Number(e.target.value),
-              })
-            }
-          >
-            <option value="">{t.segmentDefault}</option>
-            {[3, 7, 9].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <small>{t.segmentCountHint}</small>
-        </label>
-
-        <label className="field field--check">
-          <span className="field__row">
-            <input
-              type="checkbox"
-              checked={correctDrift}
+        <h2 id="settings-title">{t.settings}</h2>
+        <div className="settings">
+          <label className="field">
+            <span>{t.language}</span>
+            <select
+              value={settings.lang ?? ""}
               onChange={(e) => {
-                setCorrectDrift(e.target.checked);
-                saveSettings({ correctDrift: e.target.checked });
+                const lang =
+                  e.target.value === "" ? null : (e.target.value as Lang);
+                saveSettings({ lang });
+                onLangChange(lang);
               }}
-            />
-            <span>{t.driftCorrect}</span>
-          </span>
-          <small>{t.driftCorrectHint}</small>
-        </label>
+            >
+              <option value="">Auto</option>
+              <option value="nb">Norsk</option>
+              <option value="en">English</option>
+            </select>
+          </label>
 
-        {/* V03-S6: playback's own drift switch, next to the export one it deliberately does
+          <label className="field">
+            <span>{t.minPsr}</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={minPsrDraft}
+              placeholder="15"
+              onChange={(e) => setMinPsrDraft(e.target.value)}
+              onBlur={commitMinPsr}
+              onKeyDown={(e) => e.key === "Enter" && commitMinPsr()}
+              aria-invalid={minPsrError}
+            />
+            {minPsrError && (
+              <span className="field__error">{t.minPsrInvalid}</span>
+            )}
+            <small>{t.minPsrHint}</small>
+          </label>
+
+          <label className="field">
+            <span>{t.segmentCount}</span>
+            <select
+              value={settings.segmentCount ?? ""}
+              onChange={(e) =>
+                saveSettings({
+                  segmentCount:
+                    e.target.value === "" ? null : Number(e.target.value),
+                })
+              }
+            >
+              <option value="">{t.segmentDefault}</option>
+              {[3, 7, 9].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <small>{t.segmentCountHint}</small>
+          </label>
+
+          <label className="field field--check">
+            <span className="field__row">
+              <input
+                type="checkbox"
+                checked={correctDrift}
+                onChange={(e) => {
+                  setCorrectDrift(e.target.checked);
+                  saveSettings({ correctDrift: e.target.checked });
+                }}
+              />
+              <span>{t.driftCorrect}</span>
+            </span>
+            <small>{t.driftCorrectHint}</small>
+          </label>
+
+          {/* V03-S6: playback's own drift switch, next to the export one it deliberately does
             NOT share (D-055 — comparing the two by ear is the point). Routed through the
             engine rather than `saveSettings` directly: `setDriftCorrected` persists it AND
             rebuilds the schedule from where the playhead stands, so the change is audible
             immediately instead of at the next restart. */}
-        <label className="field field--check">
-          <span className="field__row">
-            <input
-              type="checkbox"
-              checked={playbackDrift}
-              onChange={(e) => {
-                setPlaybackDrift(e.target.checked);
-                getPlaybackEngine().setDriftCorrected(e.target.checked);
-              }}
-            />
-            <span>{t.playbackDriftCorrect}</span>
-          </span>
-          <small>{t.playbackDriftCorrectHint}</small>
-        </label>
+          <label className="field field--check">
+            <span className="field__row">
+              <input
+                type="checkbox"
+                checked={playbackDrift}
+                onChange={(e) => {
+                  setPlaybackDrift(e.target.checked);
+                  getPlaybackEngine().setDriftCorrected(e.target.checked);
+                }}
+              />
+              <span>{t.playbackDriftCorrect}</span>
+            </span>
+            <small>{t.playbackDriftCorrectHint}</small>
+          </label>
 
-        <div className="field">
-          <span>{t.cacheDir}</span>
-          <div className="field__row">
-            <input type="text" readOnly value={settings.cacheDir ?? cache?.dir ?? ""} />
-            <button type="button" className="secondary" onClick={pickCacheDir}>
-              {t.cachePick}
-            </button>
-          </div>
-          {cache && (
-            <div className="cachebar">
-              <strong>{t.cacheUsage(cache.entries, formatBytes(cache.bytes))}</strong>
-              {confirmClear ? (
-                <>
-                  <span>{t.cacheClearConfirm}</span>
-                  <button type="button" className="danger" onClick={clearCache}>
+          <div className="field">
+            <span>{t.cacheDir}</span>
+            <div className="field__row">
+              <input
+                type="text"
+                readOnly
+                value={settings.cacheDir ?? cache?.dir ?? ""}
+              />
+              <button
+                type="button"
+                className="secondary"
+                onClick={pickCacheDir}
+              >
+                {t.cachePick}
+              </button>
+            </div>
+            {cache && (
+              <div className="cachebar">
+                <strong>
+                  {t.cacheUsage(cache.entries, formatBytes(cache.bytes))}
+                </strong>
+                {confirmClear ? (
+                  <>
+                    <span>{t.cacheClearConfirm}</span>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={clearCache}
+                    >
+                      {t.cacheClear}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => setConfirmClear(false)}
+                    >
+                      {t.cancel}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setConfirmClear(true)}
+                    disabled={cache.entries === 0}
+                  >
                     {t.cacheClear}
                   </button>
-                  <button type="button" className="ghost" onClick={() => setConfirmClear(false)}>
+                )}
+              </div>
+            )}
+            <small>{t.cacheHint}</small>
+            <label className="field field--inline">
+              <span>{t.cacheCap}</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                inputMode="numeric"
+                placeholder={t.cacheCapOff}
+                value={cacheCapDraft}
+                aria-invalid={cacheCapError}
+                onChange={(e) => setCacheCapDraft(e.target.value)}
+                onBlur={() => void commitCacheCap()}
+              />
+            </label>
+            {cacheCapError && (
+              <small className="error">{t.cacheCapError}</small>
+            )}
+            <small>{t.cacheCapHint}</small>
+          </div>
+
+          <hr className="sep" />
+
+          <div className="field">
+            <span>{t.telemetryTitle}</span>
+            <label className="field field--check">
+              <span className="field__row">
+                <input
+                  type="checkbox"
+                  checked={telemetry?.granted ?? false}
+                  disabled={telemetryBusy || !telemetry}
+                  onChange={(e) => void toggleTelemetry(e.target.checked)}
+                />
+                <span>{t.telemetryToggleLabel}</span>
+              </span>
+            </label>
+            <small className="subtle">
+              {telemetry
+                ? t.telemetryStatus(telemetry.granted, telemetry.queued)
+                : t.telemetryUnavailable}
+            </small>
+            <div className="actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void openTelemetryPreview()}
+              >
+                {t.telemetryShowPreview}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  onClose();
+                  onShowConsent();
+                }}
+              >
+                {t.telemetryShowConsent}
+              </button>
+              {confirmTelemetryDelete ? (
+                <>
+                  <span className="subtle">{t.telemetryDeleteConfirm}</span>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => void deleteTelemetryData()}
+                  >
+                    {t.telemetryDelete}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setConfirmTelemetryDelete(false)}
+                  >
                     {t.cancel}
                   </button>
                 </>
               ) : (
                 <button
                   type="button"
-                  className="ghost"
-                  onClick={() => setConfirmClear(true)}
-                  disabled={cache.entries === 0}
+                  className="secondary"
+                  onClick={() => setConfirmTelemetryDelete(true)}
                 >
-                  {t.cacheClear}
+                  {t.telemetryDelete}
                 </button>
               )}
             </div>
-          )}
-          <small>{t.cacheHint}</small>
-          <label className="field field--inline">
-            <span>{t.cacheCap}</span>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              inputMode="numeric"
-              placeholder={t.cacheCapOff}
-              value={cacheCapDraft}
-              aria-invalid={cacheCapError}
-              onChange={(e) => setCacheCapDraft(e.target.value)}
-              onBlur={() => void commitCacheCap()}
-            />
-          </label>
-          {cacheCapError && <small className="error">{t.cacheCapError}</small>}
-          <small>{t.cacheCapHint}</small>
-        </div>
+          </div>
 
-        <hr className="sep" />
+          <hr className="sep" />
 
-        <div className="field">
-          <span>{t.telemetryTitle}</span>
-          <label className="field field--check">
-            <span className="field__row">
-              <input
-                type="checkbox"
-                checked={telemetry?.granted ?? false}
-                disabled={telemetryBusy || !telemetry}
-                onChange={(e) => void toggleTelemetry(e.target.checked)}
-              />
-              <span>{t.telemetryToggleLabel}</span>
-            </span>
-          </label>
-          <small className="subtle">
-            {telemetry ? t.telemetryStatus(telemetry.granted, telemetry.queued) : t.telemetryUnavailable}
-          </small>
-          <div className="actions">
-            <button type="button" className="secondary" onClick={() => void openTelemetryPreview()}>
-              {t.telemetryShowPreview}
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                onClose();
-                onShowConsent();
-              }}
-            >
-              {t.telemetryShowConsent}
-            </button>
-            {confirmTelemetryDelete ? (
-              <>
-                <span className="subtle">{t.telemetryDeleteConfirm}</span>
-                <button type="button" className="danger" onClick={() => void deleteTelemetryData()}>
-                  {t.telemetryDelete}
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => setConfirmTelemetryDelete(false)}
-                >
-                  {t.cancel}
-                </button>
-              </>
-            ) : (
+          <div className="field">
+            <span>{t.systemTitle}</span>
+            <label className="field field--check">
+              <span className="field__row">
+                <input
+                  type="checkbox"
+                  checked={betaChannel}
+                  onChange={(e) => toggleBeta(e.target.checked)}
+                />
+                <span>{t.betaChannelLabel}</span>
+              </span>
+              <small>{t.betaChannelHint}</small>
+            </label>
+            <div className="actions">
               <button
                 type="button"
                 className="secondary"
-                onClick={() => setConfirmTelemetryDelete(true)}
-              >
-                {t.telemetryDelete}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <hr className="sep" />
-
-        <div className="field">
-          <span>{t.systemTitle}</span>
-          <label className="field field--check">
-            <span className="field__row">
-              <input
-                type="checkbox"
-                checked={betaChannel}
-                onChange={(e) => toggleBeta(e.target.checked)}
-              />
-              <span>{t.betaChannelLabel}</span>
-            </span>
-            <small>{t.betaChannelHint}</small>
-          </label>
-          <div className="actions">
-            <button
-              type="button"
-              className="secondary"
-              disabled={updateBusy}
-              onClick={() => void runUpdateCheck()}
-            >
-              {t.updateCheck}
-            </button>
-            {update.phase === "available" && (
-              <button
-                type="button"
-                className="primary"
                 disabled={updateBusy}
-                onClick={() => void runDownloadInstall()}
+                onClick={() => void runUpdateCheck()}
               >
-                {t.updateDownload(update.version)}
+                {t.updateCheck}
               </button>
-            )}
-            {update.phase === "readyToInstall" && (
-              <button
-                type="button"
-                className="primary"
-                onClick={() => void relaunchForUpdate()}
-              >
-                {t.updateRestart}
-              </button>
-            )}
-          </div>
-          <small className="subtle">{updateStatusText(t, update)}</small>
-          {notes !== null && (
-            <div className="relnotes">
-              <span className="relnotes__title" id="update-notes-title">
-                {t.updateNotesTitle}
-              </span>
-              {/* Plain text, rendered as text: `{notes}` is a React text child, so the
+              {update.phase === "available" && (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={updateBusy}
+                  onClick={() => void runDownloadInstall()}
+                >
+                  {t.updateDownload(update.version)}
+                </button>
+              )}
+              {update.phase === "readyToInstall" && (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => void relaunchForUpdate()}
+                >
+                  {t.updateRestart}
+                </button>
+              )}
+            </div>
+            <small className="subtle">{updateStatusText(t, update)}</small>
+            {notes !== null && (
+              <div className="relnotes">
+                <span className="relnotes__title" id="update-notes-title">
+                  {t.updateNotesTitle}
+                </span>
+                {/* Plain text, rendered as text: `{notes}` is a React text child, so the
                   string is escaped, and `white-space: pre-line` is what turns the note's
                   own newlines into the paragraphs its author wrote. No markdown pass —
                   the release-note guard forbids markup on every PR, and a renderer here
                   would be the app deciding to interpret bytes that came off the network.
                   `tabIndex` because the box scrolls: a 1000-byte note is taller than it,
                   and a scroll region a keyboard cannot reach is a trap. */}
-              <p
-                className="relnotes__body"
-                role="group"
-                tabIndex={0}
-                aria-labelledby="update-notes-title"
-              >
-                {notes}
-              </p>
-            </div>
+                <p
+                  className="relnotes__body"
+                  role="group"
+                  tabIndex={0}
+                  aria-labelledby="update-notes-title"
+                >
+                  {notes}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <hr className="sep" />
+
+          <div className="actions">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                onClose();
+                onShowOnboarding();
+              }}
+            >
+              {t.showOnboarding}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={exportDiagnostics}
+            >
+              {t.diagnostics}
+            </button>
+          </div>
+          <small className="subtle">{t.diagnosticsHint}</small>
+
+          {sidecar && (
+            <small className="subtle">
+              {sidecar.source === "bundled"
+                ? describeSidecar(sidecar, t).label
+                : t.obFfmpegSystemPath(sidecar.path)}
+            </small>
           )}
         </div>
-
-        <hr className="sep" />
-
-        <div className="actions">
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => {
-              onClose();
-              onShowOnboarding();
-            }}
-          >
-            {t.showOnboarding}
-          </button>
-          <button type="button" className="secondary" onClick={exportDiagnostics}>
-            {t.diagnostics}
-          </button>
-        </div>
-        <small className="subtle">{t.diagnosticsHint}</small>
-
-        {sidecar && (
-          <small className="subtle">
-            {sidecar.source === "bundled"
-              ? describeSidecar(sidecar, t).label
-              : t.obFfmpegSystemPath(sidecar.path)}
-          </small>
-        )}
-      </div>
       </Dialog>
 
       {showTelemetryPreview && (

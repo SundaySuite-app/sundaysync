@@ -73,7 +73,8 @@ export const Ruler = memo(function Ruler({
         // run on every pan frame, and the estimate is deliberately generous (see
         // TICK_CHAR_PX), so the only thing it can get wrong is dropping a label that would
         // just have fitted at the very edge.
-        const fits = x + TICK_PAD_PX + label.length * TICK_CHAR_PX <= view.widthPx;
+        const fits =
+          x + TICK_PAD_PX + label.length * TICK_CHAR_PX <= view.widthPx;
         return (
           <span key={ms} className="timeline__tick" style={{ left: `${x}px` }}>
             {fits ? label : null}

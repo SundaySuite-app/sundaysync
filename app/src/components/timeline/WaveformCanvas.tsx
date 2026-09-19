@@ -1,6 +1,16 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { Strings } from "../../i18n";
-import { waveformFits, type ClipChrome, type ClipStatusKind } from "../../timeline/clipChrome";
+import {
+  waveformFits,
+  type ClipChrome,
+  type ClipStatusKind,
+} from "../../timeline/clipChrome";
 import type { TimelineView } from "../../timeline/geometry";
 import {
   barAmplitudes,
@@ -226,7 +236,8 @@ export function useClipWaveform({
   // it just stops being a wait, and the render below hands back the regenerate control.
   const lastStatus = useRef(analysisStatus);
   useEffect(() => {
-    const arrived = lastStatus.current === "pending" && analysisStatus === "ready";
+    const arrived =
+      lastStatus.current === "pending" && analysisStatus === "ready";
     lastStatus.current = analysisStatus;
     // …unless there is nowhere to draw it (D-072). A 3 px clip's analysis landing is not a
     // reason to spend an IPC; the read happens when the operator zooms in far enough to
@@ -343,7 +354,10 @@ export function useClipWaveform({
   );
 
   const status = ((): ClipWaveformStatus => {
-    if (analysisStatus === "pending" && (error?.kind === "cacheMissing" || error?.kind === "busy")) {
+    if (
+      analysisStatus === "pending" &&
+      (error?.kind === "cacheMissing" || error?.kind === "busy")
+    ) {
       // D-062: not an offer, a status. Deliberately not a control — see the component note
       // above for why the regenerate button would be the wrong thing to show here.
       //
@@ -351,7 +365,12 @@ export function useClipWaveform({
       // now marks every unanalysed file `pending`, because a run really is analysing them.
       // The clip says «analyserer …» for the duration of the sync and never offers a
       // rebuild it could not honour.
-      return { kind: "info", className: "waveform__analysing", label: t.waveformAnalysing, detail: null };
+      return {
+        kind: "info",
+        className: "waveform__analysing",
+        label: t.waveformAnalysing,
+        detail: null,
+      };
     }
 
     if (error?.kind === "cacheMissing" || error?.kind === "busy") {
@@ -418,7 +437,11 @@ export function WaveformCanvas({
   return (
     <span className="clip__waveform" data-waveform-slot="" title={title}>
       {waveform.showCanvas && waveform.status.kind === "none" ? (
-        <canvas ref={waveform.canvasRef} className="waveform__canvas" aria-hidden="true" />
+        <canvas
+          ref={waveform.canvasRef}
+          className="waveform__canvas"
+          aria-hidden="true"
+        />
       ) : null}
     </span>
   );

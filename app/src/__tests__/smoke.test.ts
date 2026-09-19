@@ -64,7 +64,8 @@ describe("boot error capture", () => {
 
   it("never grows without bound", () => {
     const before = bootErrorsSoFar().length;
-    for (let i = 0; i < MAX_BOOT_ERRORS + 10; i += 1) recordBootError("error", `loop ${i}`);
+    for (let i = 0; i < MAX_BOOT_ERRORS + 10; i += 1)
+      recordBootError("error", `loop ${i}`);
     expect(bootErrorsSoFar().length).toBe(MAX_BOOT_ERRORS);
     expect(bootErrorsSoFar().length).toBeGreaterThanOrEqual(before);
   });

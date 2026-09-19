@@ -66,7 +66,9 @@ export function ProblemsPopover({
             <span className="filerow__name" title={u.file}>
               {basename(u.file)}
             </span>
-            <span className="badge badge--problem">{reasonText(t, u.reason)}</span>
+            <span className="badge badge--problem">
+              {reasonText(t, u.reason)}
+            </span>
             <span />
             <button
               type="button"

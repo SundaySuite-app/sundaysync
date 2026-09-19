@@ -50,7 +50,9 @@ function longDayManifest(): Record<string, unknown> {
       audio: { codec: "aac", sample_rate: 48000, channels: 2 },
       video: { codec: "h264", width: 1920, height: 1080, fps: "25/1" },
       // The last hour of the span, so the drop is exactly DAY_SPAN_HOURS long.
-      creation_time: new Date(startMs + (DAY_SPAN_HOURS - 1) * 3_600_000).toISOString(),
+      creation_time: new Date(
+        startMs + (DAY_SPAN_HOURS - 1) * 3_600_000,
+      ).toISOString(),
     },
   ];
   return {
@@ -89,7 +91,11 @@ async function labelBoxes(page: Page) {
       .filter((el) => (el.textContent ?? "").trim().length > 0)
       .map((el) => {
         const r = el.getBoundingClientRect();
-        return { text: (el.textContent ?? "").trim(), left: r.left, right: r.right };
+        return {
+          text: (el.textContent ?? "").trim(),
+          left: r.left,
+          right: r.right,
+        };
       })
       .sort((a, b) => a.left - b.left),
   );
@@ -104,22 +110,35 @@ test.describe("the ruler reads at any zoom", () => {
     expect(boxes.length).toBeGreaterThan(3);
 
     const collisions = boxes
-      .map((b, i) => (i > 0 && b.left < boxes[i - 1].right ? `${boxes[i - 1].text} / ${b.text}` : null))
+      .map((b, i) =>
+        i > 0 && b.left < boxes[i - 1].right
+          ? `${boxes[i - 1].text} / ${b.text}`
+          : null,
+      )
       .filter((c): c is string => c !== null);
-    expect(collisions, `overlapping labels: ${collisions.join(", ")}`).toEqual([]);
+    expect(collisions, `overlapping labels: ${collisions.join(", ")}`).toEqual(
+      [],
+    );
   });
 
-  test("no two labels overlap at any zoom step out from the fit", async ({ page }) => {
+  test("no two labels overlap at any zoom step out from the fit", async ({
+    page,
+  }) => {
     // The ladder has to hold at every rung, not just at the one «Tilpass» happens to land on.
     await reachLongDay(page);
     for (let step = 0; step < 8; step++) {
       const boxes = await labelBoxes(page);
       const collisions = boxes
         .map((b, i) =>
-          i > 0 && b.left < boxes[i - 1].right ? `${boxes[i - 1].text} / ${b.text}` : null,
+          i > 0 && b.left < boxes[i - 1].right
+            ? `${boxes[i - 1].text} / ${b.text}`
+            : null,
         )
         .filter((c): c is string => c !== null);
-      expect(collisions, `step ${step}: overlapping labels ${collisions.join(", ")}`).toEqual([]);
+      expect(
+        collisions,
+        `step ${step}: overlapping labels ${collisions.join(", ")}`,
+      ).toEqual([]);
       await page.getByRole("button", { name: en.zoomIn }).click();
     }
   });
@@ -132,7 +151,9 @@ test.describe("the ruler reads at any zoom", () => {
 
     const boxes = await labelBoxes(page);
     for (const b of boxes) {
-      expect(b.text, `tick label ${b.text}`).toMatch(/^([01]\d|2[0-3]):[0-5]\d$/);
+      expect(b.text, `tick label ${b.text}`).toMatch(
+        /^([01]\d|2[0-3]):[0-5]\d$/,
+      );
     }
     // …and one of them is the hour the day starts at, give or take the tick spacing.
     expect(boxes.map((b) => b.text).join(" ")).toMatch(/\b(08|09|10):00\b/);

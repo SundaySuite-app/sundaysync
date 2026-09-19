@@ -79,7 +79,9 @@ export function mapEngineError(raw: string, t: Strings): MappedError {
   // the same reason `cancelled` is one — nothing is broken, and the condition clears
   // itself. Which activity is named, because "wait" without "for what" is not an answer.
   if (raw.includes(BUSY_PREFIX)) {
-    const what = raw.slice(raw.indexOf(BUSY_PREFIX) + BUSY_PREFIX.length).trim();
+    const what = raw
+      .slice(raw.indexOf(BUSY_PREFIX) + BUSY_PREFIX.length)
+      .trim();
     const text = what.startsWith("sync")
       ? t.errBusySync
       : what.startsWith("cache maintenance")
@@ -107,7 +109,9 @@ export function mapEngineError(raw: string, t: Strings): MappedError {
   // banner. Matched before the generic prefixes so it can never fall through to
   // `errUnknown` and read as a crash.
   if (raw.includes(CACHE_MISSING)) {
-    const path = raw.slice(raw.indexOf(CACHE_MISSING) + CACHE_MISSING.length).trim();
+    const path = raw
+      .slice(raw.indexOf(CACHE_MISSING) + CACHE_MISSING.length)
+      .trim();
     return { kind: "cacheMissing", path, text: t.errCacheMissing };
   }
   if (raw.startsWith("no input files")) {
@@ -151,7 +155,10 @@ export function mapEngineError(raw: string, t: Strings): MappedError {
     return { kind: "error", text: t.errDecode(rest.split(": ")[0] ?? rest) };
   }
   if (raw.startsWith("nothing was extracted for ")) {
-    return { kind: "error", text: t.errNoAudio(raw.slice("nothing was extracted for ".length)) };
+    return {
+      kind: "error",
+      text: t.errNoAudio(raw.slice("nothing was extracted for ".length)),
+    };
   }
   // A panicked worker left a lock poisoned (`OnPoison::Reject`). A bug, but one with a
   // real user action attached — the state is gone and only a restart brings it back.

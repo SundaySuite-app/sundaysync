@@ -37,7 +37,10 @@ describe("releasenotat", () => {
   it("er kort nok til å bo i et manifest som hentes ved hver sjekk", () => {
     for (const tag of knownTags()) {
       const note = checkNote(tag);
-      expect(note.ok, note.ok ? tag : `${tag}: ${note.problems.join("; ")}`).toBe(true);
+      expect(
+        note.ok,
+        note.ok ? tag : `${tag}: ${note.problems.join("; ")}`,
+      ).toBe(true);
       expect(byteLength(note.text)).toBeLessThanOrEqual(MAX_NOTE_BYTES);
     }
   });
@@ -56,8 +59,8 @@ describe("releasenotat", () => {
     // Release-jobben kjører på macOS OG Windows, og ingen av repoene
     // normaliserer linjeskift i git. Uten dette avgjorde kappløpet mellom de to
     // runnerne hva som havnet i `latest.json`.
-    expect(normalize("Blackout er \u21e7B.\r\n\r\nEscape lukker biblioteket.\r\n")).toBe(
-      "Blackout er \u21e7B.\n\nEscape lukker biblioteket.\n",
-    );
+    expect(
+      normalize("Blackout er \u21e7B.\r\n\r\nEscape lukker biblioteket.\r\n"),
+    ).toBe("Blackout er \u21e7B.\n\nEscape lukker biblioteket.\n");
   });
 });

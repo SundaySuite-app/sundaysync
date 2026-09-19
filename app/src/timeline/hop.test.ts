@@ -34,7 +34,9 @@ const LANE = LANE_MIN_PX;
  *  expectations below can be read without arithmetic. */
 const VIEW: TimelineView = { pxPerMs: 1, scrollMs: 0, widthPx: 1000 };
 
-function track(...rows: { file: string; startMs: number; endMs: number }[][]): HopTrack {
+function track(
+  ...rows: { file: string; startMs: number; endMs: number }[][]
+): HopTrack {
   return { rows };
 }
 
@@ -76,7 +78,12 @@ describe("clipBoxes", () => {
   it("maps x through the view, pan and zoom included", () => {
     const zoomed: TimelineView = { pxPerMs: 0.5, scrollMs: 200, widthPx: 1000 };
     const boxes = clipBoxes([track([clip("a", 1000, 400)])], zoomed, LANE);
-    expect(boxes.get("a")).toEqual({ x: (1000 - 200) * 0.5, y: 5, width: 200, hairline: false });
+    expect(boxes.get("a")).toEqual({
+      x: (1000 - 200) * 0.5,
+      y: 5,
+      width: 200,
+      hairline: false,
+    });
   });
 
   it("floors a zero-length clip at the width the component draws it at", () => {
@@ -190,7 +197,9 @@ describe("clipBoxes", () => {
       { rows: rows[0].rows, unsynced: false },
       { rows: rows[1].rows, unsynced: false },
     ];
-    expect(clipBoxes(rows, VIEW, LANE)).toEqual(clipBoxes(explicit, VIEW, LANE));
+    expect(clipBoxes(rows, VIEW, LANE)).toEqual(
+      clipBoxes(explicit, VIEW, LANE),
+    );
   });
 
   it("is the SAME height `Track` writes into the DOM", () => {
@@ -198,11 +207,16 @@ describe("clipBoxes", () => {
     // second expression to state, the invariant would already be broken.
     for (const lane of [LANE_MIN_PX, 63, LANE_MAX_PX]) {
       const boxes = clipBoxes(
-        [trackWithRefusals([clip("a", 0)], [clip("b", 0)]), track([clip("c", 0)])],
+        [
+          trackWithRefusals([clip("a", 0)], [clip("b", 0)]),
+          track([clip("c", 0)]),
+        ],
         VIEW,
         lane,
       );
-      expect(boxes.get("c")!.y - boxes.get("a")!.y).toBe(trackHeightFor(2, true, lane));
+      expect(boxes.get("c")!.y - boxes.get("a")!.y).toBe(
+        trackHeightFor(2, true, lane),
+      );
     }
   });
 });
@@ -231,12 +245,18 @@ describe("hopDeltas", () => {
     const before = [track([clip("a", 1000)])];
     const after = [track([clip("a", 1400)])];
     // The clip is drawn 400 px further right, so it starts 400 px to the LEFT of there.
-    expect(hopDeltas(before, VIEW, LANE, after, VIEW, LANE).get("a")).toEqual({ dx: -400, dy: 0 });
+    expect(hopDeltas(before, VIEW, LANE, after, VIEW, LANE).get("a")).toEqual({
+      dx: -400,
+      dy: 0,
+    });
   });
 
   it("reports a zero delta for a clip that did not move", () => {
     const same = [track([clip("a", 1000)])];
-    expect(hopDeltas(same, VIEW, LANE, same, VIEW, LANE).get("a")).toEqual({ dx: 0, dy: 0 });
+    expect(hopDeltas(same, VIEW, LANE, same, VIEW, LANE).get("a")).toEqual({
+      dx: 0,
+      dy: 0,
+    });
   });
 
   it("carries a clip that changed track", () => {
@@ -253,7 +273,10 @@ describe("hopDeltas", () => {
     const before = [track([clip("a", 0)]), track([clip("c", 0)])];
     // The first track now stacks two rows — its own second clip, and every track under it,
     // move down by a lane.
-    const after = [track([clip("a", 0)], [clip("b", 0)]), track([clip("c", 0)])];
+    const after = [
+      track([clip("a", 0)], [clip("b", 0)]),
+      track([clip("c", 0)]),
+    ];
     const deltas = hopDeltas(before, VIEW, LANE, after, VIEW, LANE);
     expect(deltas.get("a")).toEqual({ dx: 0, dy: 0 });
     expect(deltas.get("c")).toEqual({ dx: 0, dy: -LANE });
@@ -262,7 +285,10 @@ describe("hopDeltas", () => {
   });
 
   it("shifts everything below a track that lost a lane", () => {
-    const before = [track([clip("a", 0)], [clip("b", 0)]), track([clip("c", 0)])];
+    const before = [
+      track([clip("a", 0)], [clip("b", 0)]),
+      track([clip("c", 0)]),
+    ];
     const after = [track([clip("a", 0)]), track([clip("c", 0)])];
     expect(hopDeltas(before, VIEW, LANE, after, VIEW, LANE).get("c")).toEqual({
       dx: 0,
@@ -286,10 +312,16 @@ describe("hopDeltas", () => {
   it("measures each side under its own view when the two differ", () => {
     const before = [track([clip("a", 1000)])];
     const after = [track([clip("a", 1000)])];
-    const zoomedOut: TimelineView = { pxPerMs: 0.5, scrollMs: 0, widthPx: 1000 };
+    const zoomedOut: TimelineView = {
+      pxPerMs: 0.5,
+      scrollMs: 0,
+      widthPx: 1000,
+    };
     // Same timeline position, half the zoom: the box is drawn at 500 instead of 1000, so
     // it would have to start 500 px to the right of its new home.
-    expect(hopDeltas(before, VIEW, LANE, after, zoomedOut, LANE).get("a")).toEqual({ dx: 500, dy: 0 });
+    expect(
+      hopDeltas(before, VIEW, LANE, after, zoomedOut, LANE).get("a"),
+    ).toEqual({ dx: 500, dy: 0 });
   });
 
   it("hops the tracks below a device that GAINED a strip of refusals (F, D-096)", () => {
@@ -298,7 +330,11 @@ describe("hopDeltas", () => {
     // that device is now `UNSYNCED_ROW_PX` further down, so every one of those clips has to
     // start its hop that much higher — otherwise the whole lower half of the timeline
     // arrives at its new home by teleporting rather than by travelling.
-    const before = [track([clip("a", 0)]), track([clip("b", 0)]), track([clip("c", 0)])];
+    const before = [
+      track([clip("a", 0)]),
+      track([clip("b", 0)]),
+      track([clip("c", 0)]),
+    ];
     const after = [
       trackWithRefusals([clip("a", 0)]),
       track([clip("b", 0)]),
@@ -344,7 +380,8 @@ describe("laneHeightFor — the lanes grow into the room", () => {
     for (const rows of [1, 2, 3, 5, 7, 11, 13]) {
       for (const available of [137, 301, 449, 512, 803]) {
         const lane = laneHeightFor(rows, available);
-        if (lane > LANE_MIN_PX) expect(rows * lane).toBeLessThanOrEqual(available);
+        if (lane > LANE_MIN_PX)
+          expect(rows * lane).toBeLessThanOrEqual(available);
       }
     }
   });
@@ -356,7 +393,8 @@ describe("laneHeightFor — the lanes grow into the room", () => {
     for (const nothing of [0, -1, NaN, Infinity, -Infinity]) {
       expect(laneHeightFor(3, nothing)).toBe(LANE_MIN_PX);
     }
-    for (const nothing of [0, -1, NaN]) expect(laneHeightFor(nothing, 800)).toBe(LANE_MIN_PX);
+    for (const nothing of [0, -1, NaN])
+      expect(laneHeightFor(nothing, 800)).toBe(LANE_MIN_PX);
   });
 
   it("is the number BOTH consumers use — the D-083 invariant, restated for a value", () => {
@@ -365,7 +403,10 @@ describe("laneHeightFor — the lanes grow into the room", () => {
     // the first device would hop to rows they are not in — with no error anywhere. Nothing
     // here can see the DOM, so what is asserted is the other half: `clipBoxes` uses the
     // pitch it is GIVEN, at any value, rather than a constant of its own.
-    const tracks = [track([clip("a", 0)], [clip("b", 0)]), track([clip("c", 0)])];
+    const tracks = [
+      track([clip("a", 0)], [clip("b", 0)]),
+      track([clip("c", 0)]),
+    ];
     for (const lane of [LANE_MIN_PX, 53, 68, LANE_MAX_PX]) {
       const boxes = clipBoxes(tracks, VIEW, lane);
       expect(boxes.get("b")!.y - boxes.get("a")!.y).toBe(lane);
@@ -397,7 +438,11 @@ describe("laneHeightFor — the lanes grow into the room", () => {
     // own. Three rows at 90, then two at 90 (both clamped): `a` stays on row 0 and does not
     // move; with a single pitch for both sides this would still be right, so the case that
     // proves it is the one where the pitches differ.
-    const before = [track([clip("a", 0)]), track([clip("b", 0)]), track([clip("c", 0)])];
+    const before = [
+      track([clip("a", 0)]),
+      track([clip("b", 0)]),
+      track([clip("c", 0)]),
+    ];
     const after = [track([clip("a", 0)]), track([clip("c", 0)])];
     const oldLane = laneHeightFor(3, 300); // 100 → clamped to 90
     const newLane = laneHeightFor(2, 300); // 150 → clamped to 90
@@ -418,7 +463,10 @@ describe("laneHeightFor — the lanes grow into the room", () => {
 
 describe("clipDrawing — a clip never crosses its neighbour's start", () => {
   it("draws a clip at its own width when nothing is in the way", () => {
-    expect(clipDrawing(400, Number.POSITIVE_INFINITY)).toEqual({ width: 400, hairline: false });
+    expect(clipDrawing(400, Number.POSITIVE_INFINITY)).toEqual({
+      width: 400,
+      hairline: false,
+    });
     expect(clipDrawing(400, 400)).toEqual({ width: 400, hairline: false });
   });
 
@@ -427,7 +475,10 @@ describe("clipDrawing — a clip never crosses its neighbour's start", () => {
     // width is a drawing and can be cut. 3 px of room means a box no wider than 3 px,
     // wherever the clip's own duration would have taken it — and since 3 px is under the
     // drawing threshold, what is drawn there is a tick.
-    expect(clipDrawing(400, 3)).toEqual({ width: HAIRLINE_WIDTH_PX, hairline: true });
+    expect(clipDrawing(400, 3)).toEqual({
+      width: HAIRLINE_WIDTH_PX,
+      hairline: true,
+    });
     expect(clipDrawing(400, 1)).toEqual({ width: 1, hairline: true });
     expect(clipDrawing(12, 7)).toEqual({ width: 7, hairline: false });
   });
@@ -440,7 +491,9 @@ describe("clipDrawing — a clip never crosses its neighbour's start", () => {
       width: HAIRLINE_WIDTH_PX,
       hairline: true,
     });
-    expect(clipDrawing(3, Number.POSITIVE_INFINITY).width).toBe(HAIRLINE_WIDTH_PX);
+    expect(clipDrawing(3, Number.POSITIVE_INFINITY).width).toBe(
+      HAIRLINE_WIDTH_PX,
+    );
     // …and above it, the box is its own width to the pixel.
     expect(clipDrawing(6.1, Number.POSITIVE_INFINITY).width).toBe(6.1);
   });
@@ -477,7 +530,9 @@ describe("clipDrawing — a clip never crosses its neighbour's start", () => {
     // frame). It must not smuggle a box through a `Math.max`, and it must not become a NaN
     // in a style attribute, which voids the declaration silently.
     for (const bad of [NaN, -1, -Infinity]) {
-      expect(clipDrawing(bad, Number.POSITIVE_INFINITY).width).toBe(HAIRLINE_WIDTH_PX);
+      expect(clipDrawing(bad, Number.POSITIVE_INFINITY).width).toBe(
+        HAIRLINE_WIDTH_PX,
+      );
     }
     // A NaN ROOM is "no neighbour measured", which is the same as no neighbour.
     expect(clipDrawing(400, NaN)).toEqual({ width: 400, hairline: false });
@@ -489,16 +544,19 @@ describe("clipDrawing — a clip never crosses its neighbour's start", () => {
     // not overlap; what broke it was the floors. Walk a dense row at zooms from "the whole
     // day in a thousand pixels" to "one clip fills the screen" and require that every box
     // ends at or before the next box begins.
-    const row = Array.from({ length: 120 }, (_, i) => clip(`c${i}`, i * 90_000, 88_000));
+    const row = Array.from({ length: 120 }, (_, i) =>
+      clip(`c${i}`, i * 90_000, 88_000),
+    );
     for (const pxPerMs of [0.0000042, 0.00004, 0.0004, 0.004, 0.04, 1]) {
       const view: TimelineView = { pxPerMs, scrollMs: 0, widthPx: 1000 };
       const boxes = clipBoxes([track(row)], view, LANE);
       for (let i = 0; i < row.length - 1; i++) {
         const here = boxes.get(row[i].file)!;
         const next = boxes.get(row[i + 1].file)!;
-        expect(here.x + here.width, `pair ${i} at ${pxPerMs} px/ms`).toBeLessThanOrEqual(
-          next.x + 1e-9,
-        );
+        expect(
+          here.x + here.width,
+          `pair ${i} at ${pxPerMs} px/ms`,
+        ).toBeLessThanOrEqual(next.x + 1e-9);
       }
     }
   });
@@ -511,11 +569,15 @@ describe("roomBeforeNext", () => {
     // it from this clip's end would be a number that is already the answer to a different
     // question (the gap) and would clamp every clip to zero.
     expect(roomBeforeNext(clip("a", 1000, 100), clip("b", 1400), 1)).toBe(400);
-    expect(roomBeforeNext(clip("a", 1000, 100), clip("b", 1400), 0.5)).toBe(200);
+    expect(roomBeforeNext(clip("a", 1000, 100), clip("b", 1400), 0.5)).toBe(
+      200,
+    );
   });
 
   it("is infinite for the last clip in a row", () => {
-    expect(roomBeforeNext(clip("a", 1000), undefined, 1)).toBe(Number.POSITIVE_INFINITY);
+    expect(roomBeforeNext(clip("a", 1000), undefined, 1)).toBe(
+      Number.POSITIVE_INFINITY,
+    );
   });
 });
 
@@ -525,7 +587,12 @@ describe("hopExits", () => {
     const after = [track([clip("a", 0)])];
     const exits = hopExits(before, VIEW, LANE, after);
     expect([...exits.keys()]).toEqual(["gone"]);
-    expect(exits.get("gone")).toEqual({ x: 700, y: 5 + LANE, width: 300, hairline: false });
+    expect(exits.get("gone")).toEqual({
+      x: 700,
+      y: 5 + LANE,
+      width: 300,
+      hairline: false,
+    });
   });
 
   it("finds a survivor wherever it moved to", () => {
@@ -555,7 +622,10 @@ describe("hopExits", () => {
 //     from becoming a clip that visits another track.
 
 /** The fixture's shape: enough distinct paths that a claim about spread means something. */
-const FILES = Array.from({ length: 200 }, (_, i) => `/Users/e2e/shoot/CamA/C${1000 + i}.MP4`);
+const FILES = Array.from(
+  { length: 200 },
+  (_, i) => `/Users/e2e/shoot/CamA/C${1000 + i}.MP4`,
+);
 
 /** A comfortable clip — wide enough that the width cap never binds. */
 const WIDE = 400;
@@ -563,7 +633,8 @@ const WIDE = 400;
 describe("hopChoreography", () => {
   it("gives the same file the same number every time it is asked", () => {
     const once = hopChoreography(FILES[0], WIDE);
-    for (let i = 0; i < 5; i++) expect(hopChoreography(FILES[0], WIDE)).toEqual(once);
+    for (let i = 0; i < 5; i++)
+      expect(hopChoreography(FILES[0], WIDE)).toEqual(once);
   });
 
   it("is a function of the path, not of call order", () => {
@@ -612,10 +683,14 @@ describe("hopChoreography", () => {
     // half-tenth the rounding to one decimal is allowed to shave off it.
     const ROUNDING = 0.05;
     for (const x of xs) {
-      expect(Math.abs(x)).toBeGreaterThanOrEqual(HOP_JITTER_X_PX * 0.4 - ROUNDING);
+      expect(Math.abs(x)).toBeGreaterThanOrEqual(
+        HOP_JITTER_X_PX * 0.4 - ROUNDING,
+      );
     }
     for (const y of ys) {
-      expect(Math.abs(y)).toBeGreaterThanOrEqual(HOP_JITTER_Y_PX * 0.4 - ROUNDING);
+      expect(Math.abs(y)).toBeGreaterThanOrEqual(
+        HOP_JITTER_Y_PX * 0.4 - ROUNDING,
+      );
     }
   });
 
@@ -645,12 +720,14 @@ describe("hopChoreography", () => {
       expect(Math.abs(hopChoreography(file, 0).jx)).toBeGreaterThanOrEqual(
         HOP_MIN_JITTER_X_PX * 0.4 - 0.05,
       );
-      expect(Math.abs(hopChoreography(file, 0).jx)).toBeLessThanOrEqual(HOP_MIN_JITTER_X_PX);
+      expect(Math.abs(hopChoreography(file, 0).jx)).toBeLessThanOrEqual(
+        HOP_MIN_JITTER_X_PX,
+      );
     }
     // The cap binds on narrow clips and lets go on wide ones — the same file, two widths.
-    expect(Math.abs(hopChoreography(FILES[0], HAIRLINE_WIDTH_PX).jx)).toBeLessThan(
-      Math.abs(hopChoreography(FILES[0], WIDE).jx),
-    );
+    expect(
+      Math.abs(hopChoreography(FILES[0], HAIRLINE_WIDTH_PX).jx),
+    ).toBeLessThan(Math.abs(hopChoreography(FILES[0], WIDE).jx));
   });
 
   it("leaves the vertical wander alone at every width", () => {
@@ -658,7 +735,9 @@ describe("hopChoreography", () => {
     // proportion with — and a `jy` that shrank with the WIDTH would be arithmetic that had
     // quietly started answering a different question.
     for (const width of [0, HAIRLINE_WIDTH_PX, 12, WIDE]) {
-      expect(hopChoreography(FILES[3], width).jy).toBe(hopChoreography(FILES[3], WIDE).jy);
+      expect(hopChoreography(FILES[3], width).jy).toBe(
+        hopChoreography(FILES[3], WIDE).jy,
+      );
     }
   });
 
@@ -666,7 +745,12 @@ describe("hopChoreography", () => {
     // The hash walks the string, so an empty name, a very long one, and one full of
     // punctuation and non-ASCII all have to come out as ordinary numbers rather than as NaN
     // — a NaN would land in a CSS custom property and silently void the whole transform.
-    const awkward = ["", "/a", "/Users/e2e/Bryllup «Ø»/C0001 (kopi) [2].MP4", "x".repeat(4096)];
+    const awkward = [
+      "",
+      "/a",
+      "/Users/e2e/Bryllup «Ø»/C0001 (kopi) [2].MP4",
+      "x".repeat(4096),
+    ];
     for (const file of awkward) {
       const { delayMs, jx, jy } = hopChoreography(file, WIDE);
       expect(Number.isFinite(delayMs)).toBe(true);

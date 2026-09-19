@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { Strings } from "../../i18n";
 import { formatDuration } from "../../i18n";
 import {
@@ -109,7 +115,9 @@ export function PreviewPanel({
           <FileFacts t={t} entry={entry} recorded={recorded} />
           {actions}
           <div className="preview__sync">
-            {placement !== null && <SyncDetail t={t} clip={placement} minPsr={minPsr ?? 0} />}
+            {placement !== null && (
+              <SyncDetail t={t} clip={placement} minPsr={minPsr ?? 0} />
+            )}
             {/* The refusal, in the same half of the panel the placement would have used —
                 because it is the same question ("what did the run make of this file?") with
                 the other answer, and putting it anywhere else would be inviting the eye to
@@ -148,7 +156,10 @@ export function PreviewPanel({
 function EmptyInspector({ t }: { t: Strings }) {
   return (
     <div className="preview__empty">
-      <div className="preview__frame preview__frame--empty" aria-hidden="true" />
+      <div
+        className="preview__frame preview__frame--empty"
+        aria-hidden="true"
+      />
       <p className="preview__emptyline">{t.previewEmpty}</p>
       <p className="preview__emptyhint subtle">{t.previewEmptyHint}</p>
     </div>
@@ -177,10 +188,16 @@ function PreviewFrame({ t, entry }: { t: Strings; entry: FileEntry }) {
   /** The last frame this component fetched, tagged with the file it belongs to — so a
    *  bitmap that resolves after the selection moved on can never be drawn under the new
    *  clip's name. */
-  const [loaded, setLoaded] = useState<{ file: string; bitmap: ImageBitmap | null } | null>(null);
+  const [loaded, setLoaded] = useState<{
+    file: string;
+    bitmap: ImageBitmap | null;
+  } | null>(null);
 
-  const settled = hasFrame(file) ? { file, bitmap: peekFrame(file) ?? null } : null;
-  const shown = settled ?? (loaded !== null && loaded.file === file ? loaded : null);
+  const settled = hasFrame(file)
+    ? { file, bitmap: peekFrame(file) ?? null }
+    : null;
+  const shown =
+    settled ?? (loaded !== null && loaded.file === file ? loaded : null);
   const bitmap = shown?.bitmap ?? null;
 
   useEffect(() => {
@@ -341,7 +358,15 @@ function recordedWords(t: Strings, recorded: RecordingTime | null): string {
  * warnings. Same strings, same markup, same order: these are §9.4's, the owner reads them
  * every run, and a move is not a licence to reword.
  */
-function SyncDetail({ t, clip, minPsr }: { t: Strings; clip: Placement; minPsr: number }) {
+function SyncDetail({
+  t,
+  clip,
+  minPsr,
+}: {
+  t: Strings;
+  clip: Placement;
+  minPsr: number;
+}) {
   const provenance =
     clip.chain.length === 0
       ? t.directMatch
@@ -368,9 +393,12 @@ function SyncDetail({ t, clip, minPsr }: { t: Strings; clip: Placement; minPsr: 
         )}
       </dl>
       <p className="subtle">{provenance}</p>
-      {clip.projected_end_error_ms !== null && Math.abs(clip.projected_end_error_ms) >= 1 && (
-        <p className="subtle">{t.projectedEndError(clip.projected_end_error_ms)}</p>
-      )}
+      {clip.projected_end_error_ms !== null &&
+        Math.abs(clip.projected_end_error_ms) >= 1 && (
+          <p className="subtle">
+            {t.projectedEndError(clip.projected_end_error_ms)}
+          </p>
+        )}
       {clip.warnings.map((w, i) => (
         <p key={i} className="muted">
           {warningText(t, w)}

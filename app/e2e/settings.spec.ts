@@ -7,7 +7,9 @@ import { en } from "../src/i18n";
 // each test here checks BOTH the visible feedback and the actual storage write, not just
 // "the checkbox looks checked" (a pure UI change would pass that too).
 
-async function readSettings(page: import("@playwright/test").Page): Promise<Record<string, unknown>> {
+async function readSettings(
+  page: import("@playwright/test").Page,
+): Promise<Record<string, unknown>> {
   return page.evaluate(
     (key) => JSON.parse(window.localStorage.getItem(key) || "{}"),
     SETTINGS_KEY,
@@ -20,14 +22,18 @@ async function openSettings(page: import("@playwright/test").Page) {
 }
 
 test.describe("settings persistence", () => {
-  test("language selection persists and updates the document language", async ({ page }) => {
+  test("language selection persists and updates the document language", async ({
+    page,
+  }) => {
     await boot(page, { fixtures: BOOT_FIXTURES, settings: SETTLED_SETTINGS });
     await openSettings(page);
 
     await page.getByLabel(en.language).selectOption("nb");
 
     await expect.poll(() => readSettings(page).then((s) => s.lang)).toBe("nb");
-    await expect.poll(() => page.evaluate(() => document.documentElement.lang)).toBe("nb");
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.lang))
+      .toBe("nb");
   });
 
   test("the match-threshold field commits on blur, and rejects invalid input", async ({
@@ -54,10 +60,14 @@ test.describe("settings persistence", () => {
     await openSettings(page);
 
     await page.getByLabel(en.segmentCount).selectOption("7");
-    await expect.poll(() => readSettings(page).then((s) => s.segmentCount)).toBe(7);
+    await expect
+      .poll(() => readSettings(page).then((s) => s.segmentCount))
+      .toBe(7);
   });
 
-  test("the drift-correction toggle persists (on by default, D-042)", async ({ page }) => {
+  test("the drift-correction toggle persists (on by default, D-042)", async ({
+    page,
+  }) => {
     await boot(page, { fixtures: BOOT_FIXTURES, settings: SETTLED_SETTINGS });
     await openSettings(page);
 
@@ -65,7 +75,9 @@ test.describe("settings persistence", () => {
     await expect(toggle).toBeChecked();
 
     await toggle.uncheck();
-    await expect.poll(() => readSettings(page).then((s) => s.correctDrift)).toBe(false);
+    await expect
+      .poll(() => readSettings(page).then((s) => s.correctDrift))
+      .toBe(false);
   });
 
   test("the playback drift toggle persists and reaches the running engine (V03-S6)", async ({
@@ -78,7 +90,9 @@ test.describe("settings persistence", () => {
     await boot(page, { fixtures: BOOT_FIXTURES, settings: SETTLED_SETTINGS });
     await openSettings(page);
 
-    const toggle = page.getByRole("checkbox", { name: en.playbackDriftCorrect });
+    const toggle = page.getByRole("checkbox", {
+      name: en.playbackDriftCorrect,
+    });
     await expect(toggle).toBeChecked();
 
     await toggle.uncheck();
@@ -86,13 +100,17 @@ test.describe("settings persistence", () => {
       .poll(() => readSettings(page).then((s) => s.playbackDriftCorrected))
       .toBe(false);
     // The export's own switch is untouched.
-    await expect(page.getByRole("checkbox", { name: en.driftCorrect })).toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: en.driftCorrect }),
+    ).toBeChecked();
 
     // (That the RUNNING engine picks the change up without a restart is proved in
     // playback.spec.ts, where there is a schedule to look at.)
 
     await toggle.check();
-    await expect.poll(() => readSettings(page).then((s) => s.playbackDriftCorrected)).toBe(true);
+    await expect
+      .poll(() => readSettings(page).then((s) => s.playbackDriftCorrected))
+      .toBe(true);
   });
 
   test("a field--inline is the one-line row it names — in Settings and in the inspector", async ({
@@ -121,7 +139,10 @@ test.describe("settings persistence", () => {
     page,
   }) => {
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, enforce_cache_cap: { entries: 0, bytes: 0 } },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        enforce_cache_cap: { entries: 0, bytes: 0 },
+      },
       settings: SETTLED_SETTINGS,
     });
     await openSettings(page);
@@ -129,14 +150,20 @@ test.describe("settings persistence", () => {
     const cap = page.getByLabel(en.cacheCap);
     await cap.fill("500");
     await cap.blur();
-    await expect.poll(() => readSettings(page).then((s) => s.cacheCapMb)).toBe(500);
+    await expect
+      .poll(() => readSettings(page).then((s) => s.cacheCapMb))
+      .toBe(500);
 
     await cap.fill("");
     await cap.blur();
-    await expect.poll(() => readSettings(page).then((s) => s.cacheCapMb)).toBeNull();
+    await expect
+      .poll(() => readSettings(page).then((s) => s.cacheCapMb))
+      .toBeNull();
   });
 
-  test("values survive a full reload, not just a re-render", async ({ page }) => {
+  test("values survive a full reload, not just a re-render", async ({
+    page,
+  }) => {
     await boot(page, { fixtures: BOOT_FIXTURES, settings: SETTLED_SETTINGS });
     await openSettings(page);
 
@@ -144,14 +171,18 @@ test.describe("settings persistence", () => {
     const field = page.getByLabel(en.minPsr);
     await field.fill("12");
     await field.blur();
-    await expect.poll(() => readSettings(page).then((s) => s.correctDrift)).toBe(false);
+    await expect
+      .poll(() => readSettings(page).then((s) => s.correctDrift))
+      .toBe(false);
     await expect.poll(() => readSettings(page).then((s) => s.minPsr)).toBe(12);
 
     await page.reload();
     await page.locator(".app__header h1").waitFor();
     await openSettings(page);
 
-    await expect(page.getByRole("checkbox", { name: en.driftCorrect })).not.toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: en.driftCorrect }),
+    ).not.toBeChecked();
     await expect(page.getByLabel(en.minPsr)).toHaveValue("12");
   });
 });

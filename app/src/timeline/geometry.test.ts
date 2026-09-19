@@ -129,14 +129,18 @@ describe("the tick ladder never lets two labels touch", () => {
   });
 
   /** The narrowest gap between one label's right edge and the next label's line, in px. */
-  function tightestGapPx(v: TimelineView, originEpochMs: number | null = null): number {
+  function tightestGapPx(
+    v: TimelineView,
+    originEpochMs: number | null = null,
+  ): number {
     const interval = tickIntervalMs(v, 80, originEpochMs);
     const ticks = rulerTicks(v, 80, originEpochMs);
     let tightest = Number.POSITIVE_INFINITY;
     for (let i = 1; i < ticks.length; i++) {
       const label = tickLabel(ticks[i - 1], interval, originEpochMs);
       const gap =
-        msToX(ticks[i], v) - (msToX(ticks[i - 1], v) + 4 + label.length * TICK_CHAR_PX);
+        msToX(ticks[i], v) -
+        (msToX(ticks[i - 1], v) + 4 + label.length * TICK_CHAR_PX);
       tightest = Math.min(tightest, gap);
     }
     return tightest;
@@ -153,7 +157,11 @@ describe("the tick ladder never lets two labels touch", () => {
   it("keeps clear space at every rung, from milliseconds to half a day", () => {
     // A sweep rather than a handful of points: the ladder is only as good as its worst rung,
     // and a boundary is exactly where an off-by-one in the admission rule hides.
-    for (let pxPerMs = MIN_PX_PER_MS; pxPerMs <= MAX_PX_PER_MS; pxPerMs *= 1.3) {
+    for (
+      let pxPerMs = MIN_PX_PER_MS;
+      pxPerMs <= MAX_PX_PER_MS;
+      pxPerMs *= 1.3
+    ) {
       const v: TimelineView = { pxPerMs, scrollMs: 0, widthPx: LANE_PX };
       expect(tightestGapPx(v), `pxPerMs ${pxPerMs}`).toBeGreaterThan(0);
     }
@@ -165,14 +173,21 @@ describe("the tick ladder never lets two labels touch", () => {
     expect(tickIntervalMs(fitted(18 * HOUR), 80)).toBeGreaterThan(HOUR);
     // …and the top of the ladder is enough for the zoom floor: at ~20 h nothing above 12 h
     // is ever needed.
-    expect(tickIntervalMs({ pxPerMs: MIN_PX_PER_MS, scrollMs: 0, widthPx: LANE_PX }, 80))
-      .toBeLessThanOrEqual(12 * HOUR);
+    expect(
+      tickIntervalMs(
+        { pxPerMs: MIN_PX_PER_MS, scrollMs: 0, widthPx: LANE_PX },
+        80,
+      ),
+    ).toBeLessThanOrEqual(12 * HOUR);
   });
 
   it("still climbs monotonically as the view zooms out", () => {
     let previous = 0;
     for (let pxPerMs = MAX_PX_PER_MS; pxPerMs >= MIN_PX_PER_MS; pxPerMs /= 2) {
-      const interval = tickIntervalMs({ pxPerMs, scrollMs: 0, widthPx: LANE_PX }, 80);
+      const interval = tickIntervalMs(
+        { pxPerMs, scrollMs: 0, widthPx: LANE_PX },
+        80,
+      );
       expect(interval).toBeGreaterThanOrEqual(previous);
       previous = interval;
     }
@@ -183,7 +198,10 @@ describe("the tick ladder never lets two labels touch", () => {
     // is allowed to be finer here — but never crowded.
     const origin = Date.parse("2026-08-15T06:00:00.000Z");
     for (const hours of [6, 18, 20]) {
-      expect(tightestGapPx(fitted(hours * HOUR), origin), `${hours} h wall clock`).toBeGreaterThan(0);
+      expect(
+        tightestGapPx(fitted(hours * HOUR), origin),
+        `${hours} h wall clock`,
+      ).toBeGreaterThan(0);
     }
   });
 });

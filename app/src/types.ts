@@ -10,10 +10,7 @@
 export type DeviceKind = "video" | "audio";
 
 export type UnsyncedReason =
-  | "low_confidence"
-  | "no_audio"
-  | "decode_error"
-  | "device_overlap";
+  "low_confidence" | "no_audio" | "decode_error" | "device_overlap";
 
 export type Warning =
   | { code: "metadata_mismatch"; delta_seconds: number }

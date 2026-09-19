@@ -84,15 +84,23 @@ export function controlled(name: string): unknown {
 /** Waits until `controlled(name)` has actually been invoked (its promise is parked). */
 export async function waitForPending(page: Page, name: string): Promise<void> {
   await page.waitForFunction(
-    (n) => !!(window as unknown as Record<string, any>).__SUNDAYSYNC_PENDING__?.[n],
+    (n) =>
+      !!(window as unknown as Record<string, any>).__SUNDAYSYNC_PENDING__?.[n],
     name,
   );
 }
 
 /** Resolves a `controlled(name)` fixture's promise from the test side. */
-export async function resolveControlled(page: Page, name: string, value: unknown): Promise<void> {
+export async function resolveControlled(
+  page: Page,
+  name: string,
+  value: unknown,
+): Promise<void> {
   await page.evaluate(
-    ([n, v]) => (window as unknown as Record<string, any>).__SUNDAYSYNC_PENDING__[n as string].resolve(v),
+    ([n, v]) =>
+      (window as unknown as Record<string, any>).__SUNDAYSYNC_PENDING__[
+        n as string
+      ].resolve(v),
     [name, value] as const,
   );
 }
@@ -106,10 +114,16 @@ export async function resolveControlled(page: Page, name: string, value: unknown
  * one of those checks (`String(new Error("cancelled"))` is `"Error: cancelled"`, which
  * does not start with `"cancelled"`).
  */
-export async function rejectControlled(page: Page, name: string, message: string): Promise<void> {
+export async function rejectControlled(
+  page: Page,
+  name: string,
+  message: string,
+): Promise<void> {
   await page.evaluate(
     ([n, m]) =>
-      (window as unknown as Record<string, any>).__SUNDAYSYNC_PENDING__[n as string].reject(m),
+      (window as unknown as Record<string, any>).__SUNDAYSYNC_PENDING__[
+        n as string
+      ].reject(m),
     [name, message] as const,
   );
 }
@@ -119,9 +133,14 @@ export async function rejectControlled(page: Page, name: string, message: string
  * hand on the "backend" side of `listen()`/`onDragDropEvent()`. Mirrors the payload shape
  * `event.js`'s `listen()` hands to a handler: `{ event, id, payload }`.
  */
-export async function emit(page: Page, name: string, payload: unknown): Promise<void> {
+export async function emit(
+  page: Page,
+  name: string,
+  payload: unknown,
+): Promise<void> {
   await page.evaluate(
-    ([n, p]) => (window as unknown as Record<string, any>).__SUNDAYSYNC_EMIT__(n, p),
+    ([n, p]) =>
+      (window as unknown as Record<string, any>).__SUNDAYSYNC_EMIT__(n, p),
     [name, payload] as const,
   );
 }
@@ -142,7 +161,9 @@ export async function emit(page: Page, name: string, payload: unknown): Promise<
  * `reducedMotion: "reduce"` the attribute is never set at all and this costs nothing.
  */
 export async function waitForResult(page: Page): Promise<void> {
-  await expect(page.getByRole("button", { name: en.exportButton })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: en.exportButton }),
+  ).toBeVisible();
   await expect(page.locator(".timeline")).not.toHaveAttribute("data-hop", /.*/);
 }
 
@@ -188,7 +209,10 @@ export async function boot(page: Page, opts: BootOptions = {}): Promise<void> {
       /** event name -> the set of transformCallback ids subscribed to it. */
       const eventListeners = new Map<string, Set<number>>();
       /** eventId (returned to the caller of `plugin:event|listen`) -> what to remove. */
-      const subscriptions = new Map<number, { event: string; handler: number }>();
+      const subscriptions = new Map<
+        number,
+        { event: string; handler: number }
+      >();
 
       w.__TAURI_INTERNALS__ = {
         transformCallback(cb: (payload: unknown) => void) {
@@ -201,7 +225,10 @@ export async function boot(page: Page, opts: BootOptions = {}): Promise<void> {
         },
         invoke(cmd: string, args: unknown) {
           if (cmd === "plugin:event|listen") {
-            const { event, handler } = args as { event: string; handler: number };
+            const { event, handler } = args as {
+              event: string;
+              handler: number;
+            };
             let set = eventListeners.get(event);
             if (!set) {
               set = new Set();
@@ -222,7 +249,10 @@ export async function boot(page: Page, opts: BootOptions = {}): Promise<void> {
             return Promise.resolve(undefined);
           }
 
-          const map = (w.__SUNDAYSYNC_FIXTURES__ ?? {}) as Record<string, unknown>;
+          const map = (w.__SUNDAYSYNC_FIXTURES__ ?? {}) as Record<
+            string,
+            unknown
+          >;
           if (cmd in map) {
             try {
               const value = map[cmd];
@@ -234,7 +264,9 @@ export async function boot(page: Page, opts: BootOptions = {}): Promise<void> {
           }
           // No fixture: fail LOUD and distinguishably, rather than hanging the caller on
           // an unresolved promise that looks like a stuck screen.
-          return Promise.reject(new Error(`no Tauri backend in the browser tier: ${cmd}`));
+          return Promise.reject(
+            new Error(`no Tauri backend in the browser tier: ${cmd}`),
+          );
         },
         // Real Tauri hands back an `asset://`/`http://asset.localhost` URL. Nothing in
         // SundaySync's UI renders one as media, so this only has to be a harmless string.
@@ -249,13 +281,15 @@ export async function boot(page: Page, opts: BootOptions = {}): Promise<void> {
 
       // The harness's hand on the "backend" side of every `listen()`/`onDragDropEvent()`
       // subscription — see `emit()` above.
-      (w as Record<string, unknown>).__SUNDAYSYNC_EMIT__ = (name: string, evPayload: unknown) => {
+      (w as Record<string, unknown>).__SUNDAYSYNC_EMIT__ = (
+        name: string,
+        evPayload: unknown,
+      ) => {
         const ids = eventListeners.get(name);
         if (!ids) return;
         for (const id of ids) {
           const cb = (w as Record<string, unknown>)[`_${id}`] as
-            | ((payload: unknown) => void)
-            | undefined;
+            ((payload: unknown) => void) | undefined;
           cb?.({ event: name, id, payload: evPayload });
         }
       };
@@ -266,8 +300,14 @@ export async function boot(page: Page, opts: BootOptions = {}): Promise<void> {
       // Revive at install time (SundayRec's pattern): a `fn()` marker becomes a real
       // function once, here, rather than being reconstructed on every single invoke.
       if (value && typeof value === "object" && p.marker in (value as object)) {
-        map[cmd] = new Function(`return (${(value as Record<string, unknown>)[p.marker]})`)();
-      } else if (value && typeof value === "object" && p.voidMarker in (value as object)) {
+        map[cmd] = new Function(
+          `return (${(value as Record<string, unknown>)[p.marker]})`,
+        )();
+      } else if (
+        value &&
+        typeof value === "object" &&
+        p.voidMarker in (value as object)
+      ) {
         map[cmd] = () => undefined;
       } else {
         map[cmd] = value;
@@ -279,7 +319,8 @@ export async function boot(page: Page, opts: BootOptions = {}): Promise<void> {
 
     if (window.localStorage.getItem(p.seedOnce)) return;
     window.localStorage.setItem(p.seedOnce, "1");
-    if (p.settings) window.localStorage.setItem(p.key, JSON.stringify(p.settings));
+    if (p.settings)
+      window.localStorage.setItem(p.key, JSON.stringify(p.settings));
     else window.localStorage.removeItem(p.key);
   }, payload);
 
@@ -304,8 +345,15 @@ export const SETTLED_SETTINGS = { onboardingDone: true, lang: "en" as const };
  * Spread this and override the handful a given journey is actually about.
  */
 export const BOOT_FIXTURES: Fixtures = {
-  check_sidecar: { source: "bundled", path: "/Applications/SundaySync.app/Contents/MacOS/ffmpeg" },
-  cache_status: { dir: "/Users/e2e/Library/Caches/SundaySync", entries: 0, bytes: 0 },
+  check_sidecar: {
+    source: "bundled",
+    path: "/Applications/SundaySync.app/Contents/MacOS/ffmpeg",
+  },
+  cache_status: {
+    dir: "/Users/e2e/Library/Caches/SundaySync",
+    entries: 0,
+    bytes: 0,
+  },
   "plugin:dialog|open": null,
   "plugin:dialog|save": null,
   "plugin:opener|reveal_item_in_dir": VOID,
@@ -320,7 +368,12 @@ export const BOOT_FIXTURES: Fixtures = {
   cancel_prewarm: VOID,
   // `consentVersion` non-null means "already answered" — keeps the one-time
   // ConsentCard from popping up unbidden in specs that are not about consent.
-  telemetry_status: { consentVersion: 1, granted: false, hasInstallId: true, queued: 0 },
+  telemetry_status: {
+    consentVersion: 1,
+    granted: false,
+    hasInstallId: true,
+    queued: 0,
+  },
   // V05-W4b (D-070): marking a clip asks for its picture. Answered here with a real frame so
   // a spec that merely clicks a clip on its way to something else never has to think about
   // it; `preview.spec.ts` overrides these to test the other two states.
@@ -477,7 +530,9 @@ export async function resolveFrame(page: Page): Promise<void> {
 /** Every file `video_frame` was asked for, in order. */
 export async function frameCalls(page: Page): Promise<string[]> {
   return page.evaluate(
-    () => ((window as unknown as Record<string, unknown>).__E2E_FRAME_CALLS__ as string[]) ?? [],
+    () =>
+      ((window as unknown as Record<string, unknown>)
+        .__E2E_FRAME_CALLS__ as string[]) ?? [],
   );
 }
 
@@ -515,12 +570,24 @@ export function consentSetSpy(): Fixtures {
 // asserted stable on the Rust side by scan_manifest_serde_spelling_is_stable and
 // unsynced_reasons_match_the_plan_spelling).
 
-export function scanManifest(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+export function scanManifest(
+  over: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
   return {
     schema: 1,
     devices: [
-      { id: "rec", label: "Zoom recorder", kind: "audio", files: ["/Users/e2e/shoot/ZOOM0001.WAV"] },
-      { id: "cam-a", label: "Camera A", kind: "video", files: ["/Users/e2e/shoot/CamA/C0001.MP4"] },
+      {
+        id: "rec",
+        label: "Zoom recorder",
+        kind: "audio",
+        files: ["/Users/e2e/shoot/ZOOM0001.WAV"],
+      },
+      {
+        id: "cam-a",
+        label: "Camera A",
+        kind: "video",
+        files: ["/Users/e2e/shoot/CamA/C0001.MP4"],
+      },
     ],
     files: [
       {
@@ -568,9 +635,24 @@ export function presyncScanManifest(): Record<string, unknown> {
   return {
     schema: 1,
     devices: [
-      { id: "rec", label: "Zoom recorder", kind: "audio", files: ["/Users/e2e/shoot/ZOOM0001.WAV"] },
-      { id: "cam-a", label: "Camera A", kind: "video", files: ["/Users/e2e/shoot/CamA/C0001.MP4"] },
-      { id: "cam-b", label: "Camera B", kind: "video", files: ["/Users/e2e/shoot/CamB/C0002.MP4"] },
+      {
+        id: "rec",
+        label: "Zoom recorder",
+        kind: "audio",
+        files: ["/Users/e2e/shoot/ZOOM0001.WAV"],
+      },
+      {
+        id: "cam-a",
+        label: "Camera A",
+        kind: "video",
+        files: ["/Users/e2e/shoot/CamA/C0001.MP4"],
+      },
+      {
+        id: "cam-b",
+        label: "Camera B",
+        kind: "video",
+        files: ["/Users/e2e/shoot/CamB/C0002.MP4"],
+      },
     ],
     files: [
       {
@@ -667,7 +749,11 @@ export function ladderScanManifest(): Record<string, unknown> {
       modified_time: "2026-07-25T12:12:08Z",
     }),
     // Nothing at all — the file that can only be laid out in filename order (D-068).
-    media({ file: `${base}/JOHNNY/MUSIC_01.WAV`, device: "johnny", duration_seconds: 300 }),
+    media({
+      file: `${base}/JOHNNY/MUSIC_01.WAV`,
+      device: "johnny",
+      duration_seconds: 300,
+    }),
     // A recorder whose clock was never set: a real timestamp, from 2020 (D-071).
     media({
       file: `${base}/F2/200101_001.WAV`,
@@ -703,15 +789,27 @@ export function ladderScanManifest(): Record<string, unknown> {
   return { schema: 1, devices, files, unsynced: [], skipped: [] };
 }
 
-export function syncOutcome(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+export function syncOutcome(
+  over: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
   return {
     result: {
       schema: 1,
       parameters: { analysis_rate: 12000, min_psr: 15 },
       reference: { file: "/Users/e2e/shoot/ZOOM0001.WAV", device: "rec" },
       devices: [
-        { id: "rec", label: "Zoom recorder", kind: "audio", files: ["/Users/e2e/shoot/ZOOM0001.WAV"] },
-        { id: "cam-a", label: "Camera A", kind: "video", files: ["/Users/e2e/shoot/CamA/C0001.MP4"] },
+        {
+          id: "rec",
+          label: "Zoom recorder",
+          kind: "audio",
+          files: ["/Users/e2e/shoot/ZOOM0001.WAV"],
+        },
+        {
+          id: "cam-a",
+          label: "Camera A",
+          kind: "video",
+          files: ["/Users/e2e/shoot/CamA/C0001.MP4"],
+        },
       ],
       placements: [
         // The REFERENCE, placed at zero — which is what the engine actually does

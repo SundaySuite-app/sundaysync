@@ -83,7 +83,8 @@ export const nb = {
   unsyncedTitle: "Ikke synkronisert",
   reference: "Referanse",
   staleResult: "Kildene er endret siden forrige synkronisering.",
-  sequenceMeta: (fps: string, duration: string) => `${fps} bilder/sek · ${duration}`,
+  sequenceMeta: (fps: string, duration: string) =>
+    `${fps} bilder/sek · ${duration}`,
   offsetLabel: "Posisjon",
   confidence: "Sikkerhet",
   driftLabel: "Drift",
@@ -164,7 +165,8 @@ export const nb = {
     offSession: number;
   }) => {
     const parts: string[] = [];
-    if (counts.placed > 0) parts.push(`${counts.placed} plassert fra tidsstempel`);
+    if (counts.placed > 0)
+      parts.push(`${counts.placed} plassert fra tidsstempel`);
     if (counts.estimated > 0) parts.push(`${counts.estimated} anslått`);
     if (counts.ordered > 0) parts.push(`${counts.ordered} bare rekkefølge`);
     if (counts.offSession > 0) parts.push(`${counts.offSession} utenfor økta`);
@@ -192,7 +194,9 @@ export const nb = {
   // igjen «juni-dronemappa» øyeblikkelig, men ikke «14 filer».
   presyncOffSession: (n: number, days: string[]) => {
     const when =
-      days.length <= 2 ? days.join(" og ") : `${days.slice(0, 2).join(", ")} og ${days.length - 2} andre datoer`;
+      days.length <= 2
+        ? days.join(" og ")
+        : `${days.slice(0, 2).join(", ")} og ${days.length - 2} andre datoer`;
     return n === 1
       ? `1 fil er tidsstemplet ${when}, utenfor denne økta, og er ikke plassert etter klokka.`
       : `${n} filer er tidsstemplet ${when}, utenfor denne økta, og er ikke plassert etter klokka.`;
@@ -226,11 +230,22 @@ export const nb = {
   previewAudio: "Lyd",
   previewNone: "—",
   previewRecorded: "Opptak",
-  previewVideoStream: (codec: string, w: number, h: number, fps: string | null) =>
-    fps === null ? `${codec} · ${w}×${h}` : `${codec} · ${w}×${h} · ${fps} bilder/sek`,
+  previewVideoStream: (
+    codec: string,
+    w: number,
+    h: number,
+    fps: string | null,
+  ) =>
+    fps === null
+      ? `${codec} · ${w}×${h}`
+      : `${codec} · ${w}×${h} · ${fps} bilder/sek`,
   previewAudioStream: (codec: string, rate: number, channels: number) =>
     `${codec} · ${(rate / 1000).toFixed(rate % 1000 === 0 ? 0 : 1)} kHz · ${
-      channels === 1 ? "mono" : channels === 2 ? "stereo" : `${channels} kanaler`
+      channels === 1
+        ? "mono"
+        : channels === 2
+          ? "stereo"
+          : `${channels} kanaler`
     }`,
   /** dd.mm.åååå hh:mm:ss — samme håndlagde format som `presyncDay`, uten Intl, så det er
    *  likt i test og i app. */
@@ -261,7 +276,8 @@ export const nb = {
   volumeAria: "Volum",
   // Sets the expectation before the first press: this is the 12 kHz mono audio the
   // correlator listened to, not a mix. It is meant to prove alignment, nothing else.
-  playbackQualityNote: "Lyd for kontroll av synk (12 kHz analyselyd) — ikke eksportkvalitet",
+  playbackQualityNote:
+    "Lyd for kontroll av synk (12 kHz analyselyd) — ikke eksportkvalitet",
   muteDevice: (name: string) => `Demp ${name}`,
   unmuteDevice: (name: string) => `Opphev demping av ${name}`,
   soloDevice: (name: string) => `Solo ${name}`,
@@ -283,7 +299,8 @@ export const nb = {
   // er nøyaktig det rommet ikke skal ha. Tallet står på topplinja ved siden av problemfilene
   // — samme spørsmål, samme sted — og selve setningene henger bak det.
   warningsCount: (n: number) => (n === 1 ? "1 advarsel" : `${n} advarsler`),
-  metadataMismatch: "Tidsstempelet i fila stemmer ikke med lyden. Lyden er lagt til grunn.",
+  metadataMismatch:
+    "Tidsstempelet i fila stemmer ikke med lyden. Lyden er lagt til grunn.",
   mixedFps: "Klippene har ulik bildefrekvens.",
   frameSnap: "Plasseringen er rundet til nærmeste bilde.",
 
@@ -297,7 +314,8 @@ export const nb = {
   exportButton: "Eksporter til DaVinci Resolve",
   exportHint:
     "Dra mediefilene inn i Resolves mediemappe (Media Pool) FØRST. Bruk deretter Fil → Importer → Tidslinje for å hente fila — da matcher Resolve mot de allerede importerte klippene, noe som er nødvendig for store filer.",
-  exported: (n: number) => (n === 1 ? "Eksporterte 1 klipp" : `Eksporterte ${n} klipp`),
+  exported: (n: number) =>
+    n === 1 ? "Eksporterte 1 klipp" : `Eksporterte ${n} klipp`,
   /** Kvitteringa på stripa (V06-G3, D-092 ⑤). Ett ord, fordi det som er verdt å lese er
    *  FILNAVNET ved siden av det: «hva heter det du nettopp lagde». Resolve-instruksjonen som
    *  lå i samme boble ligger på `title` og i `docs/KNOWN_LIMITATIONS.md`. */
@@ -346,10 +364,12 @@ export const nb = {
     "Klipp under terskelen rapporteres som ikke synkronisert i stedet for å plasseres på slump.",
   minPsrInvalid: "Må være et tall over 0, eller tomt for standard.",
   segmentCount: "Segmenter per klipp",
-  segmentCountHint: "Flere segmenter gir sikrere driftmåling på lange klipp, men tar lengre tid.",
+  segmentCountHint:
+    "Flere segmenter gir sikrere driftmåling på lange klipp, men tar lengre tid.",
   segmentDefault: "5 (standard)",
   driftCorrect: "Korriger klokkedrift",
-  driftCorrectHint: "Skrives som en skånsom retiming i FCPXML-en — mediefilene dine røres ikke.",
+  driftCorrectHint:
+    "Skrives som en skånsom retiming i FCPXML-en — mediefilene dine røres ikke.",
   // V03-S6: S5 la til innstillingen, denne økta gir den en bryter. Egen fra eksport-
   // korreksjonen med vilje (D-055) — å høre forskjellen er hele poenget.
   playbackDriftCorrect: "Driftkorreksjon ved avspilling",
@@ -360,14 +380,19 @@ export const nb = {
     "Ca. 170 MB per time lyd; oppføringer som ikke er brukt på 90 dager ryddes automatisk ved oppstart.",
   cachePick: "Velg mappe",
   cacheUsage: (entries: number, size: string) =>
-    entries === 1 ? `1 oppføring · ${size}` : `${entries} oppføringer · ${size}`,
+    entries === 1
+      ? `1 oppføring · ${size}`
+      : `${entries} oppføringer · ${size}`,
   cacheClear: "Tøm buffer",
-  cacheClearConfirm: "Tømme bufferen? Neste synkronisering må analysere alt på nytt.",
+  cacheClearConfirm:
+    "Tømme bufferen? Neste synkronisering må analysere alt på nytt.",
   cacheCleared: (size: string) => `Frigjorde ${size}.`,
   cacheCap: "Størrelsestak (MB)",
   cacheCapOff: "Av",
-  cacheCapHint: "De eldst brukte oppføringene fjernes så snart bufferen overstiger taket.",
-  cacheCapError: "Skriv inn et positivt tall, eller la feltet stå tomt for å slå av.",
+  cacheCapHint:
+    "De eldst brukte oppføringene fjernes så snart bufferen overstiger taket.",
+  cacheCapError:
+    "Skriv inn et positivt tall, eller la feltet stå tomt for å slå av.",
   cacheEvicted: (entries: number, size: string) =>
     entries === 1
       ? `Fjernet 1 oppføring · frigjorde ${size}.`
@@ -437,14 +462,17 @@ export const nb = {
   telemetryPreviewEmpty: "Ingenting å vise ennå.",
   telemetryShowConsent: "Vis samtykketeksten igjen",
   telemetryDelete: "Slett mine data",
-  telemetryDeleteConfirm: "Be om at all telemetridata for denne installasjonen slettes?",
+  telemetryDeleteConfirm:
+    "Be om at all telemetridata for denne installasjonen slettes?",
   telemetryDeleted: "Forespørsel sendt — dataene slettes.",
-  telemetryDeleteFailed: "Kunne ikke sende sletteforespørsel. Prøv igjen senere.",
+  telemetryDeleteFailed:
+    "Kunne ikke sende sletteforespørsel. Prøv igjen senere.",
 
   // Settings — System / oppdateringer (E9)
   systemTitle: "System",
   betaChannelLabel: "Få betaversjoner",
-  betaChannelHint: "Tidlige testversjoner før de slippes til alle. De kan være mindre stabile.",
+  betaChannelHint:
+    "Tidlige testversjoner før de slippes til alle. De kan være mindre stabile.",
   updateCheck: "Se etter oppdatering",
   updateDownload: (version: string) => `Last ned og installer ${version}`,
   updateRestart: "Start på nytt og installer",
@@ -468,8 +496,10 @@ export const nb = {
   // av seg i lista, så et lydløst hopp ville se ut som at filer forsvant.
   skippedSummary: (sidecars: number, stills: number) => {
     const parts: string[] = [];
-    if (sidecars > 0) parts.push(sidecars === 1 ? "1 følgefil" : `${sidecars} følgefiler`);
-    if (stills > 0) parts.push(stills === 1 ? "1 stillbilde" : `${stills} stillbilder`);
+    if (sidecars > 0)
+      parts.push(sidecars === 1 ? "1 følgefil" : `${sidecars} følgefiler`);
+    if (stills > 0)
+      parts.push(stills === 1 ? "1 stillbilde" : `${stills} stillbilder`);
     return `${parts.join(" og ")} ble hoppet over`;
   },
   skippedReason: (reason: "sidecar" | "still_image"): string =>
@@ -499,7 +529,8 @@ export const en: Strings = {
   scanningInputs: "Reading the sources …",
   fileCount: (n: number) => (n === 1 ? "1 file" : `${n} files`),
   deviceCount: (n: number) => (n === 1 ? "1 device" : `${n} devices`),
-  problemCount: (n: number) => (n === 1 ? "1 problem file" : `${n} problem files`),
+  problemCount: (n: number) =>
+    n === 1 ? "1 problem file" : `${n} problem files`,
   deviceLabel: (id: string, label: string) =>
     id.startsWith("folder-") ? `Folder: ${label}` : label,
   moveToDevice: "Move to device",
@@ -588,10 +619,13 @@ export const en: Strings = {
     offSession: number;
   }) => {
     const parts: string[] = [];
-    if (counts.placed > 0) parts.push(`${counts.placed} placed from a timestamp`);
+    if (counts.placed > 0)
+      parts.push(`${counts.placed} placed from a timestamp`);
     if (counts.estimated > 0) parts.push(`${counts.estimated} estimated`);
-    if (counts.ordered > 0) parts.push(`${counts.ordered} in filename order only`);
-    if (counts.offSession > 0) parts.push(`${counts.offSession} outside this session`);
+    if (counts.ordered > 0)
+      parts.push(`${counts.ordered} in filename order only`);
+    if (counts.offSession > 0)
+      parts.push(`${counts.offSession} outside this session`);
     return `${parts.join(" · ")}.`;
   },
   // V06-R2b (D-083) — see the nb comment above.
@@ -610,7 +644,9 @@ export const en: Strings = {
   },
   presyncOffSession: (n: number, days: string[]) => {
     const when =
-      days.length <= 2 ? days.join(" and ") : `${days.slice(0, 2).join(", ")} and ${days.length - 2} other dates`;
+      days.length <= 2
+        ? days.join(" and ")
+        : `${days.slice(0, 2).join(", ")} and ${days.length - 2} other dates`;
     return n === 1
       ? `1 file is timestamped ${when}, outside this session, and is not placed by the clock.`
       : `${n} files are timestamped ${when}, outside this session, and are not placed by the clock.`;
@@ -628,7 +664,8 @@ export const en: Strings = {
   previewEmpty: "Select a clip to see it.",
   // V06-G3 (D-092 ⑥) — see the nb comment above.
   previewSection: "Inspector",
-  previewEmptyHint: "Picture, file facts and sync detail for whichever clip you mark.",
+  previewEmptyHint:
+    "Picture, file facts and sync detail for whichever clip you mark.",
   previewLoading: "Fetching picture …",
   previewNoImage: "No picture",
   previewFrameAlt: (name: string) => `Still frame from ${name}`,
@@ -637,11 +674,20 @@ export const en: Strings = {
   previewAudio: "Audio",
   previewNone: "—",
   previewRecorded: "Recorded",
-  previewVideoStream: (codec: string, w: number, h: number, fps: string | null) =>
+  previewVideoStream: (
+    codec: string,
+    w: number,
+    h: number,
+    fps: string | null,
+  ) =>
     fps === null ? `${codec} · ${w}×${h}` : `${codec} · ${w}×${h} · ${fps} fps`,
   previewAudioStream: (codec: string, rate: number, channels: number) =>
     `${codec} · ${(rate / 1000).toFixed(rate % 1000 === 0 ? 0 : 1)} kHz · ${
-      channels === 1 ? "mono" : channels === 2 ? "stereo" : `${channels} channels`
+      channels === 1
+        ? "mono"
+        : channels === 2
+          ? "stereo"
+          : `${channels} channels`
     }`,
   /** `yyyy-mm-dd hh:mm:ss` — the unambiguous English form, no Intl, same as `presyncDay`. */
   previewClock: (ms: number) => {
@@ -667,7 +713,8 @@ export const en: Strings = {
   stopPlayback: "Stop and return to the start",
   buffering: "Loading audio …",
   volumeAria: "Volume",
-  playbackQualityNote: "Audio for checking sync (12 kHz analysis audio) — not export quality",
+  playbackQualityNote:
+    "Audio for checking sync (12 kHz analysis audio) — not export quality",
   muteDevice: (name: string) => `Mute ${name}`,
   unmuteDevice: (name: string) => `Unmute ${name}`,
   soloDevice: (name: string) => `Solo ${name}`,
@@ -684,7 +731,8 @@ export const en: Strings = {
     `This clip drifts ${Math.abs(ms).toFixed(0)} ms over its length. It is corrected automatically on export (toggle in Settings).`,
   // V06-R2b (D-083) — see the nb comment above.
   warningsCount: (n: number) => (n === 1 ? "1 warning" : `${n} warnings`),
-  metadataMismatch: "The file's timestamp disagrees with the audio. The audio was trusted.",
+  metadataMismatch:
+    "The file's timestamp disagrees with the audio. The audio was trusted.",
   mixedFps: "The clips have different frame rates.",
   frameSnap: "The placement was rounded to the nearest frame.",
 
@@ -696,7 +744,8 @@ export const en: Strings = {
   exportButton: "Export to DaVinci Resolve",
   exportHint:
     "Drag the media files into Resolve's Media Pool FIRST. Then use File → Import → Timeline to bring in the file — Resolve then matches against the already-imported clips, which is required for large files.",
-  exported: (n: number) => (n === 1 ? "Exported 1 clip" : `Exported ${n} clips`),
+  exported: (n: number) =>
+    n === 1 ? "Exported 1 clip" : `Exported ${n} clips`,
   // V06-G3 (D-092 ⑤) — see the nb comment above.
   exportedShort: "Exported",
   projectName: "Project name",
@@ -708,10 +757,12 @@ export const en: Strings = {
   errIo: (path: string) => `Could not read ${path}.`,
   errInvariant: (detail: string) =>
     `Internal error — this is a bug in the app, not a problem with your files. (${detail})`,
-  errUnknown: (raw: string) => `Something went wrong. The engine says: “${raw}”`,
+  errUnknown: (raw: string) =>
+    `Something went wrong. The engine says: “${raw}”`,
   errBusySync: "Just a moment — a sync is running.",
   errBusyMaintenance: "Just a moment — the cache is being tidied.",
-  errBusyPrewarm: "Just a moment — the audio is being analysed in the background.",
+  errBusyPrewarm:
+    "Just a moment — the audio is being analysed in the background.",
   errBusy: "Just a moment — the app is busy with something else.",
   errTooManyFiles: (limit: string) =>
     `Too many files here (the limit is ${limit}). Drop in the folder with the shoot, not a whole disk.`,
@@ -736,10 +787,12 @@ export const en: Strings = {
     "Clips below the threshold are reported as not synced rather than placed on a guess.",
   minPsrInvalid: "Must be a number above 0, or empty for the default.",
   segmentCount: "Segments per clip",
-  segmentCountHint: "More segments give a more reliable drift measurement on long clips, but take longer.",
+  segmentCountHint:
+    "More segments give a more reliable drift measurement on long clips, but take longer.",
   segmentDefault: "5 (default)",
   driftCorrect: "Correct clock drift",
-  driftCorrectHint: "Written as a gentle retime into the FCPXML — your media files are not touched.",
+  driftCorrectHint:
+    "Written as a gentle retime into the FCPXML — your media files are not touched.",
   // V03-S6 — see the nb comment above.
   playbackDriftCorrect: "Drift correction during playback",
   playbackDriftCorrectHint:
@@ -751,14 +804,19 @@ export const en: Strings = {
   cacheUsage: (entries: number, size: string) =>
     entries === 1 ? `1 entry · ${size}` : `${entries} entries · ${size}`,
   cacheClear: "Clear cache",
-  cacheClearConfirm: "Clear the cache? The next sync will have to analyse everything again.",
+  cacheClearConfirm:
+    "Clear the cache? The next sync will have to analyse everything again.",
   cacheCleared: (size: string) => `Freed ${size}.`,
   cacheCap: "Size cap (MB)",
   cacheCapOff: "Off",
-  cacheCapHint: "The least-recently-used entries are removed as soon as the cache exceeds the cap.",
-  cacheCapError: "Enter a positive number, or leave the field empty to turn it off.",
+  cacheCapHint:
+    "The least-recently-used entries are removed as soon as the cache exceeds the cap.",
+  cacheCapError:
+    "Enter a positive number, or leave the field empty to turn it off.",
   cacheEvicted: (entries: number, size: string) =>
-    entries === 1 ? `Removed 1 entry · freed ${size}.` : `Removed ${entries} entries · freed ${size}.`,
+    entries === 1
+      ? `Removed 1 entry · freed ${size}.`
+      : `Removed ${entries} entries · freed ${size}.`,
   showOnboarding: "Show the introduction again",
   diagnostics: "Export diagnostics",
   diagnosticsHint: "Contains the log and result — no media files.",
@@ -821,14 +879,17 @@ export const en: Strings = {
   telemetryPreviewEmpty: "Nothing to show yet.",
   telemetryShowConsent: "Show the consent text again",
   telemetryDelete: "Delete my data",
-  telemetryDeleteConfirm: "Ask for all telemetry data for this installation to be deleted?",
+  telemetryDeleteConfirm:
+    "Ask for all telemetry data for this installation to be deleted?",
   telemetryDeleted: "Request sent — the data will be deleted.",
-  telemetryDeleteFailed: "Could not send the deletion request. Try again later.",
+  telemetryDeleteFailed:
+    "Could not send the deletion request. Try again later.",
 
   // Settings — System / updates (E9)
   systemTitle: "System",
   betaChannelLabel: "Receive beta versions",
-  betaChannelHint: "Early test builds before they reach everyone. They may be less stable.",
+  betaChannelHint:
+    "Early test builds before they reach everyone. They may be less stable.",
   updateCheck: "Check for updates",
   updateDownload: (version: string) => `Download and install ${version}`,
   updateRestart: "Restart and install",
@@ -837,7 +898,8 @@ export const en: Strings = {
   updateUpToDate: "You are on the latest version.",
   updateAvailable: (version: string) => `New version available: ${version}.`,
   updateDownloading: (percent: number) => `Downloading … ${percent}%`,
-  updateReady: (version: string) => `${version} is ready. Restart the app to finish.`,
+  updateReady: (version: string) =>
+    `${version} is ready. Restart the app to finish.`,
   updateError: (message: string) => `Could not update: ${message}`,
   updateNotesTitle: "What’s new in this version",
   updateBannerAvailable: (version: string) =>
@@ -846,8 +908,12 @@ export const en: Strings = {
   // Skipped files (V05-W2, D-066) — see the nb comment above.
   skippedSummary: (sidecars: number, stills: number) => {
     const parts: string[] = [];
-    if (sidecars > 0) parts.push(sidecars === 1 ? "1 sidecar file" : `${sidecars} sidecar files`);
-    if (stills > 0) parts.push(stills === 1 ? "1 still image" : `${stills} still images`);
+    if (sidecars > 0)
+      parts.push(
+        sidecars === 1 ? "1 sidecar file" : `${sidecars} sidecar files`,
+      );
+    if (stills > 0)
+      parts.push(stills === 1 ? "1 still image" : `${stills} still images`);
     return `${parts.join(" and ")} ${sidecars + stills === 1 ? "was" : "were"} skipped`;
   },
   skippedReason: (reason: "sidecar" | "still_image"): string =>
@@ -859,7 +925,8 @@ export type Lang = keyof typeof dictionaries;
 
 /** Norwegian unless the OS says otherwise — these are Norwegian churches. */
 export function detectLang(): Lang {
-  const nav = typeof navigator === "undefined" ? "" : navigator.language.toLowerCase();
+  const nav =
+    typeof navigator === "undefined" ? "" : navigator.language.toLowerCase();
   return nav.startsWith("en") ? "en" : "nb";
 }
 

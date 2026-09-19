@@ -87,7 +87,11 @@ export function Onboarding({ t, onDone }: { t: Strings; onDone: () => void }) {
                 <p>
                   {t.obFfmpegHow} <code>brew install ffmpeg</code>
                 </p>
-                <button type="button" className="secondary" onClick={checkSidecar}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={checkSidecar}
+                >
                   {t.obCheckAgain}
                 </button>
               </>
@@ -101,7 +105,11 @@ export function Onboarding({ t, onDone }: { t: Strings; onDone: () => void }) {
             is dropped, so «Step 2 of 3» was announced to nobody and the dots were three
             unnamed empty spans. The dots ARE a picture of the step count, so the graphic's
             own role with a text alternative is the honest spelling of what is drawn. */}
-        <div className="onboarding__dots" role="img" aria-label={t.obStep(step, TOTAL_STEPS)}>
+        <div
+          className="onboarding__dots"
+          role="img"
+          aria-label={t.obStep(step, TOTAL_STEPS)}
+        >
           {[1, 2, 3].map((n) => (
             <span
               key={n}
@@ -117,12 +125,20 @@ export function Onboarding({ t, onDone }: { t: Strings; onDone: () => void }) {
           </button>
           <div className="actions">
             {step > 1 && (
-              <button type="button" className="secondary" onClick={() => setStep(step - 1)}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setStep(step - 1)}
+              >
                 {t.obBack}
               </button>
             )}
             {step < TOTAL_STEPS ? (
-              <button type="button" className="primary" onClick={() => setStep(step + 1)}>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => setStep(step + 1)}
+              >
                 {t.obNext}
               </button>
             ) : (

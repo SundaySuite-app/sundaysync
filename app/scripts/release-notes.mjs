@@ -88,7 +88,8 @@ export const normalize = (text) => text.replace(/\r\n/g, "\n");
 /** Bytes, ikke `String.length` — se `MAX_NOTE_BYTES`. */
 export const byteLength = (text) => Buffer.byteLength(text, "utf8");
 
-const readJson = (path) => JSON.parse(readFileSync(join(REPO_ROOT, path), "utf8"));
+const readJson = (path) =>
+  JSON.parse(readFileSync(join(REPO_ROOT, path), "utf8"));
 
 /** Versjonen appen bygges som. */
 export function packageVersion() {
@@ -175,11 +176,15 @@ export function checkNote(tag) {
   }
   for (const [pattern, what] of PLAIN_TEXT_RULES) {
     if (pattern.test(text)) {
-      problems.push(`${relative}: notatet vises som ren tekst, så ikke bruk ${what}`);
+      problems.push(
+        `${relative}: notatet vises som ren tekst, så ikke bruk ${what}`,
+      );
     }
   }
 
-  return problems.length ? { ok: false, tag, path, problems } : { ok: true, tag, path, text };
+  return problems.length
+    ? { ok: false, tag, path, problems }
+    : { ok: true, tag, path, text };
 }
 
 /**
@@ -206,7 +211,12 @@ export function checkAll() {
     if (!result.ok) problems.push(...result.problems);
   }
 
-  return { ok: problems.length === 0, problems, version: pkg, tag: tagFor(pkg) };
+  return {
+    ok: problems.length === 0,
+    problems,
+    version: pkg,
+    tag: tagFor(pkg),
+  };
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
@@ -225,7 +235,9 @@ function main(argv) {
       console.error("Releasenotatet holder ikke:");
       fail(result.problems);
     }
-    console.log(`✓ ${result.tag} har notat, og ${knownTags().length} notat(er) er gyldige.`);
+    console.log(
+      `✓ ${result.tag} har notat, og ${knownTags().length} notat(er) er gyldige.`,
+    );
     return;
   }
 
@@ -248,6 +260,9 @@ function main(argv) {
 }
 
 // Kjør bare som kommando, ikke når testene importerer modulen.
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
+) {
   main(process.argv.slice(2));
 }

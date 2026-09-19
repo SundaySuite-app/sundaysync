@@ -2,7 +2,11 @@ import { memo } from "react";
 import type { Strings } from "../../i18n";
 import type { PrewarmStatus } from "../../state";
 import { clipChrome } from "../../timeline/clipChrome";
-import { formatTimecode, msToX, type TimelineView } from "../../timeline/geometry";
+import {
+  formatTimecode,
+  msToX,
+  type TimelineView,
+} from "../../timeline/geometry";
 import { clipDrawing } from "../../timeline/hop";
 import type { ClipSpan } from "../../timeline/laneLayout";
 import { usePlayheadInsideSpan } from "../../timeline/playhead";
@@ -118,7 +122,10 @@ export const Clip = memo(function Clip({
   // from that module can never disagree with the clip it stands in for. The width is
   // clamped to `roomPx` there: a clip may be drawn shorter than its duration, never across
   // the next clip's start (D-091).
-  const { width, hairline } = clipDrawing((span.endMs - span.startMs) * view.pxPerMs, roomPx);
+  const { width, hairline } = clipDrawing(
+    (span.endMs - span.startMs) * view.pxPerMs,
+    roomPx,
+  );
   const name = basename(span.file);
   const hasWarnings = placement !== null && placement.warnings.length > 0;
   // Subscribed to the DERIVED boolean, so this re-renders when the playhead crosses this
@@ -137,13 +144,22 @@ export const Clip = memo(function Clip({
   // The waveform's own state, and what it wants to say about itself. Held here rather than
   // inside the canvas component because the answer competes for pixels with the filename
   // (D-065), and the two have to be laid out by whoever can see both.
-  const waveform = useClipWaveform({ t, file: span.file, span, view, widthPx: width, analysisStatus });
+  const waveform = useClipWaveform({
+    t,
+    file: span.file,
+    span,
+    view,
+    widthPx: width,
+    analysisStatus,
+  });
   const status = waveform.status;
   const chrome = clipChrome(width, status.kind);
   // Too narrow to say it in the box: the sentence moves to the slot's tooltip, next to the
   // filename, rather than being dropped or scribbled across three pixels.
   const slotTitle =
-    status.kind !== "none" && chrome.status === "none" ? `${name} — ${status.label}` : undefined;
+    status.kind !== "none" && chrome.status === "none"
+      ? `${name} — ${status.label}`
+      : undefined;
 
   // Stays a real `<button>` — S5's `TimelineView.onPointerDown` tells a clip click from a
   // background-pan gesture by `target.closest("button, select, label, .timeline__ruler")`,
@@ -171,7 +187,8 @@ export const Clip = memo(function Clip({
   // file's own analysis has landed. Grey while it waits, blue when its bytes exist, green
   // when the engine has placed it — and it is a pre-sync mark only, because after a sync
   // every drawn clip has been analysed and a colour every box wears is not a colour.
-  const estimated = timeSource !== null && timeSource !== "container" && timeSource !== "none";
+  const estimated =
+    timeSource !== null && timeSource !== "container" && timeSource !== "none";
   const sequential = timeSource === "none";
   // `placement === null &&` is not redundant with the map being emptied on `sync/done`: it
   // is what makes the two claims mutually exclusive BY CONSTRUCTION rather than by
@@ -222,7 +239,9 @@ export const Clip = memo(function Clip({
     : sourceWords !== null
       ? `${name}, ${t.presyncStart} ${formatTimecode(span.startMs)} — ${t.presyncStartEstimated}: ${sourceWords}`
       : `${name}, ${t.presyncStart} ${formatTimecode(span.startMs)}`;
-  const presyncName = offSession ? `${presyncLabel} — ${t.presyncOffSessionClip}` : presyncLabel;
+  const presyncName = offSession
+    ? `${presyncLabel} — ${t.presyncOffSessionClip}`
+    : presyncLabel;
   const baseLabel =
     placement !== null
       ? `${name}, ${t.offsetLabel} ${placement.offset_seconds.toFixed(1)} s`
@@ -247,7 +266,9 @@ export const Clip = memo(function Clip({
       data-file={span.file}
       // The offset pattern is the §9.4 accessible name and stays exactly as it was; the
       // unknown-duration note is appended rather than replacing it.
-      aria-label={durationUnknown ? `${baseLabel} — ${t.clipDurationUnknown}` : baseLabel}
+      aria-label={
+        durationUnknown ? `${baseLabel} — ${t.clipDurationUnknown}` : baseLabel
+      }
       // "The playhead is inside this clip" — `aria-current="time"` is the one value in the
       // enumeration that means a temporal position, which is exactly what this is.
       aria-current={underPlayhead ? "time" : undefined}
@@ -271,8 +292,13 @@ export const Clip = memo(function Clip({
             // chrome's inset from the box's edge) and the slide is added to it. An inline
             // `padding-left` in px would silently drop the base padding whenever the slide
             // was zero, which is most of the time.
-            <span className="clip__chrome" style={{ paddingLeft: `calc(var(--clip-pad) + ${labelShift}px)` }}>
-              {chrome.name !== "none" ? <span className="clip__name">{name}</span> : null}
+            <span
+              className="clip__chrome"
+              style={{ paddingLeft: `calc(var(--clip-pad) + ${labelShift}px)` }}
+            >
+              {chrome.name !== "none" ? (
+                <span className="clip__name">{name}</span>
+              ) : null}
               <ClipStatus status={status} mode={chrome.status} />
             </span>
           ) : null}

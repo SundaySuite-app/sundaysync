@@ -44,9 +44,20 @@ import { TopStrip } from "./components/shell/TopStrip";
 
 import { BUSY_PREFIX, mapEngineError } from "./errors";
 import { invokeWithTimeout } from "./invoke";
-import { detectLang, dictionaries, formatDuration, type Lang, type Strings } from "./i18n";
+import {
+  detectLang,
+  dictionaries,
+  formatDuration,
+  type Lang,
+  type Strings,
+} from "./i18n";
 import { getSettings } from "./settings";
-import { initialState, reducer, type Banner, type PrewarmEndReason } from "./state";
+import {
+  initialState,
+  reducer,
+  type Banner,
+  type PrewarmEndReason,
+} from "./state";
 import {
   invalidate as invalidateWaveform,
   invalidateAll as invalidateAllWaveforms,
@@ -55,9 +66,18 @@ import {
 import { recordingTimes } from "./timeline/recordingTime";
 import { getTelemetryStatus, reportFrontendError } from "./telemetry";
 import { checkForUpdate } from "./update";
-import { gateErrorReport, initialErrorGateState, shapeErrorPayload } from "./telemetryErrors";
+import {
+  gateErrorReport,
+  initialErrorGateState,
+  shapeErrorPayload,
+} from "./telemetryErrors";
 import { basename } from "./types";
-import type { ProgressEvent, ScanManifest, SidecarStatus, SyncOutcome } from "./types";
+import type {
+  ProgressEvent,
+  ScanManifest,
+  SidecarStatus,
+  SyncOutcome,
+} from "./types";
 
 /** `prewarm:file` (lib.rs `PrewarmFileEvent`) — one file finished pre-analysing. */
 interface PrewarmFileEvent {
@@ -86,9 +106,13 @@ function prewarmEndReason(e: unknown, t: Strings): PrewarmEndReason {
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const [lang, setLang] = useState<Lang>(() => getSettings().lang ?? detectLang());
+  const [lang, setLang] = useState<Lang>(
+    () => getSettings().lang ?? detectLang(),
+  );
   const [showSettings, setShowSettings] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(() => !getSettings().onboardingDone);
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => !getSettings().onboardingDone,
+  );
   const [showConsent, setShowConsent] = useState(false);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("SundaySync");
@@ -111,7 +135,9 @@ export function App() {
    * prop of the timeline's, and a second reader of the same field up here would be a second
    * place that can disagree about how many there are.
    */
-  const [stripStatusEl, setStripStatusEl] = useState<HTMLSpanElement | null>(null);
+  const [stripStatusEl, setStripStatusEl] = useState<HTMLSpanElement | null>(
+    null,
+  );
   const t = dictionaries[lang];
 
   // Screen readers pronounce by the document language — a hardcoded lang="nb" reads
@@ -130,7 +156,10 @@ export function App() {
         dispatch({ type: "sidecar/checked", ok: false });
         const mapped = mapEngineError(String(e), t);
         if (mapped.kind === "notice") {
-          dispatch({ type: "banner/set", banner: { kind: "info", text: mapped.text } });
+          dispatch({
+            type: "banner/set",
+            banner: { kind: "info", text: mapped.text },
+          });
         }
       });
     // `t` is intentionally not a dependency: this self-test runs once at startup, and a
@@ -147,7 +176,8 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     getTelemetryStatus().then((status) => {
-      if (!cancelled && status && status.consentVersion === null) setShowConsent(true);
+      if (!cancelled && status && status.consentVersion === null)
+        setShowConsent(true);
     });
     return () => {
       cancelled = true;
@@ -184,7 +214,12 @@ export function App() {
     const submit = (kind: string, rawMessage: string) => {
       try {
         const shaped = shapeErrorPayload(kind, rawMessage);
-        const gated = gateErrorReport(gate, shaped.kind, shaped.message, Date.now());
+        const gated = gateErrorReport(
+          gate,
+          shaped.kind,
+          shaped.message,
+          Date.now(),
+        );
         gate = gated.state;
         if (!gated.allow) return;
         void reportFrontendError(shaped.kind, shaped.message);
@@ -199,7 +234,9 @@ export function App() {
     const onRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason as unknown;
       const message =
-        reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
+        reason instanceof Error
+          ? `${reason.name}: ${reason.message}`
+          : String(reason);
       submit("unhandledrejection", message);
     };
 
@@ -243,7 +280,11 @@ export function App() {
   useEffect(() => {
     const unlisten = listen<PrewarmFileEvent>("prewarm:file", (e) => {
       invalidateWaveform(e.payload.file);
-      dispatch({ type: "prewarm/file", file: e.payload.file, ok: e.payload.ok });
+      dispatch({
+        type: "prewarm/file",
+        file: e.payload.file,
+        ok: e.payload.ok,
+      });
     });
     return () => {
       void unlisten.then((f) => f());
@@ -256,7 +297,10 @@ export function App() {
   // a rebuilt clip drew its waveform inside a grey box, over a dot still saying the row's
   // audio was not analysed. Not an event from the backend; a fact one module already had.
   useEffect(
-    () => subscribeRegenerated((file) => dispatch({ type: "analysis/regenerated", file })),
+    () =>
+      subscribeRegenerated((file) =>
+        dispatch({ type: "analysis/regenerated", file }),
+      ),
     [],
   );
 
@@ -284,10 +328,17 @@ export function App() {
     if (phase.name !== "scanning") return;
     const seq = scanSeq;
     const inputs = phase.inputs;
-    invoke<ScanManifest>("scan_inputs", { inputs, cacheDir: getSettings().cacheDir })
+    invoke<ScanManifest>("scan_inputs", {
+      inputs,
+      cacheDir: getSettings().cacheDir,
+    })
       .then((manifest) => dispatch({ type: "scan/done", seq, manifest }))
       .catch((e) =>
-        dispatch({ type: "scan/failed", seq, error: mapEngineError(String(e), t) }),
+        dispatch({
+          type: "scan/failed",
+          seq,
+          error: mapEngineError(String(e), t),
+        }),
       );
     // `t` is deliberately not a dependency: an error banner in yesterday's language is
     // better than re-scanning the whole card dump because the user toggled languages.
@@ -367,9 +418,17 @@ export function App() {
     // information the reducer needed away before asking it a question, and answered
     // "finished" for a pass that had been shoved aside. That is what wrote `failed` across
     // every clip the moment the operator pressed Sync.
-    void invoke("prewarm_analysis", { files, cacheDir: getSettings().cacheDir }).then(
+    void invoke("prewarm_analysis", {
+      files,
+      cacheDir: getSettings().cacheDir,
+    }).then(
       () => dispatch({ type: "prewarm/settled", seq, reason: "done" }),
-      (e: unknown) => dispatch({ type: "prewarm/settled", seq, reason: prewarmEndReason(e, t) }),
+      (e: unknown) =>
+        dispatch({
+          type: "prewarm/settled",
+          seq,
+          reason: prewarmEndReason(e, t),
+        }),
     );
     // `excludedRef` is read but intentionally not a dependency: see the note above — an
     // exclusion must not restart the pass. The scan sequence is what re-runs this.
@@ -479,7 +538,10 @@ export function App() {
       // one export answer that still uses the toast layer.
       setExportedPath(path);
       if (clips === 0) {
-        dispatch({ type: "banner/set", banner: { kind: "warn", text: t.exported(0) } });
+        dispatch({
+          type: "banner/set",
+          banner: { kind: "warn", text: t.exported(0) },
+        });
       } else {
         dispatch({ type: "banner/clear" });
       }
@@ -489,7 +551,14 @@ export function App() {
         banner: { kind: "error", text: mapEngineError(String(e), t).text },
       });
     }
-  }, [projectName, t, state.phase, state.reference, state.overrides, state.excluded]);
+  }, [
+    projectName,
+    t,
+    state.phase,
+    state.reference,
+    state.overrides,
+    state.excluded,
+  ]);
 
   const notice = useCallback((kind: Banner["kind"], text: string) => {
     dispatch({ type: "banner/set", banner: { kind, text } });
@@ -520,7 +589,8 @@ export function App() {
   useLayoutEffect(() => {
     const previous = previousPhaseName.current;
     previousPhaseName.current = phase.name;
-    if (previous === "syncing" && phase.name === "result" && motionAllowed()) setBandHeld(true);
+    if (previous === "syncing" && phase.name === "result" && motionAllowed())
+      setBandHeld(true);
   }, [phase.name]);
   // `onHopSettled` is the ordinary release — `useHop` fires it from both of the ways a hop can
   // end, its own finish and any gesture that cancels it. The timer is the promise that there
@@ -544,7 +614,9 @@ export function App() {
   if (phase.name === "syncing") lastSyncProgress.current = phase.progress;
 
   const manifest =
-    phase.name === "sources" || phase.name === "syncing" || phase.name === "result"
+    phase.name === "sources" ||
+    phase.name === "syncing" ||
+    phase.name === "result"
       ? phase.manifest
       : phase.name === "scanning"
         ? phase.previous
@@ -559,7 +631,9 @@ export function App() {
   // what was dropped, and stays MOUNTED across sources → syncing → result. Nothing below
   // may unmount it on a phase change — the continuity is the feature.
   const timelinePhase =
-    phase.name === "sources" || phase.name === "syncing" || phase.name === "result"
+    phase.name === "sources" ||
+    phase.name === "syncing" ||
+    phase.name === "result"
       ? phase.name
       : null;
   const outcome = phase.name === "result" ? phase.outcome : null;
@@ -591,13 +665,19 @@ export function App() {
   const selectedUnsynced = useMemo(
     () =>
       outcome !== null && selected !== null
-        ? (outcome.result.unsynced.find((u) => u.file === selected)?.reason ?? null)
+        ? (outcome.result.unsynced.find((u) => u.file === selected)?.reason ??
+          null)
         : null,
     [outcome, selected],
   );
   const selectedEntry =
-    selected !== null ? (manifest?.files.find((f) => f.file === selected) ?? null) : null;
-  const recorded = useMemo(() => (manifest ? recordingTimes(manifest.files) : null), [manifest]);
+    selected !== null
+      ? (manifest?.files.find((f) => f.file === selected) ?? null)
+      : null;
+  const recorded = useMemo(
+    () => (manifest ? recordingTimes(manifest.files) : null),
+    [manifest],
+  );
   // Nothing is dropped, so nothing can be marked. The timeline's own pruning effect cannot
   // say this: by the empty phase it is unmounted.
   useEffect(() => {
@@ -615,8 +695,17 @@ export function App() {
    * frame rate and length.
    */
   const stripSummary = useMemo(() => {
-    if (manifest === null || phase.name === "empty" || phase.name === "scanning") return null;
-    const { files, devices } = sourceCounts(manifest, state.overrides, excludedSet);
+    if (
+      manifest === null ||
+      phase.name === "empty" ||
+      phase.name === "scanning"
+    )
+      return null;
+    const { files, devices } = sourceCounts(
+      manifest,
+      state.overrides,
+      excludedSet,
+    );
     const counts = `${t.fileCount(files)} · ${t.deviceCount(devices)}`;
     if (outcome === null) return counts;
     const { fps, duration_seconds } = outcome.result.sequence;
@@ -637,7 +726,10 @@ export function App() {
   /** What the engine refused to place, minus what the operator has already taken out. Lifted
    *  out of `TimelineView` with the shelf itself (D-079). */
   const shelved = useMemo(
-    () => (outcome ? outcome.result.unsynced.filter((u) => !excludedSet.has(u.file)) : []),
+    () =>
+      outcome
+        ? outcome.result.unsynced.filter((u) => !excludedSet.has(u.file))
+        : [],
     [outcome, excludedSet],
   );
   const stripSources =
@@ -651,7 +743,11 @@ export function App() {
         <SourcesPopover
           t={t}
           manifest={manifest}
-          inputs={phase.name === "empty" || phase.name === "scanning" ? [] : phase.inputs}
+          inputs={
+            phase.name === "empty" || phase.name === "scanning"
+              ? []
+              : phase.inputs
+          }
           overrides={state.overrides}
           excluded={excludedSet}
           summary={stripSummary}
@@ -664,7 +760,9 @@ export function App() {
           scanned={problemFiles(manifest, excludedSet)}
           shelved={shelved}
           deviceIds={deviceIds}
-          onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+          onOverride={(file, device) =>
+            dispatch({ type: "override/set", file, device })
+          }
           onExclude={(file) => dispatch({ type: "files/exclude", file })}
         />
         {/* Where the timeline puts «N advarsler» (V06-R2b, D-083) — right after the problem
@@ -678,7 +776,10 @@ export function App() {
             waiting for; this is work the app started on its own and abandons without a word. */}
         {state.prewarmProgress !== null && (
           <p className="prewarm" aria-live="off">
-            {t.prewarmProgress(state.prewarmProgress.completed, state.prewarmProgress.total)}
+            {t.prewarmProgress(
+              state.prewarmProgress.completed,
+              state.prewarmProgress.total,
+            )}
           </p>
         )}
       </div>
@@ -779,11 +880,21 @@ export function App() {
             measurably could not hold nine. */}
         {/* The same glyph as «Synkroniser» above, because it is the same act done again
             (V06-G3, D-092). */}
-        <button type="button" className="secondary" onClick={runSync} title={t.resyncHint}>
+        <button
+          type="button"
+          className="secondary"
+          onClick={runSync}
+          title={t.resyncHint}
+        >
           <SyncIcon />
           {t.resyncButton}
         </button>
-        <button type="button" className="primary" onClick={exportTimeline} disabled={phase.stale}>
+        <button
+          type="button"
+          className="primary"
+          onClick={exportTimeline}
+          disabled={phase.stale}
+        >
           <ExportIcon />
           {t.exportButton}
         </button>
@@ -818,7 +929,11 @@ export function App() {
           while the app is genuinely working. */}
       {phase.name === "scanning" && (
         <Band>
-          <ProgressBar t={t} progress={phase.progress} idleLabel={t.scanningInputs} />
+          <ProgressBar
+            t={t}
+            progress={phase.progress}
+            idleLabel={t.scanningInputs}
+          />
         </Band>
       )}
       {phase.name === "syncing" && (
@@ -841,7 +956,10 @@ export function App() {
             progress={
               lastSyncProgress.current === null
                 ? null
-                : { ...lastSyncProgress.current, completed: lastSyncProgress.current.total }
+                : {
+                    ...lastSyncProgress.current,
+                    completed: lastSyncProgress.current.total,
+                  }
             }
           />
         </Band>
@@ -865,7 +983,12 @@ export function App() {
         </div>
 
         {phase.name === "empty" && (
-          <EmptyState t={t} onFiles={chooseFiles} onFolder={chooseFolder} onDropPaths={addPaths} />
+          <EmptyState
+            t={t}
+            onFiles={chooseFiles}
+            onFolder={chooseFolder}
+            onDropPaths={addPaths}
+          />
         )}
 
         {/* `scanning` deliberately renders NOTHING here. The band above says what is
@@ -890,7 +1013,6 @@ export function App() {
             onHopSettled={onHopSettled}
           />
         )}
-
       </section>
 
       <Inspector>
@@ -901,7 +1023,9 @@ export function App() {
           placement={selectedPlacement}
           unsyncedReason={selectedUnsynced}
           minPsr={outcome?.result.parameters.min_psr ?? null}
-          recorded={selected !== null ? (recorded?.get(selected) ?? null) : null}
+          recorded={
+            selected !== null ? (recorded?.get(selected) ?? null) : null
+          }
           actions={
             selectedEntry !== null ? (
               <InspectorActions
@@ -921,8 +1045,12 @@ export function App() {
                 deviceIds={deviceIds}
                 isReference={state.reference === selectedEntry.file}
                 busy={busy}
-                onReference={(file) => dispatch({ type: "reference/set", file })}
-                onOverride={(file, device) => dispatch({ type: "override/set", file, device })}
+                onReference={(file) =>
+                  dispatch({ type: "reference/set", file })
+                }
+                onOverride={(file, device) =>
+                  dispatch({ type: "override/set", file, device })
+                }
                 onExclude={(file) => dispatch({ type: "files/exclude", file })}
               />
             ) : null
@@ -934,16 +1062,18 @@ export function App() {
         {/* What was taken out, what was never looked at, and who the reference will be —
             three footnotes that used to sit at the bottom of a 40 %-tall list (V06-R2a,
             D-077 #7/#13/#14). Each is absent when it has nothing to say. */}
-        {manifest !== null && phase.name !== "empty" && phase.name !== "scanning" && (
-          <SlotChips
-            t={t}
-            manifest={manifest}
-            excluded={excludedSet}
-            reference={state.reference}
-            showAutoReference={phase.name === "sources"}
-            onRestore={(file) => dispatch({ type: "files/restore", file })}
-          />
-        )}
+        {manifest !== null &&
+          phase.name !== "empty" &&
+          phase.name !== "scanning" && (
+            <SlotChips
+              t={t}
+              manifest={manifest}
+              excluded={excludedSet}
+              reference={state.reference}
+              showAutoReference={phase.name === "sources"}
+              onRestore={(file) => dispatch({ type: "files/restore", file })}
+            />
+          )}
         {/* The stale notice is a fact about the result, not an alarm about it — one quiet
             line at the bottom of the room rather than a banner between the operator and the
             timeline (D-082). Same words, same warn colour. */}
@@ -969,7 +1099,9 @@ export function App() {
         />
       )}
 
-      {showOnboarding && <Onboarding t={t} onDone={() => setShowOnboarding(false)} />}
+      {showOnboarding && (
+        <Onboarding t={t} onDone={() => setShowOnboarding(false)} />
+      )}
 
       {/* Deferred until onboarding is out of the way so the two dialogs never stack. */}
       {!showOnboarding && showConsent && (

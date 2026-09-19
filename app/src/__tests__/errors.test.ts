@@ -17,20 +17,29 @@ describe("mapEngineError (D-030)", () => {
   });
 
   it("maps sidecar-unavailable regardless of the detail suffix", () => {
-    const m = mapEngineError("ffmpeg sidecar unavailable: `ffprobe` could not be run", nb);
+    const m = mapEngineError(
+      "ffmpeg sidecar unavailable: `ffprobe` could not be run",
+      nb,
+    );
     expect(m.kind).toBe("error");
     expect(m.text).toBe(nb.errSidecar);
   });
 
   it("extracts the path from an io error", () => {
-    const m = mapEngineError("failed to read /media/C0001.MP4: permission denied", nb);
+    const m = mapEngineError(
+      "failed to read /media/C0001.MP4: permission denied",
+      nb,
+    );
     expect(m.kind).toBe("error");
     expect(m.text).toContain("/media/C0001.MP4");
     expect(m.text).not.toContain("permission denied");
   });
 
   it("keeps the detail on an invariant violation — it is a bug report", () => {
-    const m = mapEngineError("internal invariant violated: a file was lost", nb);
+    const m = mapEngineError(
+      "internal invariant violated: a file was lost",
+      nb,
+    );
     expect(m.kind).toBe("error");
     expect(m.text).toContain("a file was lost");
   });
@@ -46,7 +55,10 @@ describe("mapEngineError (D-030)", () => {
     // this must never collapse into the generic `errUnknown` red banner — and it must
     // carry the clip path back out, because that is the argument `regenerate_analysis`
     // takes.
-    const m = mapEngineError("cache_missing:/Users/kari/Opptak/Cam A/C0001.MP4", nb);
+    const m = mapEngineError(
+      "cache_missing:/Users/kari/Opptak/Cam A/C0001.MP4",
+      nb,
+    );
     expect(m.kind).toBe("cacheMissing");
     expect(m).toHaveProperty("path", "/Users/kari/Opptak/Cam A/C0001.MP4");
     // Every variant carries `text`, so existing consumers keep rendering something.
@@ -105,22 +117,32 @@ describe("mapEngineError (D-030)", () => {
   });
 
   it("names the file an unreadable clip refusal is about, and nothing else", () => {
-    const decode = mapEngineError("could not decode /media/C0003.MP4: no audio stream", nb);
+    const decode = mapEngineError(
+      "could not decode /media/C0003.MP4: no audio stream",
+      nb,
+    );
     expect(decode.text).toBe(nb.errDecode("/media/C0003.MP4"));
     expect(decode.text).not.toContain("no audio stream");
-    expect(mapEngineError("nothing was extracted for /media/C0004.MP4", nb).text).toBe(
-      nb.errNoAudio("/media/C0004.MP4"),
-    );
+    expect(
+      mapEngineError("nothing was extracted for /media/C0004.MP4", nb).text,
+    ).toBe(nb.errNoAudio("/media/C0004.MP4"));
   });
 
   it("maps the remaining shell refusals an operator can reach", () => {
-    expect(mapEngineError("nothing has been synced yet", nb).text).toBe(nb.errNothingSynced);
-    expect(mapEngineError("internal state was poisoned", nb).text).toBe(nb.errPoisoned);
+    expect(mapEngineError("nothing has been synced yet", nb).text).toBe(
+      nb.errNothingSynced,
+    );
+    expect(mapEngineError("internal state was poisoned", nb).text).toBe(
+      nb.errPoisoned,
+    );
   });
 
   it("treats the updater's own timeout as the retry it is, not a crash", () => {
     // `update.ts`'s `withTimeout` rejects with an `Error`, so `String(e)` prefixes "Error: ".
-    const m = mapEngineError("Error: update_check did not answer within 15000 ms", nb);
+    const m = mapEngineError(
+      "Error: update_check did not answer within 15000 ms",
+      nb,
+    );
     expect(m.kind).toBe("notice");
     expect(m.text).toBe(nb.noticeTimeout);
   });
@@ -128,7 +150,8 @@ describe("mapEngineError (D-030)", () => {
   it("frames an unmapped message instead of handing over bare English, and says so", () => {
     // §7.5. The raw text is the only fact there is and stays; what may not happen is it
     // landing alone. `unmapped` is how the updater knows not to wrap it a second time.
-    const raw = "no common audio: the recorder and the cameras share no overlapping sound";
+    const raw =
+      "no common audio: the recorder and the cameras share no overlapping sound";
     const m = mapEngineError(raw, nb);
     expect(m.kind).toBe("error");
     expect(m).toHaveProperty("unmapped", true);
@@ -136,11 +159,17 @@ describe("mapEngineError (D-030)", () => {
     expect(m.text).not.toBe(raw);
     expect(m.text.startsWith(raw)).toBe(false);
     // …and only the fallback is marked, or the flag would mean nothing.
-    expect(mapEngineError("no input files were given", nb)).not.toHaveProperty("unmapped");
+    expect(mapEngineError("no input files were given", nb)).not.toHaveProperty(
+      "unmapped",
+    );
   });
 
   it("says all of it in English too — a half-translated dictionary is worse than none", () => {
-    expect(mapEngineError("busy: sync in progress", en).text).toBe(en.errBusySync);
-    expect(mapEngineError("nothing has been synced yet", en).text).toBe(en.errNothingSynced);
+    expect(mapEngineError("busy: sync in progress", en).text).toBe(
+      en.errBusySync,
+    );
+    expect(mapEngineError("nothing has been synced yet", en).text).toBe(
+      en.errNothingSynced,
+    );
   });
 });

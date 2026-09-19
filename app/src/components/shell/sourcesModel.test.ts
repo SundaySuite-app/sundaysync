@@ -89,28 +89,43 @@ describe("groupFiles", () => {
     // re-scan of a different card). Silently keeping the file under its OLD device would put
     // it in a run the operator moved it out of.
     const groups = groupFiles(manifest(), { [WAV]: "cam-ghost" }, NONE);
-    expect(groups.flatMap((g) => g.files.map((f) => f.file))).toEqual([CAM, CAM2]);
+    expect(groups.flatMap((g) => g.files.map((f) => f.file))).toEqual([
+      CAM,
+      CAM2,
+    ]);
   });
 });
 
 describe("sourceCounts", () => {
   it("is the strip's «N filer · M enheter»", () => {
-    expect(sourceCounts(manifest(), {}, NONE)).toEqual({ files: 3, devices: 2 });
+    expect(sourceCounts(manifest(), {}, NONE)).toEqual({
+      files: 3,
+      devices: 2,
+    });
   });
 
   it("counts after the exclusion filter, not before", () => {
-    expect(sourceCounts(manifest(), {}, new Set([CAM2]))).toEqual({ files: 2, devices: 2 });
+    expect(sourceCounts(manifest(), {}, new Set([CAM2]))).toEqual({
+      files: 2,
+      devices: 2,
+    });
   });
 
   it("counts devices through the overlay, so an emptied one stops counting", () => {
-    expect(sourceCounts(manifest(), { [WAV]: "cam-a" }, NONE)).toEqual({ files: 3, devices: 1 });
+    expect(sourceCounts(manifest(), { [WAV]: "cam-a" }, NONE)).toEqual({
+      files: 3,
+      devices: 1,
+    });
   });
 
   it("agrees with groupFiles, always — the strip and the list it opens are one claim (D-081)", () => {
     // The bug this exists to refuse: a 44 px line that says «3 filer · 2 enheter» over a panel
     // listing two files. The two derivations are separate on purpose (the strip needs this in
     // phases where no list is drawn), so the agreement has to be asserted rather than assumed.
-    const cases: { overrides: Record<string, string>; excluded: Set<string> }[] = [
+    const cases: {
+      overrides: Record<string, string>;
+      excluded: Set<string>;
+    }[] = [
       { overrides: {}, excluded: new Set() },
       { overrides: {}, excluded: new Set([CAM]) },
       { overrides: { [WAV]: "cam-a" }, excluded: new Set() },
@@ -120,7 +135,9 @@ describe("sourceCounts", () => {
     for (const { overrides, excluded } of cases) {
       const groups = groupFiles(manifest(), overrides, excluded);
       const counts = sourceCounts(manifest(), overrides, excluded);
-      expect(counts.files).toBe(groups.reduce((acc, g) => acc + g.files.length, 0));
+      expect(counts.files).toBe(
+        groups.reduce((acc, g) => acc + g.files.length, 0),
+      );
       expect(counts.devices).toBe(groups.length);
     }
   });
@@ -128,7 +145,9 @@ describe("sourceCounts", () => {
 
 describe("problemFiles", () => {
   it("is the scan's own refusals, minus what the operator already removed", () => {
-    const m = manifest({ unsynced: [{ file: BROKEN, reason: "decode_error" }] });
+    const m = manifest({
+      unsynced: [{ file: BROKEN, reason: "decode_error" }],
+    });
     expect(problemFiles(m, NONE).map((u) => u.file)).toEqual([BROKEN]);
     expect(problemFiles(m, new Set([BROKEN]))).toEqual([]);
   });
@@ -136,7 +155,9 @@ describe("problemFiles", () => {
 
 describe("removedFiles", () => {
   it("keeps the order they were removed in, and carries what the scan knows about each", () => {
-    const m = manifest({ unsynced: [{ file: BROKEN, reason: "decode_error" }] });
+    const m = manifest({
+      unsynced: [{ file: BROKEN, reason: "decode_error" }],
+    });
     const removed = removedFiles(m, new Set([CAM2, BROKEN]));
     expect(removed.map((r) => r.file)).toEqual([CAM2, BROKEN]);
     // A readable file has its entry; a problem file has no `FileEntry` at all, and its reason
@@ -151,7 +172,9 @@ describe("removedFiles", () => {
     // A re-scan can come back without a file the operator had removed. The undo must still be
     // offered: losing the row would make the removal permanent by accident.
     const removed = removedFiles(manifest(), new Set(["/gone/ghost.mp4"]));
-    expect(removed).toEqual([{ file: "/gone/ghost.mp4", entry: null, problem: null }]);
+    expect(removed).toEqual([
+      { file: "/gone/ghost.mp4", entry: null, problem: null },
+    ]);
   });
 });
 
@@ -169,7 +192,11 @@ describe("skippedFiles", () => {
   });
 
   it("an absent list is an empty one — an older manifest has no `skipped` field at all", () => {
-    expect(skippedFiles(manifest())).toEqual({ files: [], sidecars: 0, stills: 0 });
+    expect(skippedFiles(manifest())).toEqual({
+      files: [],
+      sidecars: 0,
+      stills: 0,
+    });
   });
 });
 

@@ -95,7 +95,10 @@ export const NAME_AND_ICON_MIN_PX =
  * is never consulted there. A sliver stays a coloured tick, which is a true and useful thing
  * for a clip to be. It simply carries no text, because 2 px of text is not text.
  */
-export function clipChrome(widthPx: number, status: ClipStatusKind): ClipChrome {
+export function clipChrome(
+  widthPx: number,
+  status: ClipStatusKind,
+): ClipChrome {
   // A NaN width (a clip whose geometry has not settled) must not smuggle a `true` through
   // a `>=`: every comparison below is written so that a non-number falls to "nothing fits".
   const w = Number.isFinite(widthPx) ? widthPx : 0;

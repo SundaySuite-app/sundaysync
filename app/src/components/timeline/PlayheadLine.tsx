@@ -16,7 +16,10 @@ export function PlayheadLine({ view }: { view: TimelineView }) {
 
   return (
     <div className="timeline__playhead" aria-hidden="true">
-      <div className="timeline__playhead-line" style={{ transform: `translateX(${x}px)` }} />
+      <div
+        className="timeline__playhead-line"
+        style={{ transform: `translateX(${x}px)` }}
+      />
     </div>
   );
 }

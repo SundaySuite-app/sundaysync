@@ -60,7 +60,10 @@ function exportSpy(): Fixtures {
   };
 }
 
-async function recorded(page: Page, key: string): Promise<Record<string, unknown>> {
+async function recorded(
+  page: Page,
+  key: string,
+): Promise<Record<string, unknown>> {
   return (await page.evaluate(
     (k) => (window as unknown as Record<string, unknown>)[k],
     key,
@@ -75,7 +78,11 @@ function inspector(page: Page) {
   return page.locator(".inspector");
 }
 
-async function reachSources(page: Page, fixtures: Fixtures = {}, manifest = presyncScanManifest()) {
+async function reachSources(
+  page: Page,
+  fixtures: Fixtures = {},
+  manifest = presyncScanManifest(),
+) {
   await boot(page, {
     fixtures: {
       ...BOOT_FIXTURES,
@@ -98,7 +105,9 @@ async function mark(page: Page, file: string, name: string) {
 
 async function openSources(page: Page) {
   await sources(page).locator(".popover--sources > summary").click();
-  await expect(sources(page).locator(".popover--sources .popover__panel")).toBeVisible();
+  await expect(
+    sources(page).locator(".popover--sources .popover__panel"),
+  ).toBeVisible();
 }
 
 test.describe("removing the marked clip", () => {
@@ -107,7 +116,9 @@ test.describe("removing the marked clip", () => {
   }) => {
     await reachSources(page);
     await expect(page.locator(".clip")).toHaveCount(3);
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.fileCount(3));
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.fileCount(3),
+    );
 
     await mark(page, CAM_B, "C0002.MP4");
     await inspector(page).getByLabel(`${en.removeFile}: C0002.MP4`).click();
@@ -117,18 +128,26 @@ test.describe("removing the marked clip", () => {
     await expect(page.locator(".clip")).toHaveCount(2);
     // …its (now empty) device track with it, exactly as an override that empties a device
     // already does…
-    await expect(page.getByRole("group", { name: en.trackAria("Camera B") })).toBeHidden();
+    await expect(
+      page.getByRole("group", { name: en.trackAria("Camera B") }),
+    ).toBeHidden();
     // …the strip counts what is left, not what was dropped…
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.fileCount(2));
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.fileCount(2),
+    );
     // …and the list behind it agrees.
     await openSources(page);
     await expect(
-      sources(page).locator(".device-group__name").filter({ hasText: "Camera B" }),
+      sources(page)
+        .locator(".device-group__name")
+        .filter({ hasText: "Camera B" }),
     ).toHaveCount(0);
     await expect(sources(page).getByText("C0002.MP4")).toHaveCount(0);
   });
 
-  test("the way back: the slot's «Fjernet» chip restores it everywhere", async ({ page }) => {
+  test("the way back: the slot's «Fjernet» chip restores it everywhere", async ({
+    page,
+  }) => {
     await reachSources(page);
     await mark(page, CAM_B, "C0002.MP4");
     await inspector(page).getByLabel(`${en.removeFile}: C0002.MP4`).click();
@@ -143,8 +162,12 @@ test.describe("removing the marked clip", () => {
     await removed.getByLabel(`${en.restoreFile}: C0002.MP4`).click();
 
     await expect(page.locator(`.clip[data-file="${CAM_B}"]`)).toHaveCount(1);
-    await expect(page.getByRole("group", { name: en.trackAria("Camera B") })).toBeVisible();
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.fileCount(3));
+    await expect(
+      page.getByRole("group", { name: en.trackAria("Camera B") }),
+    ).toBeVisible();
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.fileCount(3),
+    );
     // Nothing removed any more, so the chip itself is gone.
     await expect(page.locator(".slot__removed")).toHaveCount(0);
   });
@@ -162,9 +185,15 @@ test.describe("removing the marked clip", () => {
     await page.getByRole("button", { name: en.syncButton }).click();
     await expect(page.locator(".band")).toBeVisible();
 
-    await expect(inspector(page).getByLabel(`${en.removeFile}: C0002.MP4`)).toBeDisabled();
-    await expect(inspector(page).getByLabel(`${en.makeReference}: C0002.MP4`)).toBeDisabled();
-    await expect(inspector(page).getByLabel(`${en.moveToDevice}: C0002.MP4`)).toBeDisabled();
+    await expect(
+      inspector(page).getByLabel(`${en.removeFile}: C0002.MP4`),
+    ).toBeDisabled();
+    await expect(
+      inspector(page).getByLabel(`${en.makeReference}: C0002.MP4`),
+    ).toBeDisabled();
+    await expect(
+      inspector(page).getByLabel(`${en.moveToDevice}: C0002.MP4`),
+    ).toBeDisabled();
     await expect(sources(page)).toHaveAttribute("aria-busy", "true");
   });
 });
@@ -179,7 +208,9 @@ test.describe("the reference star", () => {
     await expect(auto).toBeVisible();
 
     await mark(page, WAV, "ZOOM0001.WAV");
-    const star = inspector(page).getByLabel(`${en.makeReference}: ZOOM0001.WAV`);
+    const star = inspector(page).getByLabel(
+      `${en.makeReference}: ZOOM0001.WAV`,
+    );
     await expect(star).toHaveAttribute("aria-pressed", "false");
 
     await star.click();
@@ -194,18 +225,26 @@ test.describe("the reference star", () => {
     await expect(auto).toBeVisible();
   });
 
-  test("removing the reference file gives the choice back to the engine", async ({ page }) => {
+  test("removing the reference file gives the choice back to the engine", async ({
+    page,
+  }) => {
     await reachSources(page, runSyncSpy(syncOutcome()));
 
     await mark(page, WAV, "ZOOM0001.WAV");
-    await inspector(page).getByLabel(`${en.makeReference}: ZOOM0001.WAV`).click();
-    await expect(page.locator(".slot").getByText(en.autoReferenceShort)).toBeHidden();
+    await inspector(page)
+      .getByLabel(`${en.makeReference}: ZOOM0001.WAV`)
+      .click();
+    await expect(
+      page.locator(".slot").getByText(en.autoReferenceShort),
+    ).toBeHidden();
 
     await inspector(page).getByLabel(`${en.removeFile}: ZOOM0001.WAV`).click();
 
     // The star went with the file. Anything else would have the run naming a reference the
     // engine was told to skip — and the engine picking its own instead, silently.
-    await expect(page.locator(".slot").getByText(en.autoReferenceShort)).toBeVisible();
+    await expect(
+      page.locator(".slot").getByText(en.autoReferenceShort),
+    ).toBeVisible();
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForResult(page);
     const args = await recorded(page, "__E2E_SYNC_ARGS__");
@@ -215,11 +254,15 @@ test.describe("the reference star", () => {
 });
 
 test.describe("removing a file that could not be read", () => {
-  test("the ✕ is on the problem rows too, and the row leaves the popover", async ({ page }) => {
+  test("the ✕ is on the problem rows too, and the row leaves the popover", async ({
+    page,
+  }) => {
     // "om de kan leses eller ikke" — the operator does not sort the drop into removable and
     // non-removable. The lens-cap take and the file that would not decode are one wish. A
     // problem file has no clip to mark, so its ✕ stays on its own row (D-077 #12).
-    const withProblem = scanManifest({ unsynced: [{ file: BROKEN, reason: "decode_error" }] });
+    const withProblem = scanManifest({
+      unsynced: [{ file: BROKEN, reason: "decode_error" }],
+    });
     await reachSources(page, {}, withProblem);
 
     const problems = sources(page).locator(".popover--problems");
@@ -254,7 +297,9 @@ test.describe("the removal reaches the engine, not just the screen", () => {
     expect(args.inputs).toEqual(["/Users/e2e/shoot"]);
   });
 
-  test("with nothing removed the field is null, not an empty list", async ({ page }) => {
+  test("with nothing removed the field is null, not an empty list", async ({
+    page,
+  }) => {
     // Absent and empty mean the same thing to the backend (`#[serde(default)]`), and a
     // frontend that never sends the field must behave exactly as it did before D-060.
     await reachSources(page, runSyncSpy(syncOutcome()));
@@ -265,7 +310,9 @@ test.describe("the removal reaches the engine, not just the screen", () => {
     expect(args.excludeFiles).toBeNull();
   });
 
-  test("export_timeline is told too — the F6 fingerprint depends on it", async ({ page }) => {
+  test("export_timeline is told too — the F6 fingerprint depends on it", async ({
+    page,
+  }) => {
     await reachSources(page, { ...runSyncSpy(syncOutcome()), ...exportSpy() });
     await page.getByRole("button", { name: en.syncButton }).click();
     await waitForResult(page);
@@ -280,14 +327,20 @@ test.describe("the removal reaches the engine, not just the screen", () => {
     await mark(page, CAM_A, "C0001.MP4");
     await inspector(page).getByLabel(`${en.removeFile}: C0001.MP4`).click();
     await expect(page.getByText(en.staleResult)).toBeVisible();
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeDisabled();
 
     await page.getByRole("button", { name: en.resyncButton }).click();
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeEnabled();
     await page.getByRole("button", { name: en.exportButton }).click();
 
     await expect
-      .poll(async () => (await recorded(page, "__E2E_EXPORT_ARGS__"))?.excludeFiles)
+      .poll(
+        async () => (await recorded(page, "__E2E_EXPORT_ARGS__"))?.excludeFiles,
+      )
       .toEqual([CAM_A]);
   });
 });
@@ -327,7 +380,9 @@ test.describe("the unsynced shelf, now inside the problem popover (D-079)", () =
 
     await page.getByRole("button", { name: en.resyncButton }).click();
     await expect
-      .poll(async () => (await recorded(page, "__E2E_SYNC_ARGS__")).excludeFiles)
+      .poll(
+        async () => (await recorded(page, "__E2E_SYNC_ARGS__")).excludeFiles,
+      )
       .toEqual([CAM_A]);
   });
 });

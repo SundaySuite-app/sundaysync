@@ -56,7 +56,8 @@ function sources(page: Page) {
 
 function audio(page: Page) {
   return page.evaluate(
-    () => (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__ ?? null,
+    () =>
+      (window as unknown as Record<string, any>).__SUNDAYSYNC_AUDIO__ ?? null,
   );
 }
 
@@ -82,7 +83,11 @@ function outcomeBoth(over: Record<string, unknown> = {}) {
   return base;
 }
 
-async function reachResult(page: Page, outcome: unknown, extra: Record<string, unknown> = {}) {
+async function reachResult(
+  page: Page,
+  outcome: unknown,
+  extra: Record<string, unknown> = {},
+) {
   await boot(page, {
     fixtures: {
       ...BOOT_FIXTURES,
@@ -111,10 +116,14 @@ test.describe("the portalled controls are the slot's and the strip's, not the ti
     await stop.focus();
     await page.keyboard.press(" ");
 
-    await expect.poll(async () => (await audio(page))?.playing ?? false).toBe(false);
+    await expect
+      .poll(async () => (await audio(page))?.playing ?? false)
+      .toBe(false);
   });
 
-  test("Space on the warnings chip opens it, and plays nothing", async ({ page }) => {
+  test("Space on the warnings chip opens it, and plays nothing", async ({
+    page,
+  }) => {
     await reachResult(page, outcomeBoth({ warnings: [{ code: "mixed_fps" }] }));
 
     const chip = page.locator(".strip__status .popover--warnings");
@@ -127,10 +136,14 @@ test.describe("the portalled controls are the slot's and the strip's, not the ti
     // that already opens the problem chip and «Kilder» six pixels to its left.
     await expect(chip.locator(".popover__panel")).toBeVisible();
     await expect(chip.locator(".popover__panel")).toContainText(en.mixedFps);
-    await expect.poll(async () => (await audio(page))?.playing ?? false).toBe(false);
+    await expect
+      .poll(async () => (await audio(page))?.playing ?? false)
+      .toBe(false);
   });
 
-  test("the arrow keys on a transport control do not drag the playhead", async ({ page }) => {
+  test("the arrow keys on a transport control do not drag the playhead", async ({
+    page,
+  }) => {
     // Same seam, quieter symptom: `ArrowRight` on a portalled control moved the playhead a
     // second and swallowed the key, so a keyboard user tabbing along the slot scrubbed the
     // timeline by accident.
@@ -150,14 +163,20 @@ test.describe("the portalled controls are the slot's and the strip's, not the ti
     await reachResult(page, outcomeBoth());
 
     await page.locator(".timeline").press(" ");
-    await expect.poll(async () => (await audio(page))?.playing ?? false).toBe(true);
+    await expect
+      .poll(async () => (await audio(page))?.playing ?? false)
+      .toBe(true);
     await page.locator(".timeline").press(" ");
-    await expect.poll(async () => (await audio(page))?.playing ?? false).toBe(false);
+    await expect
+      .poll(async () => (await audio(page))?.playing ?? false)
+      .toBe(false);
   });
 });
 
 test.describe("«Kilder» can open every file it lists", () => {
-  test("a file the engine refused to place still opens in the inspector", async ({ page }) => {
+  test("a file the engine refused to place still opens in the inspector", async ({
+    page,
+  }) => {
     // The list is the app's only alphabetical index of the drop (D-077 #8), and «why did THIS
     // one not sync?» is the question it is most often opened for. The row marked the file and
     // the timeline's pruning effect un-marked it in the same commit, so the click did nothing
@@ -184,16 +203,22 @@ test.describe("«Kilder» can open every file it lists", () => {
 
     // It is genuinely not on the timeline — that half is right and stays right.
     await expect(page.locator(`.clip[data-file="${CAM}"]`)).toHaveCount(0);
-    await expect(page.locator(".popover--problems > summary")).toHaveText(en.problemCount(1));
+    await expect(page.locator(".popover--problems > summary")).toHaveText(
+      en.problemCount(1),
+    );
 
     await sources(page).locator(".popover--sources > summary").click();
-    await sources(page).locator(".filerow--pick", { hasText: "C0001.MP4" }).click();
+    await sources(page)
+      .locator(".filerow--pick", { hasText: "C0001.MP4" })
+      .click();
 
     // What the inspector has to say about it is exactly what it says about any file before a
     // sync: the picture, the file facts, and the three decisions — including the ✕ and the
     // «move to device» that is D-027's own advice for a clip that would not place.
     await expect(page.locator(".preview__name")).toHaveText("C0001.MP4");
-    await expect(page.locator(".inspector").getByLabel(`${en.removeFile}: C0001.MP4`)).toBeVisible();
+    await expect(
+      page.locator(".inspector").getByLabel(`${en.removeFile}: C0001.MP4`),
+    ).toBeVisible();
     // …and, since F (D-096), the run's own answer about it.
     //
     // This assertion used to read «no engine detail, because there is none», and it was
@@ -211,7 +236,9 @@ test.describe("«Kilder» can open every file it lists", () => {
     await expect(page.locator(".preview__sync .detail-grid")).toHaveCount(0);
   });
 
-  test("a file the operator removed still empties the panel", async ({ page }) => {
+  test("a file the operator removed still empties the panel", async ({
+    page,
+  }) => {
     // The other half of the same rule, unchanged: a REMOVED file is out of the run and out of
     // the room, and the panel must not go on describing it.
     await reachResult(page, outcomeBoth());
@@ -219,16 +246,23 @@ test.describe("«Kilder» can open every file it lists", () => {
     await page.locator(`.clip[data-file="${CAM}"]`).click();
     await expect(page.locator(".preview__name")).toHaveText("C0001.MP4");
 
-    await page.locator(".inspector").getByLabel(`${en.removeFile}: C0001.MP4`).click();
+    await page
+      .locator(".inspector")
+      .getByLabel(`${en.removeFile}: C0001.MP4`)
+      .click();
 
     await expect(page.locator(`.clip[data-file="${CAM}"]`)).toHaveCount(0);
     // D-092 ⑥ — the empty state is a structure now; the sentence is its own element.
-    await expect(page.locator(".preview__emptyline")).toHaveText(en.previewEmpty);
+    await expect(page.locator(".preview__emptyline")).toHaveText(
+      en.previewEmpty,
+    );
   });
 });
 
 test.describe("the project name is one name", () => {
-  test("a blank field exports as SundaySync rather than as nothing", async ({ page }) => {
+  test("a blank field exports as SundaySync rather than as nothing", async ({
+    page,
+  }) => {
     await reachResult(page, outcomeBoth());
     await page.evaluate(() => {
       const w = window as unknown as Record<string, any>;
@@ -251,7 +285,9 @@ test.describe("the project name is one name", () => {
     // D-092 ⑤: an export's answer is the strip's receipt, not a toast.
     await expect(page.locator(".strip__receipt")).toBeVisible();
 
-    const calls = await page.evaluate(() => (window as unknown as Record<string, any>).__CALLS__);
+    const calls = await page.evaluate(
+      () => (window as unknown as Record<string, any>).__CALLS__,
+    );
     expect(calls.export[0].project).toBe("SundaySync");
     expect(calls.save[0].options.defaultPath).toBe("SundaySync.fcpxml");
   });
@@ -274,7 +310,9 @@ test.describe("the project name is one name", () => {
     await page.getByRole("button", { name: en.exportButton }).click();
     await expect(page.locator(".strip__receipt")).toBeVisible();
 
-    const calls = await page.evaluate(() => (window as unknown as Record<string, any>).__CALLS__);
+    const calls = await page.evaluate(
+      () => (window as unknown as Record<string, any>).__CALLS__,
+    );
     expect(calls.export[0].project).toBe("Gudstjeneste 23. august");
   });
 });
@@ -289,7 +327,11 @@ test.describe("a rebuilt analysis is an analysed file", () => {
     // read «Lyden er ikke analysert». The app contradicting itself in one glance, on the one
     // control the operator reaches for when a card would not read.
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": [SHOOT], scan_inputs: scanManifest() },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": [SHOOT],
+        scan_inputs: scanManifest(),
+      },
       settings: SETTLED_SETTINGS,
     });
     await page.evaluate(() => {
@@ -332,7 +374,9 @@ test.describe("a rebuilt analysis is an analysed file", () => {
     await expect(camDot).toHaveAttribute("aria-label", en.trackAnalysed);
     // …and the recorder, which was never touched, is exactly where it was.
     await expect(
-      page.getByRole("group", { name: en.trackAria("Zoom recorder") }).locator(".track__dot"),
+      page
+        .getByRole("group", { name: en.trackAria("Zoom recorder") })
+        .locator(".track__dot"),
     ).toHaveAttribute("aria-label", en.trackAnalysed);
   });
 });

@@ -47,7 +47,11 @@ describe("clipTransport — drift", () => {
   });
 
   it("leaves every clip alone when the toggle is off", () => {
-    const c = clip({ durationSec: 1000, driftPpm: 500, projectedEndErrorMs: 500 });
+    const c = clip({
+      durationSec: 1000,
+      driftPpm: 500,
+      projectedEndErrorMs: 500,
+    });
     const t = clipTransport(c, { driftCorrected: false });
     expect(t.rate).toBe(1);
     expect(t.corrected).toBe(false);
@@ -93,7 +97,9 @@ describe("clipTransport — drift", () => {
 
       // Uncorrected (1:1 from the same start) is one full drift out.
       const uncorrectedEnd = t.startSec + l;
-      expect(Math.abs(Math.abs(uncorrectedEnd - idealEnd) - fullDrift)).toBeLessThan(1e-6);
+      expect(
+        Math.abs(Math.abs(uncorrectedEnd - idealEnd) - fullDrift),
+      ).toBeLessThan(1e-6);
 
       // The inverted rate — `1 + ppm·1e-6` instead of its reciprocal — is the bug D-019
       // warns about: it moves the end the WRONG WAY, to roughly twice the drift out.
@@ -107,7 +113,10 @@ describe("clipTransport — drift", () => {
       // what gets checked.
       for (let k = 0; k < chunkCount(t.sourceSamples); k += 1) {
         const p = (k * CHUNK_SAMPLES) / ANALYSIS_RATE;
-        expect(chunkTimelineSpan(t, k).startSec).toBeCloseTo(offset0 + (1 + slope) * p, 6);
+        expect(chunkTimelineSpan(t, k).startSec).toBeCloseTo(
+          offset0 + (1 + slope) * p,
+          6,
+        );
       }
     }
   });
@@ -125,7 +134,11 @@ describe("clipTransport — drift", () => {
     // E10's edited-mix corpus reported −587 484 ppm. Applied as a playback rate that is
     // a 2.4× speed-up, and the operator would blame the sync, not the measurement.
     const t = clipTransport(
-      clip({ durationSec: 1000, driftPpm: -587_484, projectedEndErrorMs: -587_484 }),
+      clip({
+        durationSec: 1000,
+        driftPpm: -587_484,
+        projectedEndErrorMs: -587_484,
+      }),
       OPTS,
     );
     expect(t.rate).toBe(1);
@@ -141,10 +154,13 @@ describe("clipTransport — drift", () => {
     );
     expect(small.corrected).toBe(false);
 
-    const big = clipTransport(clip({ durationSec: 1000, driftPpm: 30, projectedEndErrorMs: 30 }), {
-      driftCorrected: true,
-      fps: 25,
-    });
+    const big = clipTransport(
+      clip({ durationSec: 1000, driftPpm: 30, projectedEndErrorMs: 30 }),
+      {
+        driftCorrected: true,
+        fps: 25,
+      },
+    );
     expect(big.corrected).toBe(true);
   });
 });
@@ -153,13 +169,26 @@ describe("computeSchedule", () => {
   it("keeps two clips' relative timing exactly equal to their offset delta", () => {
     // The single most important assertion in the file: if this is off by a millisecond,
     // the operator hears an echo and blames the engine.
-    const a = clip({ file: "/a.wav", device: "rec", startSec: 0, durationSec: 120 });
-    const b = clip({ file: "/b.mp4", device: "cam", startSec: 4.2, durationSec: 120 });
+    const a = clip({
+      file: "/a.wav",
+      device: "rec",
+      startSec: 0,
+      durationSec: 120,
+    });
+    const b = clip({
+      file: "/b.mp4",
+      device: "cam",
+      startSec: 4.2,
+      durationSec: 120,
+    });
 
     const s = computeSchedule([a, b], 0, ALL, OPTS);
-    const first = (file: string) => s.find((e) => e.file === file && e.chunkIndex === 0)!;
+    const first = (file: string) =>
+      s.find((e) => e.file === file && e.chunkIndex === 0)!;
 
-    expect(first("/b.mp4").whenOffsetSec - first("/a.wav").whenOffsetSec).toBeCloseTo(4.2, 12);
+    expect(
+      first("/b.mp4").whenOffsetSec - first("/a.wav").whenOffsetSec,
+    ).toBeCloseTo(4.2, 12);
   });
 
   it("holds that delta at chunk 40 of a long clip, with no accumulated float drift", () => {
@@ -168,7 +197,10 @@ describe("computeSchedule", () => {
     const a = clip({ file: "/a.wav", startSec: 0, durationSec: 3600 });
     const b = clip({ file: "/b.mp4", startSec: 4.2, durationSec: 3600 });
 
-    const s = computeSchedule([a, b], 600, ALL, { ...OPTS, horizonAheadSec: 60 });
+    const s = computeSchedule([a, b], 600, ALL, {
+      ...OPTS,
+      horizonAheadSec: 60,
+    });
     const at = (file: string, k: number) =>
       s.find((e) => e.file === file && e.chunkIndex === k)!;
 
@@ -198,7 +230,12 @@ describe("computeSchedule", () => {
   it("leaves no gap and no overlap between consecutive chunks", () => {
     // A seam that is 1 ms short is a click; 1 ms long is a stutter. Both are the failure
     // mode a listener notices and no length assertion catches.
-    const c = clip({ startSec: 2.5, durationSec: 100, driftPpm: 300, projectedEndErrorMs: 30 });
+    const c = clip({
+      startSec: 2.5,
+      durationSec: 100,
+      driftPpm: 300,
+      projectedEndErrorMs: 30,
+    });
     const t = clipTransport(c, OPTS);
     const s = computeSchedule([c], 0, ALL, { ...OPTS, horizonAheadSec: 1000 });
 
@@ -216,7 +253,10 @@ describe("computeSchedule", () => {
     }
     // The last chunk ends exactly where the transport says the clip does.
     const last = s[s.length - 1];
-    expect(last.whenOffsetSec + last.sourceDurationSec / last.rate).toBeCloseTo(t.endSec, 9);
+    expect(last.whenOffsetSec + last.sourceDurationSec / last.rate).toBeCloseTo(
+      t.endSec,
+      9,
+    );
   });
 
   it("stops at the horizon and never schedules the past", () => {
@@ -245,22 +285,41 @@ describe("computeSchedule", () => {
 
   it("gives every source rate 1 when drift correction is off", () => {
     const clips = [
-      clip({ file: "/a.wav", durationSec: 600, driftPpm: 300, projectedEndErrorMs: 180 }),
-      clip({ file: "/b.wav", durationSec: 600, driftPpm: -120, projectedEndErrorMs: -72 }),
+      clip({
+        file: "/a.wav",
+        durationSec: 600,
+        driftPpm: 300,
+        projectedEndErrorMs: 180,
+      }),
+      clip({
+        file: "/b.wav",
+        durationSec: 600,
+        driftPpm: -120,
+        projectedEndErrorMs: -72,
+      }),
     ];
-    const s = computeSchedule(clips, 0, ALL, { driftCorrected: false, horizonAheadSec: 30 });
+    const s = computeSchedule(clips, 0, ALL, {
+      driftCorrected: false,
+      horizonAheadSec: 30,
+    });
     expect(s.length).toBeGreaterThan(0);
     for (const e of s) expect(e.rate).toBe(1);
   });
 
   it("carries the corrected rate onto every one of a drifting clip's sources", () => {
-    const c = clip({ durationSec: 600, driftPpm: 200, projectedEndErrorMs: 120 });
+    const c = clip({
+      durationSec: 600,
+      driftPpm: 200,
+      projectedEndErrorMs: 120,
+    });
     const s = computeSchedule([c], 0, ALL, OPTS);
     for (const e of s) expect(e.rate).toBeCloseTo(1 / 1.0002, 15);
   });
 
   it("ignores a zero-length clip instead of scheduling an empty source", () => {
-    expect(computeSchedule([clip({ durationSec: 0 })], 0, ALL, OPTS)).toEqual([]);
+    expect(computeSchedule([clip({ durationSec: 0 })], 0, ALL, OPTS)).toEqual(
+      [],
+    );
   });
 });
 

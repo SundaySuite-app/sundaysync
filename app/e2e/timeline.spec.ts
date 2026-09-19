@@ -19,7 +19,10 @@ import { en } from "../src/i18n";
 // other, and whether zoom/pan actually move pixels.
 
 /** Boot straight into the result phase with `outcome` as `run_sync`'s answer. */
-async function reachResult(page: Page, outcome: Record<string, unknown> = syncOutcome()) {
+async function reachResult(
+  page: Page,
+  outcome: Record<string, unknown> = syncOutcome(),
+) {
   await boot(page, {
     fixtures: {
       ...BOOT_FIXTURES,
@@ -86,7 +89,10 @@ async function hoverTimeline(page: Page) {
   const body = page.locator(".timeline__body");
   await body.scrollIntoViewIfNeeded();
   const box = (await body.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + Math.min(box.height / 2, 120));
+  await page.mouse.move(
+    box.x + box.width / 2,
+    box.y + Math.min(box.height / 2, 120),
+  );
 }
 
 /**
@@ -112,14 +118,22 @@ test.describe("timeline tracks", () => {
   }) => {
     await reachResult(page);
 
-    await expect(page.locator(".track:not(.track--ruler):not(.track--scrollbar)")).toHaveCount(2);
-    const reference = page.getByRole("group", { name: en.trackAria("Zoom recorder") });
+    await expect(
+      page.locator(".track:not(.track--ruler):not(.track--scrollbar)"),
+    ).toHaveCount(2);
+    const reference = page.getByRole("group", {
+      name: en.trackAria("Zoom recorder"),
+    });
     await expect(reference).toBeVisible();
-    await expect(page.getByRole("group", { name: en.trackAria("Camera A") })).toBeVisible();
+    await expect(
+      page.getByRole("group", { name: en.trackAria("Camera A") }),
+    ).toBeVisible();
 
     // The reference device is marked — a ★ carrying «Referanse» as its accessible name
     // since R/D-094, so the device name gets the gutter's width. See gutter.spec.ts.
-    await expect(reference.getByRole("img", { name: en.reference })).toBeVisible();
+    await expect(
+      reference.getByRole("img", { name: en.reference }),
+    ).toBeVisible();
 
     // …and it has a CLIP, which until the V06-G2 review it never did in this suite. The
     // engine places the reference at zero by construction (`place.rs`: "The reference
@@ -144,22 +158,32 @@ test.describe("timeline tracks", () => {
     // run has when the reference itself could not be laid out, and the shape §7.5 is about.
     await reachResult(page, outcomeWithPlacements([placement()]));
 
-    const empty = page.getByRole("group", { name: en.trackAria("Zoom recorder") });
+    const empty = page.getByRole("group", {
+      name: en.trackAria("Zoom recorder"),
+    });
     await expect(empty.getByText(en.emptyLane)).toBeVisible();
     await expect(empty.locator(".clip")).toHaveCount(0);
     await expect(empty.getByRole("img", { name: en.reference })).toBeVisible();
   });
 
-  test("two overlapping clips on one device stack into two sub-tracks", async ({ page }) => {
+  test("two overlapping clips on one device stack into two sub-tracks", async ({
+    page,
+  }) => {
     await reachResult(
       page,
       outcomeWithPlacements(
         [
-          placement({ file: "/Users/e2e/shoot/CamA/C0001.MP4", offset_seconds: 0 }),
+          placement({
+            file: "/Users/e2e/shoot/CamA/C0001.MP4",
+            offset_seconds: 0,
+          }),
           // Starts 60 s in while the first still has ~59 minutes to run — physically
           // impossible for one camera, but the multitrack-board exemption (D-050) lets
           // it through, and then it must not hide behind the first.
-          placement({ file: "/Users/e2e/shoot/CamA/C0002.MP4", offset_seconds: 60 }),
+          placement({
+            file: "/Users/e2e/shoot/CamA/C0002.MP4",
+            offset_seconds: 60,
+          }),
         ],
         { "/Users/e2e/shoot/CamA/C0002.MP4": 3000 },
       ),
@@ -167,8 +191,12 @@ test.describe("timeline tracks", () => {
 
     const camA = page.getByRole("group", { name: en.trackAria("Camera A") });
     await expect(camA.locator(".track__lane")).toHaveCount(2);
-    await expect(camA.getByRole("group", { name: en.subTrackAria(1) })).toBeVisible();
-    await expect(camA.getByRole("group", { name: en.subTrackAria(2) })).toBeVisible();
+    await expect(
+      camA.getByRole("group", { name: en.subTrackAria(1) }),
+    ).toBeVisible();
+    await expect(
+      camA.getByRole("group", { name: en.subTrackAria(2) }),
+    ).toBeVisible();
 
     // Each row holds exactly one of them, and the rows sit at different heights.
     const first = clipBox(page, "C0001.MP4");
@@ -202,14 +230,22 @@ test.describe("timeline tracks", () => {
     // inside the lane is dropped and its line kept (V06-R3).
     const lane = (await page.locator("#timeline-viewport").boundingBox())!;
     const rights = await ticks.evaluateAll((els) =>
-      els.map((el) => el.getBoundingClientRect().left + (el.textContent ?? "").length * 7 + 4),
+      els.map(
+        (el) =>
+          el.getBoundingClientRect().left +
+          (el.textContent ?? "").length * 7 +
+          4,
+      ),
     );
-    for (const r of rights) expect(r).toBeLessThanOrEqual(lane.x + lane.width + 1);
+    for (const r of rights)
+      expect(r).toBeLessThanOrEqual(lane.x + lane.width + 1);
   });
 });
 
 test.describe("playhead", () => {
-  test("clicking the ruler moves the playhead line to that instant", async ({ page }) => {
+  test("clicking the ruler moves the playhead line to that instant", async ({
+    page,
+  }) => {
     await reachResult(page);
     const line = page.locator(".timeline__playhead-line");
     const ruler = (await page.locator(".timeline__ruler").boundingBox())!;
@@ -218,27 +254,40 @@ test.describe("playhead", () => {
     const targetX = ruler.x + ruler.width * 0.66;
     await page.mouse.click(targetX, ruler.y + ruler.height / 2);
 
-    await expect.poll(async () => (await line.boundingBox())!.x).toBeGreaterThan(targetX - 3);
+    await expect
+      .poll(async () => (await line.boundingBox())!.x)
+      .toBeGreaterThan(targetX - 3);
     expect((await line.boundingBox())!.x).toBeLessThan(targetX + 3);
 
     // …and dragging keeps it following the pointer, back the other way.
     await page.mouse.move(targetX, ruler.y + ruler.height / 2);
     await page.mouse.down();
-    await page.mouse.move(ruler.x + ruler.width * 0.2, ruler.y + ruler.height / 2, { steps: 5 });
+    await page.mouse.move(
+      ruler.x + ruler.width * 0.2,
+      ruler.y + ruler.height / 2,
+      { steps: 5 },
+    );
     await page.mouse.up();
-    await expect.poll(async () => (await line.boundingBox())!.x).toBeLessThan(targetX);
+    await expect
+      .poll(async () => (await line.boundingBox())!.x)
+      .toBeLessThan(targetX);
   });
 });
 
 test.describe("zoom and pan", () => {
-  test("ctrl+wheel zooms in around the cursor, widening the clip", async ({ page }) => {
+  test("ctrl+wheel zooms in around the cursor, widening the clip", async ({
+    page,
+  }) => {
     await reachResult(page);
     const clip = clipBox(page);
     const before = await clip.boundingBox();
     expect(before).not.toBeNull();
 
     const body = await page.locator(".timeline__body").boundingBox();
-    await page.mouse.move(body!.x + body!.width / 2, body!.y + body!.height / 2);
+    await page.mouse.move(
+      body!.x + body!.width / 2,
+      body!.y + body!.height / 2,
+    );
     await page.keyboard.down("Control");
     for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -120);
     await page.keyboard.up("Control");
@@ -248,7 +297,9 @@ test.describe("zoom and pan", () => {
       .toBeGreaterThan(before!.width * 1.5);
   });
 
-  test("a horizontal wheel pans, moving the clip without resizing it", async ({ page }) => {
+  test("a horizontal wheel pans, moving the clip without resizing it", async ({
+    page,
+  }) => {
     await reachResult(page);
     const clip = clipBox(page);
     await zoomIn(page, 6);
@@ -257,12 +308,16 @@ test.describe("zoom and pan", () => {
     // A trackpad's sideways flick — a real `deltaX`, no modifier.
     await page.mouse.wheel(400, 0);
 
-    await expect.poll(async () => (await clip.boundingBox())!.x).toBeLessThan(before!.x);
+    await expect
+      .poll(async () => (await clip.boundingBox())!.x)
+      .toBeLessThan(before!.x);
     // Panning is not zooming: the clip keeps its width.
     expect((await clip.boundingBox())!.width).toBeCloseTo(before!.width, 0);
   });
 
-  test("shift+wheel pans too — the mouse-with-one-wheel convention", async ({ page }) => {
+  test("shift+wheel pans too — the mouse-with-one-wheel convention", async ({
+    page,
+  }) => {
     await reachResult(page);
     const clip = clipBox(page);
     await zoomIn(page, 6);
@@ -272,10 +327,14 @@ test.describe("zoom and pan", () => {
     await page.mouse.wheel(0, 400);
     await page.keyboard.up("Shift");
 
-    await expect.poll(async () => (await clip.boundingBox())!.x).toBeLessThan(before!.x);
+    await expect
+      .poll(async () => (await clip.boundingBox())!.x)
+      .toBeLessThan(before!.x);
   });
 
-  test("a plain vertical wheel is not swallowed (finding 13)", async ({ page }) => {
+  test("a plain vertical wheel is not swallowed (finding 13)", async ({
+    page,
+  }) => {
     // The gesture the timeline owns is horizontal; a plain vertical wheel belongs to whatever
     // scroller is under it. It used to `preventDefault()` every wheel event before even
     // looking at the modifiers, and then pan on `deltaY` — so an innocent scroll silently
@@ -298,13 +357,17 @@ test.describe("zoom and pan", () => {
       window.addEventListener(
         "wheel",
         (e) => {
-          (window as unknown as Record<string, unknown>).__WHEEL_PREVENTED__ = e.defaultPrevented;
+          (window as unknown as Record<string, unknown>).__WHEEL_PREVENTED__ =
+            e.defaultPrevented;
         },
         { passive: true },
       );
     });
     const prevented = () =>
-      page.evaluate(() => (window as unknown as Record<string, unknown>).__WHEEL_PREVENTED__);
+      page.evaluate(
+        () =>
+          (window as unknown as Record<string, unknown>).__WHEEL_PREVENTED__,
+      );
 
     await page.evaluate(() => window.scrollTo(0, 0));
     await hoverTimeline(page);
@@ -326,7 +389,9 @@ test.describe("zoom and pan", () => {
     await expect.poll(prevented).toBe(true);
   });
 
-  test("keyboard: + zooms in, 0 and F fit the whole result back on screen", async ({ page }) => {
+  test("keyboard: + zooms in, 0 and F fit the whole result back on screen", async ({
+    page,
+  }) => {
     await reachResult(page);
     const clip = clipBox(page);
     const fitted = (await clip.boundingBox())!.width;
@@ -334,33 +399,49 @@ test.describe("zoom and pan", () => {
     await page.locator(".timeline").focus();
     await page.keyboard.press("+");
     await page.keyboard.press("+");
-    await expect.poll(async () => (await clip.boundingBox())!.width).toBeGreaterThan(fitted);
+    await expect
+      .poll(async () => (await clip.boundingBox())!.width)
+      .toBeGreaterThan(fitted);
 
     await page.keyboard.press("0");
-    await expect.poll(async () => (await clip.boundingBox())!.width).toBeCloseTo(fitted, 0);
+    await expect
+      .poll(async () => (await clip.boundingBox())!.width)
+      .toBeCloseTo(fitted, 0);
 
     // `F` is the same action under the name the Fit button carries (V03-S6).
     await page.keyboard.press("+");
     await page.keyboard.press("+");
-    await expect.poll(async () => (await clip.boundingBox())!.width).toBeGreaterThan(fitted);
+    await expect
+      .poll(async () => (await clip.boundingBox())!.width)
+      .toBeGreaterThan(fitted);
     await page.keyboard.press("f");
-    await expect.poll(async () => (await clip.boundingBox())!.width).toBeCloseTo(fitted, 0);
+    await expect
+      .poll(async () => (await clip.boundingBox())!.width)
+      .toBeCloseTo(fitted, 0);
   });
 
-  test("the scrollbar thumb shrinks as the visible window does", async ({ page }) => {
+  test("the scrollbar thumb shrinks as the visible window does", async ({
+    page,
+  }) => {
     await reachResult(page);
     const thumb = page.locator(".timeline__thumb");
     const full = (await thumb.boundingBox())!.width;
 
     await zoomIn(page, 8);
 
-    await expect.poll(async () => (await thumb.boundingBox())!.width).toBeLessThan(full * 0.6);
-    await expect(page.getByRole("scrollbar", { name: en.scrollbarAria })).toBeVisible();
+    await expect
+      .poll(async () => (await thumb.boundingBox())!.width)
+      .toBeLessThan(full * 0.6);
+    await expect(
+      page.getByRole("scrollbar", { name: en.scrollbarAria }),
+    ).toBeVisible();
   });
 });
 
 test.describe("the scrollbar (findings 5 and 14)", () => {
-  test("grabbing the thumb by its left edge does not jump the timeline", async ({ page }) => {
+  test("grabbing the thumb by its left edge does not jump the timeline", async ({
+    page,
+  }) => {
     // Finding 5: `offsetFrac` is the thumb's LEFT edge, but the pointer fraction was fed
     // to the CENTRE-seeking mapping, and the same handler ran whether the press landed on
     // the thumb or on empty trough. Pressing the thumb's left edge therefore threw the
@@ -380,7 +461,10 @@ test.describe("the scrollbar (findings 5 and 14)", () => {
 
     // …and by its right edge, which used to throw the view half a window the other way.
     const right = (await thumb.boundingBox())!;
-    await page.mouse.move(right.x + right.width - 1, right.y + right.height / 2);
+    await page.mouse.move(
+      right.x + right.width - 1,
+      right.y + right.height / 2,
+    );
     await page.mouse.down();
     await page.mouse.up();
     expect((await thumb.boundingBox())!.x).toBeCloseTo(right.x, 0);
@@ -402,7 +486,9 @@ test.describe("the scrollbar (findings 5 and 14)", () => {
     await page.mouse.move(grabX + 60, y, { steps: 6 });
     await page.mouse.up();
 
-    await expect.poll(async () => (await thumb.boundingBox())!.x).toBeCloseTo(before.x + 60, 0);
+    await expect
+      .poll(async () => (await thumb.boundingBox())!.x)
+      .toBeCloseTo(before.x + 60, 0);
   });
 
   test("pressing empty trough still jumps the view there", async ({ page }) => {
@@ -414,8 +500,13 @@ test.describe("the scrollbar (findings 5 and 14)", () => {
     const { trough, thumb: before } = await scrollbarBoxes(page);
     const thumb = page.locator(".timeline__thumb");
 
-    await page.mouse.click(trough.x + trough.width * 0.9, trough.y + trough.height / 2);
-    await expect.poll(async () => (await thumb.boundingBox())!.x).toBeGreaterThan(before.x + 20);
+    await page.mouse.click(
+      trough.x + trough.width * 0.9,
+      trough.y + trough.height / 2,
+    );
+    await expect
+      .poll(async () => (await thumb.boundingBox())!.x)
+      .toBeGreaterThan(before.x + 20);
   });
 
   test("it is focusable, keyboard-operable, and reports a value that reaches 100", async ({
@@ -436,7 +527,9 @@ test.describe("the scrollbar (findings 5 and 14)", () => {
     await expect(bar).toHaveAttribute("aria-valuenow", "0");
 
     await bar.press("ArrowRight");
-    await expect.poll(async () => Number(await bar.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+    await expect
+      .poll(async () => Number(await bar.getAttribute("aria-valuenow")))
+      .toBeGreaterThan(0);
 
     await bar.press("End");
     await expect(bar).toHaveAttribute("aria-valuenow", "100");
@@ -487,7 +580,9 @@ test.describe("playhead keyboard (V03-S6)", () => {
     await expect(time).toHaveText("00:00.000");
   });
 
-  test("the clip under the playhead is marked aria-current", async ({ page }) => {
+  test("the clip under the playhead is marked aria-current", async ({
+    page,
+  }) => {
     // `usePlayheadInsideSpan` existed for exactly this and had no caller until S6.
     await reachResult(page);
     const clip = clipBox(page);
@@ -514,7 +609,9 @@ test.describe("playhead keyboard (V03-S6)", () => {
 });
 
 test.describe("a clip whose duration the outcome does not carry (finding 15)", () => {
-  test("says so instead of drawing a silent zero-length sliver", async ({ page }) => {
+  test("says so instead of drawing a silent zero-length sliver", async ({
+    page,
+  }) => {
     const base = syncOutcome();
     await reachResult(page, {
       ...base,
@@ -526,10 +623,18 @@ test.describe("a clip whose duration the outcome does not carry (finding 15)", (
     // when there is room for a name, and this one is the 3 px sliver the whole test is
     // about. What it says it says in `aria-label` and `title` — asserted right below, and
     // the point of the test — not in three pixels of ellipsis.
-    const clip = page.locator(`.clip[data-file="/Users/e2e/shoot/CamA/C0001.MP4"]`);
+    const clip = page.locator(
+      `.clip[data-file="/Users/e2e/shoot/CamA/C0001.MP4"]`,
+    );
     await expect(clip).toHaveClass(/clip--nodur/);
-    await expect(clip).toHaveAttribute("aria-label", new RegExp(en.clipDurationUnknown));
-    await expect(clip).toHaveAttribute("title", new RegExp(en.clipDurationUnknown));
+    await expect(clip).toHaveAttribute(
+      "aria-label",
+      new RegExp(en.clipDurationUnknown),
+    );
+    await expect(clip).toHaveAttribute(
+      "title",
+      new RegExp(en.clipDurationUnknown),
+    );
     // Still a clip: clicking it still shows what the app knows about it — in the preview
     // panel since V05-W4b (D-070) rather than in a dialog. A three-pixel sliver is the
     // hardest thing on the timeline to hit, and it staying selectable is the point.
@@ -564,7 +669,9 @@ test.describe("clip detail and the unsynced shelf", () => {
       result: {
         ...(base.result as Record<string, unknown>),
         placements: [],
-        unsynced: [{ file: "/Users/e2e/shoot/CamA/C0001.MP4", reason: "device_overlap" }],
+        unsynced: [
+          { file: "/Users/e2e/shoot/CamA/C0001.MP4", reason: "device_overlap" },
+        ],
       },
     });
 
@@ -580,11 +687,16 @@ test.describe("clip detail and the unsynced shelf", () => {
     await problems.locator("> summary").click();
     await expect(page.getByText(en.reasonDeviceOverlap)).toBeVisible();
 
-    await page.locator(".shelf").getByLabel(`${en.moveToDevice}: C0001.MP4`).selectOption("rec");
+    await page
+      .locator(".shelf")
+      .getByLabel(`${en.moveToDevice}: C0001.MP4`)
+      .selectOption("rec");
 
     // The override reached the reducer: the result is stale, and it LOOKS stale.
     await expect(timeline).toHaveClass(/result--stale/);
     await expect(page.getByText(en.staleResult)).toBeVisible();
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeDisabled();
   });
 });

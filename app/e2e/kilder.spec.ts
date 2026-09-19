@@ -37,7 +37,9 @@ function sources(page: Page) {
 /** Open «Kilder» — the summary line is the `<summary>` (D-077 #1/#4). */
 async function openSources(page: Page) {
   await sources(page).locator(".popover--sources > summary").click();
-  await expect(sources(page).locator(".popover--sources .popover__panel")).toBeVisible();
+  await expect(
+    sources(page).locator(".popover--sources .popover__panel"),
+  ).toBeVisible();
 }
 
 test.describe("drop, scan, sources", () => {
@@ -45,7 +47,11 @@ test.describe("drop, scan, sources", () => {
     page,
   }) => {
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: scanManifest() },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: scanManifest(),
+      },
       settings: SETTLED_SETTINGS,
     });
 
@@ -55,16 +61,25 @@ test.describe("drop, scan, sources", () => {
     // D-077 #3/#4: the camera/recorder chips are gone — one line has room for one claim, and
     // the split between the two kinds of device is in the list one click behind it and in the
     // timeline's own gutter icons. What the line says is «N files · M devices».
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.fileCount(2));
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.deviceCount(2));
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.fileCount(2),
+    );
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.deviceCount(2),
+    );
     // §9.2: the summary is BEFORE any sync — no "run_sync" fixture is even installed, so this
     // would blow up loudly (harness.ts's "no Tauri backend" rejection) if the app synced on
     // its own.
-    await expect(page.getByRole("button", { name: en.syncButton })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.syncButton }),
+    ).toBeVisible();
     // D-077 #7: the auto-reference promise is a quiet line in the bottom slot now — and since
     // D-092 a glyph and two words, with the sentence itself on the `title`.
     await expect(page.locator(".slot__auto")).toHaveText(en.autoReferenceShort);
-    await expect(page.locator(".slot__auto")).toHaveAttribute("title", en.autoReference);
+    await expect(page.locator(".slot__auto")).toHaveAttribute(
+      "title",
+      en.autoReference,
+    );
 
     await openSources(page);
 
@@ -82,25 +97,37 @@ test.describe("drop, scan, sources", () => {
     await expect(sources(page).locator(".roots .root button")).toHaveCount(1);
   });
 
-  test("a file row marks the clip and closes the panel (D-077 #8)", async ({ page }) => {
+  test("a file row marks the clip and closes the panel (D-077 #8)", async ({
+    page,
+  }) => {
     // The row is a button now, and what it does is the errand the list exists for: find the
     // file by name, look at it. The three per-file controls it used to carry are on the ONE
     // marked clip in the inspector instead.
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: scanManifest() },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: scanManifest(),
+      },
       settings: SETTLED_SETTINGS,
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
     await openSources(page);
 
-    await sources(page).locator(".filerow--pick", { hasText: "C0001.MP4" }).click();
+    await sources(page)
+      .locator(".filerow--pick", { hasText: "C0001.MP4" })
+      .click();
 
     await expect(page.locator(".preview__name")).toHaveText("C0001.MP4");
     // Left open, the panel would cover the column the click just filled.
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeHidden();
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeHidden();
   });
 
-  test("a real OS drag-drop populates sources the same way (onDragDropEvent)", async ({ page }) => {
+  test("a real OS drag-drop populates sources the same way (onDragDropEvent)", async ({
+    page,
+  }) => {
     await boot(page, {
       fixtures: { ...BOOT_FIXTURES, scan_inputs: scanManifest() },
       settings: SETTLED_SETTINGS,
@@ -122,10 +149,14 @@ test.describe("drop, scan, sources", () => {
     // The summary line specifically. "2 files" is also a substring of the timeline's own
     // "2 files have no recording time …" note (D-061), so a page-wide text match is ambiguous
     // — and this assertion was always about the count the app leads with.
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.fileCount(2));
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.fileCount(2),
+    );
   });
 
-  test("a drag-leave without a drop clears the hover state and adds nothing", async ({ page }) => {
+  test("a drag-leave without a drop clears the hover state and adds nothing", async ({
+    page,
+  }) => {
     await boot(page, { fixtures: BOOT_FIXTURES, settings: SETTLED_SETTINGS });
 
     const dropzone = page.locator(".dropzone");
@@ -135,16 +166,26 @@ test.describe("drop, scan, sources", () => {
     await emit(page, "tauri://drag-leave", {});
     await expect(dropzone).not.toHaveClass(/dropzone--over/);
     // Still the empty state — nothing was dropped, so there is no cluster on the strip at all.
-    await expect(page.getByRole("button", { name: en.dropAction })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.dropAction }),
+    ).toBeVisible();
     await expect(sources(page)).toBeHidden();
   });
 
-  test("unusable files are reported honestly, not silently dropped", async ({ page }) => {
+  test("unusable files are reported honestly, not silently dropped", async ({
+    page,
+  }) => {
     const withProblem = scanManifest({
-      unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
+      unsynced: [
+        { file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" },
+      ],
     });
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: withProblem },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: withProblem,
+      },
       settings: SETTLED_SETTINGS,
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
@@ -162,10 +203,14 @@ test.describe("drop, scan, sources", () => {
     await expect(problems.getByText("broken.mp4")).toBeVisible();
     // And the ✕ is on a problem row exactly as it is on a readable one — "om de kan leses
     // eller ikke" (D-062).
-    await expect(problems.getByLabel(`${en.removeFile}: broken.mp4`)).toBeVisible();
+    await expect(
+      problems.getByLabel(`${en.removeFile}: broken.mp4`),
+    ).toBeVisible();
   });
 
-  test("files the scan walked past are counted, not vanished (D-066)", async ({ page }) => {
+  test("files the scan walked past are counted, not vanished (D-066)", async ({
+    page,
+  }) => {
     // The drone folder from the owner's wedding, in miniature: a `.LRF` proxy beside its
     // original, an orphaned one, and the `IMG_4164.HEIC` that used to reach the red shelf
     // as an "error" about a photograph.
@@ -173,11 +218,18 @@ test.describe("drop, scan, sources", () => {
       skipped: [
         { file: "/Users/e2e/shoot/DRONE/DJI_0075.LRF", reason: "sidecar" },
         { file: "/Users/e2e/shoot/DRONE/DJI_0080.LRF", reason: "sidecar" },
-        { file: "/Users/e2e/shoot/STEINAR/IMG_4164.HEIC", reason: "still_image" },
+        {
+          file: "/Users/e2e/shoot/STEINAR/IMG_4164.HEIC",
+          reason: "still_image",
+        },
       ],
     });
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: withSkips },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: withSkips,
+      },
       settings: SETTLED_SETTINGS,
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
@@ -197,13 +249,23 @@ test.describe("drop, scan, sources", () => {
     // The badges specifically: "still image" is also a substring of the summary line above,
     // so a bare text match inside the popover is ambiguous by construction.
     const badges = skipped.locator(".filerow--skipped .badge");
-    await expect(badges.filter({ hasText: en.skippedReason("still_image") })).toHaveCount(1);
-    await expect(badges.filter({ hasText: en.skippedReason("sidecar") })).toHaveCount(2);
+    await expect(
+      badges.filter({ hasText: en.skippedReason("still_image") }),
+    ).toHaveCount(1);
+    await expect(
+      badges.filter({ hasText: en.skippedReason("sidecar") }),
+    ).toHaveCount(2);
   });
 
-  test("nothing skipped means no skipped chip at all (D-066)", async ({ page }) => {
+  test("nothing skipped means no skipped chip at all (D-066)", async ({
+    page,
+  }) => {
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: scanManifest() },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: scanManifest(),
+      },
       settings: SETTLED_SETTINGS,
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
@@ -214,9 +276,15 @@ test.describe("drop, scan, sources", () => {
     await expect(page.locator(".slot__skipped")).toHaveCount(0);
   });
 
-  test("removing the only root returns to the empty state", async ({ page }) => {
+  test("removing the only root returns to the empty state", async ({
+    page,
+  }) => {
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: scanManifest() },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: scanManifest(),
+      },
       settings: SETTLED_SETTINGS,
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
@@ -226,14 +294,19 @@ test.describe("drop, scan, sources", () => {
     await page.locator(".roots .root button").click();
 
     await expect(sources(page)).toBeHidden();
-    await expect(page.getByRole("button", { name: en.dropAction })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.dropAction }),
+    ).toBeVisible();
   });
 
   test("«Tøm alt» clears every root at once (D-077 #2)", async ({ page }) => {
     await boot(page, {
       fixtures: {
         ...BOOT_FIXTURES,
-        "plugin:dialog|open": ["/Users/e2e/shoot/CamA", "/Users/e2e/shoot/CamB"],
+        "plugin:dialog|open": [
+          "/Users/e2e/shoot/CamA",
+          "/Users/e2e/shoot/CamB",
+        ],
         scan_inputs: scanManifest(),
       },
       settings: SETTLED_SETTINGS,
@@ -246,14 +319,20 @@ test.describe("drop, scan, sources", () => {
     await sources(page).getByRole("button", { name: en.clearAll }).click();
 
     await expect(sources(page)).toBeHidden();
-    await expect(page.getByRole("button", { name: en.dropAction })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.dropAction }),
+    ).toBeVisible();
   });
 
   test("an override before any sync regroups the file, with nothing marked stale", async ({
     page,
   }) => {
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: scanManifest() },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: scanManifest(),
+      },
       settings: SETTLED_SETTINGS,
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
@@ -262,20 +341,32 @@ test.describe("drop, scan, sources", () => {
     // D-077 #10: the override is the inspector's, so the file has to be marked first — which
     // is the honest shape of the decision. "Move THIS file" needs a this.
     await openSources(page);
-    await sources(page).locator(".filerow--pick", { hasText: "C0001.MP4" }).click();
-    await page.locator(".inspector").getByLabel(`${en.moveToDevice}: C0001.MP4`).selectOption("rec");
+    await sources(page)
+      .locator(".filerow--pick", { hasText: "C0001.MP4" })
+      .click();
+    await page
+      .locator(".inspector")
+      .getByLabel(`${en.moveToDevice}: C0001.MP4`)
+      .selectOption("rec");
 
     // The strip agrees at once: still two files, but one device now.
-    await expect(sources(page).locator(".strip__summary")).toContainText(en.deviceCount(1));
+    await expect(sources(page).locator(".strip__summary")).toContainText(
+      en.deviceCount(1),
+    );
 
     await openSources(page);
     // The recorder group has both files; the camera group disappears (a device emptied by the
     // overlay is not rendered — the same rule the engine applies).
     await expect(
-      sources(page).locator(".device-group").filter({ hasText: "Zoom recorder" }).locator(".device-group__meta"),
+      sources(page)
+        .locator(".device-group")
+        .filter({ hasText: "Zoom recorder" })
+        .locator(".device-group__meta"),
     ).toContainText(en.fileCount(2));
     await expect(
-      sources(page).locator(".device-group__name").filter({ hasText: "Camera A" }),
+      sources(page)
+        .locator(".device-group__name")
+        .filter({ hasText: "Camera A" }),
     ).toHaveCount(0);
     // No result exists yet, so there is nothing to mark stale — no such notice appears.
     await expect(page.getByText(en.staleResult)).toBeHidden();
@@ -342,7 +433,9 @@ test.describe("«Kilder» reaches every file", () => {
     await openSources(page);
   }
 
-  test("the panel scrolls instead of crushing its sections", async ({ page }) => {
+  test("the panel scrolls instead of crushing its sections", async ({
+    page,
+  }) => {
     await reachBigDrop(page);
     const panel = sources(page).locator(".popover--sources .popover__panel");
 
@@ -360,7 +453,11 @@ test.describe("«Kilder» reaches every file", () => {
     // …and no section is drawn shorter than the rows it contains, which is the mechanism.
     const crushed = await panel.evaluate((el) =>
       Array.from(el.querySelectorAll<HTMLElement>(".device-group"))
-        .map((g) => ({ cls: g.className, clientHeight: g.clientHeight, scrollHeight: g.scrollHeight }))
+        .map((g) => ({
+          cls: g.className,
+          clientHeight: g.clientHeight,
+          scrollHeight: g.scrollHeight,
+        }))
         .filter((g) => g.scrollHeight > g.clientHeight + 1),
     );
     expect(crushed, `crushed sections: ${JSON.stringify(crushed)}`).toEqual([]);
@@ -376,9 +473,16 @@ test.describe("«Kilder» reaches every file", () => {
     // cannot find by name, which is the one errand this list exists for.
     const reached = await panel.evaluate(async (el) => {
       const seen = new Set<string>();
-      const rows = Array.from(el.querySelectorAll<HTMLElement>(".filerow--pick"));
-      const frame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
-      for (let top = 0; top <= el.scrollHeight; top += Math.max(1, el.clientHeight - 40)) {
+      const rows = Array.from(
+        el.querySelectorAll<HTMLElement>(".filerow--pick"),
+      );
+      const frame = () =>
+        new Promise((r) => requestAnimationFrame(() => r(null)));
+      for (
+        let top = 0;
+        top <= el.scrollHeight;
+        top += Math.max(1, el.clientHeight - 40)
+      ) {
         el.scrollTop = top;
         await frame();
         const box = el.getBoundingClientRect();
@@ -387,7 +491,11 @@ test.describe("«Kilder» reaches every file", () => {
           // Keyed on the row's `title`, which is the file's full PATH: four devices carry
           // the same fifteen basenames, so a set of visible text would top out at fifteen
           // however well the panel scrolled.
-          if (r.top >= box.top - 1 && r.bottom <= box.bottom + 1 && r.height > 0) {
+          if (
+            r.top >= box.top - 1 &&
+            r.bottom <= box.bottom + 1 &&
+            r.height > 0
+          ) {
             seen.add(row.getAttribute("title") ?? "");
           }
         }
@@ -397,7 +505,9 @@ test.describe("«Kilder» reaches every file", () => {
     expect(reached).toBe(60);
   });
 
-  test("the problems popover is scrollable rather than crushed too", async ({ page }) => {
+  test("the problems popover is scrollable rather than crushed too", async ({
+    page,
+  }) => {
     // Same root cause, second surface (D-092 ①). Nothing in this panel may be squeezed out
     // of existence: every refusal is a file the operator has to decide about.
     const many = bigScanManifest(4);
@@ -425,9 +535,9 @@ test.describe("«Kilder» reaches every file", () => {
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,
       rows: el.querySelectorAll(".filerow--problem").length,
-      clipped: Array.from(el.querySelectorAll<HTMLElement>(".filerow--problem")).filter(
-        (r) => r.getBoundingClientRect().height < 8,
-      ).length,
+      clipped: Array.from(
+        el.querySelectorAll<HTMLElement>(".filerow--problem"),
+      ).filter((r) => r.getBoundingClientRect().height < 8).length,
     }));
     expect(metrics.rows).toBe(24);
     expect(metrics.clipped).toBe(0);
@@ -443,7 +553,11 @@ test.describe("«Kilder» reaches every file", () => {
 test.describe("popover dismissal", () => {
   async function reachSources(page: Page) {
     await boot(page, {
-      fixtures: { ...BOOT_FIXTURES, "plugin:dialog|open": ["/Users/e2e/shoot"], scan_inputs: scanManifest() },
+      fixtures: {
+        ...BOOT_FIXTURES,
+        "plugin:dialog|open": ["/Users/e2e/shoot"],
+        scan_inputs: scanManifest(),
+      },
       settings: SETTLED_SETTINGS,
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
@@ -458,30 +572,46 @@ test.describe("popover dismissal", () => {
 
     await page.keyboard.press("Escape");
 
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeHidden();
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeHidden();
     // The next Tab continues from the summary, not from the top of the document.
-    await expect(sources(page).locator(".popover--sources > summary")).toBeFocused();
+    await expect(
+      sources(page).locator(".popover--sources > summary"),
+    ).toBeFocused();
   });
 
-  test("a press outside closes it; a press inside does not", async ({ page }) => {
+  test("a press outside closes it; a press inside does not", async ({
+    page,
+  }) => {
     await reachSources(page);
     await openSources(page);
 
     // Inside: the panel's own padding, which is not a control.
-    await sources(page).locator(".popover--sources .popover__panel").click({ position: { x: 4, y: 4 } });
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeVisible();
+    await sources(page)
+      .locator(".popover--sources .popover__panel")
+      .click({ position: { x: 4, y: 4 } });
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeVisible();
 
     await page.locator(".timeline").click({ position: { x: 5, y: 5 } });
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeHidden();
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeHidden();
   });
 
-  test("opening one closes the other — two panels never cover each other", async ({ page }) => {
+  test("opening one closes the other — two panels never cover each other", async ({
+    page,
+  }) => {
     await boot(page, {
       fixtures: {
         ...BOOT_FIXTURES,
         "plugin:dialog|open": ["/Users/e2e/shoot"],
         scan_inputs: scanManifest({
-          unsynced: [{ file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" }],
+          unsynced: [
+            { file: "/Users/e2e/shoot/broken.mp4", reason: "decode_error" },
+          ],
         }),
       },
       settings: SETTLED_SETTINGS,
@@ -491,8 +621,12 @@ test.describe("popover dismissal", () => {
 
     await sources(page).locator(".popover--problems > summary").click();
 
-    await expect(sources(page).locator(".popover--problems .popover__panel")).toBeVisible();
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeHidden();
+    await expect(
+      sources(page).locator(".popover--problems .popover__panel"),
+    ).toBeVisible();
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeHidden();
   });
 
   test("the keyboard opens it, walks it and closes it — the disclosure is the browser's", async ({
@@ -506,7 +640,9 @@ test.describe("popover dismissal", () => {
 
     await sources(page).locator(".popover--sources > summary").focus();
     await page.keyboard.press("Enter");
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeVisible();
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeVisible();
 
     // The first control inside the panel is the next tab stop — the root's own ✕.
     await page.keyboard.press("Tab");
@@ -516,10 +652,14 @@ test.describe("popover dismissal", () => {
     await expect(sources(page).locator(".filerow--pick").first()).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(page.locator(".preview__name")).toHaveText("ZOOM0001.WAV");
-    await expect(sources(page).locator(".popover--sources .popover__panel")).toBeHidden();
+    await expect(
+      sources(page).locator(".popover--sources .popover__panel"),
+    ).toBeHidden();
   });
 
-  test("a `<select>` inside a panel does not count as a press outside it", async ({ page }) => {
+  test("a `<select>` inside a panel does not count as a press outside it", async ({
+    page,
+  }) => {
     // The `composedPath()` half of D-078. A native `<select>` draws its options in the
     // browser's own popup layer rather than as descendants of the element, so a dismissal
     // written with `contains(event.target)` closes the panel under the operator's hand
@@ -535,7 +675,12 @@ test.describe("popover dismissal", () => {
           result: {
             ...(base.result as Record<string, unknown>),
             placements: [],
-            unsynced: [{ file: "/Users/e2e/shoot/CamA/C0001.MP4", reason: "device_overlap" }],
+            unsynced: [
+              {
+                file: "/Users/e2e/shoot/CamA/C0001.MP4",
+                reason: "device_overlap",
+              },
+            ],
           },
         },
       },
@@ -543,7 +688,9 @@ test.describe("popover dismissal", () => {
     });
     await page.getByRole("button", { name: en.dropFolder }).click();
     await page.getByRole("button", { name: en.syncButton }).click();
-    await expect(page.getByRole("button", { name: en.exportButton })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: en.exportButton }),
+    ).toBeVisible();
 
     const problems = sources(page).locator(".popover--problems");
     await problems.locator("> summary").click();
@@ -558,7 +705,9 @@ test.describe("popover dismissal", () => {
     await expect(page.getByText(en.staleResult)).toBeVisible();
   });
 
-  test("a popover overlays the room — opening one moves no box in it", async ({ page }) => {
+  test("a popover overlays the room — opening one moves no box in it", async ({
+    page,
+  }) => {
     // D-078's whole reason for being a layer rather than a block. The room is fixed (D-074),
     // so a list that took space when it opened would move the material the operator is reading
     // — which is the thing the bridge panel did for the whole of R1 and what R2a is for.
@@ -618,21 +767,35 @@ test.describe("scan progress", () => {
 
     // Before any event: indeterminate, the scanning-specific idle label — not the
     // generic "Syncing" one `ProgressBar` falls back to for `run_sync`.
-    await expect(page.locator(".progress__label")).toHaveText(en.scanningInputs);
+    await expect(page.locator(".progress__label")).toHaveText(
+      en.scanningInputs,
+    );
     await expect(page.locator(".progress__fill--indeterminate")).toBeVisible();
 
-    await emit(page, "scan:progress", { stage: "Probing", completed: 3, total: 8 });
+    await emit(page, "scan:progress", {
+      stage: "Probing",
+      completed: 3,
+      total: 8,
+    });
 
-    await expect(page.locator(".progress__label")).toContainText(stageLabel(en, "Probing"));
+    await expect(page.locator(".progress__label")).toContainText(
+      stageLabel(en, "Probing"),
+    );
     await expect(page.locator(".progress__label")).toContainText("3/8");
     const bar = page.getByRole("progressbar");
     await expect(bar).toHaveAttribute("aria-valuenow", "3");
     await expect(bar).toHaveAttribute("aria-valuemax", "8");
   });
 
-  test("resolving the pending scan lands on the sources view", async ({ page }) => {
+  test("resolving the pending scan lands on the sources view", async ({
+    page,
+  }) => {
     await reachScanning(page);
-    await emit(page, "scan:progress", { stage: "Probing", completed: 8, total: 8 });
+    await emit(page, "scan:progress", {
+      stage: "Probing",
+      completed: 8,
+      total: 8,
+    });
     await resolveControlled(page, "scan_inputs", scanManifest());
 
     await expect(sources(page)).toBeVisible();

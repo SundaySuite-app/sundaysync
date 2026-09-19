@@ -149,9 +149,14 @@ export class PcmStore {
   private async fetch(ref: PlannedChunk): Promise<void> {
     let buffer: ArrayBuffer;
     try {
-      buffer = await this.read(ref.file, ref.chunkIndex * CHUNK_SAMPLES, CHUNK_SAMPLES);
+      buffer = await this.read(
+        ref.file,
+        ref.chunkIndex * CHUNK_SAMPLES,
+        CHUNK_SAMPLES,
+      );
     } catch (e) {
-      const raw = typeof e === "string" ? e : String((e as Error)?.message ?? e);
+      const raw =
+        typeof e === "string" ? e : String((e as Error)?.message ?? e);
       if (raw.includes(CACHE_MISSING)) {
         this.markDead(ref.file);
       }
@@ -212,7 +217,12 @@ export class PcmStore {
         bytes: held.samples.byteLength,
       });
     }
-    for (const ref of chooseEvictions(resident, planned, tSec, this.budgetBytes)) {
+    for (const ref of chooseEvictions(
+      resident,
+      planned,
+      tSec,
+      this.budgetBytes,
+    )) {
       const key = chunkKey(ref.file, ref.chunkIndex);
       const held = this.chunks.get(key);
       if (!held) continue;
