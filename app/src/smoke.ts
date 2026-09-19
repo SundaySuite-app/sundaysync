@@ -91,7 +91,7 @@ export function collectSmokeReport(
 ): SmokeReport {
   const root = doc.getElementById("root");
   const rect = root?.getBoundingClientRect();
-  let bodyBackground = "";
+  let bodyBackground: string;
   try {
     bodyBackground = win.getComputedStyle(doc.body).backgroundColor || "";
   } catch {
