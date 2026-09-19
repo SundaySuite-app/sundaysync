@@ -5750,3 +5750,51 @@ stabile manifestet har `windows-x86_64-nsis`, så oppdatereren henter riktig ins
 
 Beta ble promotert til `v0.7.0`. Begge ringer serverer nå `v0.7.0`, og beta-feeden er byte-identisk
 med stabil-feeden og GitHub-manifestet.
+
+## D-101 — Rammeverk-løftet: Vite 8, React 19, jsdom 30, Vitest 5 og TypeScript 7
+
+Rammeverk-runden for desktop-appene (19.09) fant sync klart bakerst. Den hadde ingen
+`dependabot.yml` (fikset i #81), og derfor sto den på React 18, Vite 6 + plugin-react 4 og
+jsdom 25, mens resten av suiten var på React 19 og Vite 8. Løftet tas her som én PR med ett
+commit per steg, i samme rekkefølge som i de andre appene.
+
+### ① Vite 6 → 8 og @vitejs/plugin-react 4 → 6 — som par
+
+De to feiler hver for seg (ERESOLVE), så de løftes sammen (samme oppskrift som
+sundaystudio#48 og sundaypaper#40). `vite.config.ts` bruker ikke `__dirname`, så ingen
+config-endring. Bygget går over til rolldown/oxc, og esbuild forsvinner fra treet.
+
+### ② React 18 → 19
+
+To endringer, begge mekaniske:
+
+- `act` bor i `react` nå. `react-dom/test-utils` eksporterer den ikke lenger
+  (`src/timeline/playhead.test.ts`).
+- I @types/react 19 har `RefObject<T>` `current: T`, og `useRef<T>(null)` gir `RefObject<T | null>`.
+  Hookene som tar imot refs (`useHop`, `useReveal`, `WaveformCanvas`) tar nå
+  `RefObject<T | null>`. Det er nøyaktig det `RefObject<T>` betydde i React 18, så ingen logikk
+  er endret.
+
+### ③ jsdom 25 → 30, Vitest 4 → 5 og TypeScript 5.9 → 7
+
+jsdom 25 var også grunnen til at npm-delen av minor/patch-runden (#82) måtte utelates: npm 10
+krasjer (`Cannot read properties of null (reading 'edgesOut')`) på jsdom 25 sin valgfrie
+`canvas`-peer. Med jsdom 30 er krasjet borte.
+
+TypeScript 7 kommer med side-om-side-oppsettet som resten av suiten bruker (SundayPaper ADR-004):
+
+```json
+"@typescript/native": "npm:typescript@~7.0.2",
+"typescript":         "npm:@typescript/typescript6@^6.0.2"
+```
+
+`tsc` er TS 7. Navnet `typescript` blir på TS 6.0-API-et, fordi `typescript-eslint` fortsatt
+krever `<6.1.0` (typescript-eslint#10940). **Linja er ikke en nedgradering** — ikke «rett» den.
+Aliasene smelter sammen når typescript-eslint støtter TS 7.
+
+To nye TS 7-standarder traff sync:
+
+- `types` er nå `[]`, altså lastes ikke lenger alle `@types/*` automatisk. `e2e/tsconfig.json`
+  sier derfor `"types": ["node"]`, fordi `playwright.config.ts` bruker `process`.
+- `noUncheckedSideEffectImports` er på. `import "./styles.css"` i `main.tsx` trenger en
+  deklarasjon, så `tsconfig.json` sier `"types": ["vite/client"]`, som deklarerer `*.css`.

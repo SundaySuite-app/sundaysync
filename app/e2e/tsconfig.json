@@ -12,7 +12,9 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    // TS 7: types → [] — playwright.config.ts bruker `process`. Se docs/DECISIONS.md D-101.
+    "types": ["node"]
   },
   "include": ["../playwright.config.ts", "."]
 }

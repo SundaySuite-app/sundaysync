@@ -218,10 +218,10 @@ export function useHop({
   /** Identity is what matters: a new object here means a new run's result arrived. */
   outcome: unknown | null;
   contentSpanMs: number;
-  bodyRef: RefObject<HTMLDivElement>;
-  sectionRef: RefObject<HTMLElement>;
+  bodyRef: RefObject<HTMLDivElement | null>;
+  sectionRef: RefObject<HTMLElement | null>;
   /** The layer the fade ghosts are drawn into (`.timeline__ghosts`). */
-  ghostRef: RefObject<HTMLDivElement>;
+  ghostRef: RefObject<HTMLDivElement | null>;
   setView: (update: (v: View) => View) => void;
   /** `TimelineView`'s "which span have I already fitted?" marker — the hop owns it while
    *  it is running, and hands it back set to the span it finished on. */

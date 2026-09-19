@@ -14,7 +14,10 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    // TS 7: types → [] og noUncheckedSideEffectImports er standard; vite/client
+    // deklarerer `*.css`, som main.tsx importerer for sideeffekten. Se docs/DECISIONS.md D-101.
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }
