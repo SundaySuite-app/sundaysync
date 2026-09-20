@@ -52,6 +52,24 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
+      # Everything below keys off `github.ref_name` as though it were a version
+      # tag: `tagName`, `releaseName`, and the `-beta.` tests that drive both
+      # `prerelease` and the Windows `--bundles nsis` switch. On a
+      # `workflow_dispatch` from a BRANCH, `ref_name` is the branch ("main"), and
+      # the run would happily create a release literally tagged `main`, mark it a
+      # normal release, and upload a `latest.json` to it — which the updater ring
+      # would then be asked to serve. Dispatch on a TAG still works: that is the
+      # documented way to re-run a release without re-tagging.
+      # Ported from sundayrec/.github/workflows/release.yml.
+      - name: Refuse to build a release from a non-tag ref
+        if: github.ref_type != 'tag'
+        shell: bash
+        run: |
+          echo "::error::release.yml ran on ${{ github.ref_type }} '${{ github.ref_name }}'."
+          echo "This workflow only makes sense on a version tag — every release field is"
+          echo "derived from the tag name. Re-run it selecting a tag, or push a v* tag."
+          exit 1
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node
@@ -112,6 +130,12 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
 
+      # ⚠️ A Windows step that COMPILES (cargo/tauri) must not use `shell: bash`.
+      # Git-bash puts C:\Program Files\Git\usr\bin first on PATH, where MSYS's
+      # own link.exe shadows the MSVC linker and every build script dies with
+      # "linking with `link.exe` failed" — nothing about the error names bash.
+      # tauri-action runs outside bash, so this applies to hand-written run
+      # steps (proven the hard way in a throwaway probe, 2026-09-20).
       - name: Build and publish
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
