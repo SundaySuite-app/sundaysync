@@ -3,7 +3,7 @@
  *
  * Every automated check on this frontend until now ran in headless Chromium with the Tauri
  * IPC mocked (`app/e2e/harness.ts`). The shipped app runs in WKWebView on macOS and WebView2
- * on Windows, and defects that live only in those engines have reached a Sunday Suite owner
+ * on Windows, and defects that live only in those engines have reached a SundaySuite owner
  * before: SundayEdit shipped a renderer 42× slower in real WKWebView because its UA string
  * carries no `Safari` token — a fact Chromium cannot express.
  *

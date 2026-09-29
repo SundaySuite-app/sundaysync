@@ -1969,7 +1969,7 @@ fn default_cache_dir() -> Result<PathBuf, String> {
 // UI states the renderer drives itself (it listens to `update:progress` for the
 // live download percent), matching how the sync pipeline already reports progress.
 
-/// Base URL of the Sunday Suite update feed.
+/// Base URL of the SundaySuite update feed.
 ///
 /// `option_env!` reads the environment at COMPILE time: the value baked in when the
 /// binary was built is the only one it will ever use. A plain release ships the

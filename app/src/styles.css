@@ -1,4 +1,4 @@
-/* SundaySync — dark UI on the Sunday Suite Brand Sheet v1.0 tokens (D-026).
+/* SundaySync — dark UI on the SundaySuite Brand Sheet v1.0 tokens (D-026).
    The token block is copied from sundayrec/legacy/renderer/styles.css so the two
    desktop apps read as one suite. Dark-only: the light theme is gone, and with it the
    contrast bugs its dark-media block shipped with. */
@@ -37,7 +37,7 @@
   --text3: #4a5878;
   --text4: #2e3a55;
 
-  /* Brand — Sunday Suite gold (Brand Sheet v1.0) */
+  /* Brand — SundaySuite gold (Brand Sheet v1.0) */
   --gold: #ebb84b;
   --accent: #ebb84b;
   --accent2: #f2d58a;

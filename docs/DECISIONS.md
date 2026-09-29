@@ -1169,7 +1169,7 @@ are owner/cross-program coordination items.
 ## D-044 — E9: in-app updater + stable/beta ring
 
 **E9.** SundaySync gets an in-app auto-updater via `tauri-plugin-updater`, polling the
-shared Sunday Suite feed at the **app-scoped** route
+shared SundaySuite feed at the **app-scoped** route
 `updates.sundaysuite.app/v1/update/sundaysync/{stable,beta}` (not SundayRec's frozen
 `/v1/update/{channel}` alias — the Worker's `/v1/update/:app/:channel` is what the app-
 dimension foundation serves). The ring is a per-machine `betaChannel` localStorage setting
