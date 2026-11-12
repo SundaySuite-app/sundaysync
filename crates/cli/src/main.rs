@@ -12,8 +12,8 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use sundaysync_core::{
-    scan, CancelToken, Error, NoProgress, Progress, ProgressSink, Sidecar, SyncRequest,
-    DEFAULT_MIN_PSR,
+    CancelToken, DEFAULT_MIN_PSR, Error, NoProgress, Progress, ProgressSink, Sidecar, SyncRequest,
+    scan,
 };
 
 #[derive(Parser, Debug)]

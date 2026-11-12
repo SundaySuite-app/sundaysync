@@ -629,10 +629,11 @@ mod tests {
         // genuinely hard to hear.
         assert!(s.devices.iter().any(|d| d.clips.len() > 1));
         assert!(s.devices.iter().any(|d| d.colour.drift_ppm.abs() > 0.0));
-        assert!(s
-            .devices
-            .iter()
-            .any(|d| d.colour.snr_db.is_some_and(|x| x <= 15.0)));
+        assert!(
+            s.devices
+                .iter()
+                .any(|d| d.colour.snr_db.is_some_and(|x| x <= 15.0))
+        );
     }
 
     #[test]

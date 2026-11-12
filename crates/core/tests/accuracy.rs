@@ -15,8 +15,8 @@
 
 use std::path::{Path, PathBuf};
 use sundaysync_core::{
-    correlate::Correlator, request::DEFAULT_MIN_PSR, Cache, CancelToken, Extractor, NoProgress,
-    Sidecar,
+    Cache, CancelToken, Extractor, NoProgress, Sidecar, correlate::Correlator,
+    request::DEFAULT_MIN_PSR,
 };
 use sundaysync_fixturegen::shoot::{self, Codec, Truth};
 
@@ -366,8 +366,8 @@ fn drift_is_measured_within_the_gate() {
 #[ignore = "full tier: drift correction END-alignment (E6 / D-042)"]
 fn drift_correction_lands_the_clip_end_within_the_gate() {
     use sundaysync_core::{
-        export_fcpxml, export_fcpxml_with_options, Device, DeviceKind, ExportOptions, Parameters,
-        Placement, Rational, Reference, Sequence, SyncResult, SCHEMA_VERSION,
+        Device, DeviceKind, ExportOptions, Parameters, Placement, Rational, Reference,
+        SCHEMA_VERSION, Sequence, SyncResult, export_fcpxml, export_fcpxml_with_options,
     };
 
     // 40 ppm / 400 s. Half a frame at 50 fps is 10 ms, so 16 ms of drift is past the gate

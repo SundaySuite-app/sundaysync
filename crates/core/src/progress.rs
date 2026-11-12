@@ -1,7 +1,7 @@
 //! Progress reporting and cancellation — docs/PLAN.md §3 and §7.4.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Pipeline stages, in execution order (§3).
 ///

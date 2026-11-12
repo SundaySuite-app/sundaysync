@@ -9,8 +9,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use sundaysync_core::{
-    export_fcpxml, Device, DeviceKind, Parameters, Placement, Rational, Reference, Sequence,
-    SyncResult, SCHEMA_VERSION,
+    Device, DeviceKind, Parameters, Placement, Rational, Reference, SCHEMA_VERSION, Sequence,
+    SyncResult, export_fcpxml,
 };
 
 /// A deliberately awkward shoot: a negative offset, a space and a Norwegian letter in a

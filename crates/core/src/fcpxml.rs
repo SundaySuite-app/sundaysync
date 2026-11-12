@@ -557,7 +557,7 @@ fn escape(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::rational::Rational;
-    use crate::result::{Device, Parameters, Placement, Reference, Sequence, SCHEMA_VERSION};
+    use crate::result::{Device, Parameters, Placement, Reference, SCHEMA_VERSION, Sequence};
     use std::path::PathBuf;
 
     fn sample() -> (SyncResult, BTreeMap<PathBuf, f64>) {
@@ -646,9 +646,10 @@ mod tests {
         let (r, d) = sample();
         let e = export(&r, &d, "Service").unwrap();
 
-        assert!(e
-            .xml
-            .starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(
+            e.xml
+                .starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        );
         assert!(e.xml.contains("<!DOCTYPE fcpxml>"));
         assert!(e.xml.contains(r#"<fcpxml version="1.10">"#));
         for tag in [
@@ -1082,9 +1083,10 @@ mod tests {
             e.xml.contains("<timeMap>"),
             "the drifting clip must be retimed"
         );
-        assert!(e
-            .xml
-            .contains(r#"<timept time="0s" value="0s" interp="linear"/>"#));
+        assert!(
+            e.xml
+                .contains(r#"<timept time="0s" value="0s" interp="linear"/>"#)
+        );
         // Exactly one clip is corrected: the camera, not the reference.
         assert_eq!(e.xml.matches("<timeMap>").count(), 1);
         assert_eq!(e.clips.iter().filter(|c| c.time_map.is_some()).count(), 1);
@@ -1201,10 +1203,12 @@ mod tests {
 
         // The bound itself stays usable: exactly at MAX_CREDIBLE_DRIFT_PPM is still a clock.
         let (r2, d2) = drifting_sample(crate::drift::MAX_CREDIBLE_DRIFT_PPM, 400.0);
-        assert!(export(&r2, &d2, "Service")
-            .unwrap()
-            .xml
-            .contains("<timeMap>"));
+        assert!(
+            export(&r2, &d2, "Service")
+                .unwrap()
+                .xml
+                .contains("<timeMap>")
+        );
     }
 
     #[test]

@@ -44,23 +44,23 @@ pub use drift::Drift;
 pub use error::{Error, Result};
 pub use extract::{AnalysisAudio, CachedAudio, ExtractError, Extractor};
 pub use fcpxml::{
-    export as export_fcpxml, export_with_options as export_fcpxml_with_options, Export,
-    ExportError, ExportOptions, TimeMap,
+    Export, ExportError, ExportOptions, TimeMap, export as export_fcpxml,
+    export_with_options as export_fcpxml_with_options,
 };
 pub use peaks::{
-    meta_from_sample_count, pyramid_from_cache_file, Level, LevelMeta, Pyramid, PyramidMeta,
-    BASE_BIN_SAMPLES,
+    BASE_BIN_SAMPLES, Level, LevelMeta, Pyramid, PyramidMeta, meta_from_sample_count,
+    pyramid_from_cache_file,
 };
 pub use place::{Candidate, Placed};
 pub use probe::{AudioStream, Probed, VideoStream};
 pub use progress::{CancelToken, NoProgress, Progress, ProgressSink, Stage};
 pub use rational::Rational;
-pub use request::{SyncRequest, ANALYSIS_RATE, DEFAULT_MIN_PSR};
+pub use request::{ANALYSIS_RATE, DEFAULT_MIN_PSR, SyncRequest};
 pub use result::{
-    Device, DeviceKind, Parameters, Placement, Reference, Sequence, SkipReason, SkippedFile,
-    SyncResult, Unsynced, UnsyncedReason, Warning, SCHEMA_VERSION,
+    Device, DeviceKind, Parameters, Placement, Reference, SCHEMA_VERSION, Sequence, SkipReason,
+    SkippedFile, SyncResult, Unsynced, UnsyncedReason, Warning,
 };
-pub use scan::{scan, FileEntry, ScanManifest};
+pub use scan::{FileEntry, ScanManifest, scan};
 pub use sidecar::{Sidecar, SidecarSource};
 use std::path::PathBuf;
 

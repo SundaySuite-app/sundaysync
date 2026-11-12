@@ -7,7 +7,7 @@
 
 use crate::progress::CancelToken;
 use crate::rational::Rational;
-use crate::sidecar::{self, RunFailure, Sidecar, PROBE_TIMEOUT};
+use crate::sidecar::{self, PROBE_TIMEOUT, RunFailure, Sidecar};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

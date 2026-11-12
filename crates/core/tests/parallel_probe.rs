@@ -11,7 +11,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::{Path, PathBuf};
-use sundaysync_core::{scan, CancelToken, NoProgress, Sidecar};
+use sundaysync_core::{CancelToken, NoProgress, Sidecar, scan};
 
 /// The D-005 skip guard: no ffprobe, no probe suite. On the ubuntu gate
 /// `SUNDAYSYNC_REQUIRE_FFMPEG=1` turns a skip into a failure so it can never silently rot.

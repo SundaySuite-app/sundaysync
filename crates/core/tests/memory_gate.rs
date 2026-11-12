@@ -34,8 +34,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use sundaysync_core::{CancelToken, NoProgress, Sidecar, SyncRequest};
 use sundaysync_fixturegen::DaySpec;
@@ -133,11 +133,7 @@ impl RssSampler {
         let polled = self.peak_kb.load(Ordering::Relaxed);
         let hwm = kernel_peak_rss_kb().unwrap_or(0);
         let best = polled.max(hwm);
-        if best == 0 {
-            None
-        } else {
-            Some(best * 1024)
-        }
+        if best == 0 { None } else { Some(best * 1024) }
     }
 }
 

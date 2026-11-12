@@ -144,8 +144,10 @@ mod tests {
     fn nothing_is_excluded_by_default() {
         // D-060: exclusion is opt-in. A caller that never sets the field runs exactly the
         // set it scanned, which is what keeps every pre-V04 caller byte-identical.
-        assert!(SyncRequest::new(vec![PathBuf::from("/tmp/a.wav")])
-            .exclude_files
-            .is_empty());
+        assert!(
+            SyncRequest::new(vec![PathBuf::from("/tmp/a.wav")])
+                .exclude_files
+                .is_empty()
+        );
     }
 }

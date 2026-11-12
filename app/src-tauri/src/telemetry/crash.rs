@@ -44,8 +44,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    home_dir, now_ms, scrub_free_text, Os, LOCATION_MAX_CHARS, MAX_CRASHES, MESSAGE_MAX_CHARS,
-    VERSION_MAX_CHARS,
+    LOCATION_MAX_CHARS, MAX_CRASHES, MESSAGE_MAX_CHARS, Os, VERSION_MAX_CHARS, home_dir, now_ms,
+    scrub_free_text,
 };
 
 /// The schema of a [`CrashReport`]. Bumped when a field changes meaning.

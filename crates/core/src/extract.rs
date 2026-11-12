@@ -275,25 +275,27 @@ impl Extractor {
 
         std::thread::scope(|scope| {
             for _ in 0..worker_count().min(total.max(1)) {
-                scope.spawn(|| loop {
-                    let i = next.fetch_add(1, Ordering::Relaxed);
-                    if i >= total || cancel.is_cancelled() {
-                        break;
+                scope.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= total || cancel.is_cancelled() {
+                            break;
+                        }
+                        let outcome = self.extract_one(&paths[i], cancel);
+                        // Notified from the outcome BEFORE it is moved into its slot, so the
+                        // flag the listener sees is the very value that was recorded — there
+                        // is no window in which the two could disagree.
+                        let ok = outcome.is_ok();
+                        if let Ok(mut slots) = slots.lock() {
+                            slots[i] = Some(outcome);
+                        }
+                        on_file(&paths[i], ok);
+                        progress.report(Progress {
+                            stage: Stage::Extracting,
+                            completed: done.fetch_add(1, Ordering::Relaxed) + 1,
+                            total,
+                        });
                     }
-                    let outcome = self.extract_one(&paths[i], cancel);
-                    // Notified from the outcome BEFORE it is moved into its slot, so the
-                    // flag the listener sees is the very value that was recorded — there
-                    // is no window in which the two could disagree.
-                    let ok = outcome.is_ok();
-                    if let Ok(mut slots) = slots.lock() {
-                        slots[i] = Some(outcome);
-                    }
-                    on_file(&paths[i], ok);
-                    progress.report(Progress {
-                        stage: Stage::Extracting,
-                        completed: done.fetch_add(1, Ordering::Relaxed) + 1,
-                        total,
-                    });
                 });
             }
         });
