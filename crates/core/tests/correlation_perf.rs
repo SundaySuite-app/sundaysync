@@ -22,8 +22,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use sundaysync_core::{
+    ANALYSIS_RATE, Cache, CancelToken, Extractor, NoProgress, Sidecar,
     correlate::{Correlator, SEGMENT_COUNT},
-    Cache, CancelToken, Extractor, NoProgress, Sidecar, ANALYSIS_RATE,
 };
 use sundaysync_fixturegen::shoot::{self, Truth};
 

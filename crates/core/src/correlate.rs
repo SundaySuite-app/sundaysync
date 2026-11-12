@@ -418,10 +418,11 @@ impl Correlator {
         hash: &[u8; 32],
         fft: &Arc<dyn Fft<f32>>,
     ) -> bool {
-        if let Some(rc) = self.ref_spectra.as_ref() {
-            if rc.seg_len == seg_len && &rc.hash == hash {
-                return true;
-            }
+        if let Some(rc) = self.ref_spectra.as_ref()
+            && rc.seg_len == seg_len
+            && &rc.hash == hash
+        {
+            return true;
         }
 
         let step = n - seg_len + 1;

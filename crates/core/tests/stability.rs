@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use sundaysync_core::{CancelToken, Error, NoProgress, Sidecar, SyncRequest};
-use sundaysync_fixturegen::{shoot, signal, Rng};
+use sundaysync_fixturegen::{Rng, shoot, signal};
 
 /// §V02-PROGRAM E4: "~100 runs".
 const RUNS: usize = 100;

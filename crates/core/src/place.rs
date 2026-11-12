@@ -505,12 +505,12 @@ fn build_placement(r: Resolved<'_>) -> Placement {
     let mut warnings = Vec::new();
     let measured = drift::measure(segments, clip_samples);
 
-    if let Some(d) = measured {
-        if d.exceeds_half_frame(fps) {
-            warnings.push(Warning::Drift {
-                projected_end_error_ms: d.projected_end_error_ms,
-            });
-        }
+    if let Some(d) = measured
+        && d.exceeds_half_frame(fps)
+    {
+        warnings.push(Warning::Drift {
+            projected_end_error_ms: d.projected_end_error_ms,
+        });
     }
     Placement {
         file: candidate.path().to_path_buf(),
@@ -1610,10 +1610,12 @@ mod tests {
         );
 
         // And the reference itself, which was never refused, carries nothing.
-        assert!(placed
-            .unsynced
-            .iter()
-            .all(|u| u.file != Path::new("/media/rec.wav")));
+        assert!(
+            placed
+                .unsynced
+                .iter()
+                .all(|u| u.file != Path::new("/media/rec.wav"))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

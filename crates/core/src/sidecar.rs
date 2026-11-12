@@ -412,10 +412,10 @@ where
     // broken the caller's contract whatever it then exited with, and reporting the
     // ceiling regardless of the exit code makes the failure deterministic instead of
     // dependent on how the offending process happened to end.
-    if let Some(limit) = cap {
-        if stdout.len() > limit {
-            return Err(RunFailure::OutputTooLarge { limit });
-        }
+    if let Some(limit) = cap
+        && stdout.len() > limit
+    {
+        return Err(RunFailure::OutputTooLarge { limit });
     }
 
     if status.success() {

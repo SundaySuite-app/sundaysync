@@ -46,7 +46,7 @@ use serde::{Deserialize, Serialize};
 use sundaysync_core::result::{SyncResult, UnsyncedReason, Warning};
 use tauri::Manager;
 
-use crate::{lock_state, OnPoison};
+use crate::{OnPoison, lock_state};
 
 pub mod crash;
 
@@ -545,10 +545,10 @@ fn strip_absolute_paths(text: &str) -> String {
 /// must not be cut mid-character). Idempotent.
 pub fn scrub_free_text(raw: &str, home: Option<&str>, max: usize) -> String {
     let mut s = raw.to_string();
-    if let Some(h) = home {
-        if h.len() >= 3 {
-            s = s.replace(h, "~");
-        }
+    if let Some(h) = home
+        && h.len() >= 3
+    {
+        s = s.replace(h, "~");
     }
     let cleaned = strip_absolute_paths(&s);
     if cleaned.chars().count() <= max {
@@ -566,11 +566,7 @@ pub fn scrub_free_text(raw: &str, home: Option<&str>, max: usize) -> String {
 /// just the offending run. A threshold that is not a number is not worth losing a
 /// batch of reports over, so it lands as zero and stays visible in aggregate.
 fn finite_or_zero(v: f64) -> f64 {
-    if v.is_finite() {
-        v
-    } else {
-        0.0
-    }
+    if v.is_finite() { v } else { 0.0 }
 }
 
 // ── The payload ──────────────────────────────────────────────────────────────
@@ -1703,10 +1699,10 @@ pub async fn request_telemetry_deletion(
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use sundaysync_core::result::{
-        Device, DeviceKind, Parameters, Placement, Reference, Sequence, Unsynced, SCHEMA_VERSION,
-    };
     use sundaysync_core::Rational;
+    use sundaysync_core::result::{
+        Device, DeviceKind, Parameters, Placement, Reference, SCHEMA_VERSION, Sequence, Unsynced,
+    };
 
     // ── A church-y result, full of things that must NOT leave ─────────────────
 

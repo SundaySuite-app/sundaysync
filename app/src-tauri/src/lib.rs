@@ -14,8 +14,8 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use sundaysync_core::{
-    export_fcpxml_with_options, sync_with_durations, CancelToken, ExportOptions, Progress,
-    ProgressSink, Sidecar, SidecarSource, Stage, SyncRequest, SyncResult, DEFAULT_MIN_PSR,
+    CancelToken, DEFAULT_MIN_PSR, ExportOptions, Progress, ProgressSink, Sidecar, SidecarSource,
+    Stage, SyncRequest, SyncResult, export_fcpxml_with_options, sync_with_durations,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -459,10 +459,10 @@ impl Drop for ActivityGuard {
 impl AppState {
     /// The stored sidecar, resolving and caching it if startup could not.
     fn sidecar(&self) -> Result<Sidecar, String> {
-        if let Ok(slot) = lock_state(&self.sidecar, OnPoison::Recover) {
-            if let Some(sidecar) = slot.as_ref() {
-                return Ok(sidecar.clone());
-            }
+        if let Ok(slot) = lock_state(&self.sidecar, OnPoison::Recover)
+            && let Some(sidecar) = slot.as_ref()
+        {
+            return Ok(sidecar.clone());
         }
         let resolved = resolve_sidecar()?;
         if let Ok(mut slot) = lock_state(&self.sidecar, OnPoison::Recover) {
@@ -488,10 +488,10 @@ impl AppState {
     /// Fires the in-flight run's cancel token. F1: recovers a poisoned lock rather than
     /// silently no-opping — a poisoned `AppState` must not disable the one safety control.
     fn request_cancel(&self) {
-        if let Ok(slot) = lock_state(&self.cancel, OnPoison::Recover) {
-            if let Some(token) = slot.as_ref() {
-                token.cancel();
-            }
+        if let Ok(slot) = lock_state(&self.cancel, OnPoison::Recover)
+            && let Some(token) = slot.as_ref()
+        {
+            token.cancel();
         }
     }
 
@@ -499,10 +499,10 @@ impl AppState {
     /// Returns the owning `Arc` so the caller can later prove ownership of the slot (F3).
     fn install_scan_cancel(&self) -> Arc<CancelToken> {
         let token = Arc::new(CancelToken::new());
-        if let Ok(mut slot) = lock_state(&self.scan_cancel, OnPoison::Recover) {
-            if let Some(previous) = slot.replace(token.clone()) {
-                previous.cancel();
-            }
+        if let Ok(mut slot) = lock_state(&self.scan_cancel, OnPoison::Recover)
+            && let Some(previous) = slot.replace(token.clone())
+        {
+            previous.cancel();
         }
         token
     }
@@ -511,13 +511,12 @@ impl AppState {
     /// under the lock closes the TOCTOU window where a late-finishing scan cleared a newer
     /// scan's token and left the newer run uncancellable.
     fn clear_scan_cancel_if_ours(&self, mine: &Arc<CancelToken>) {
-        if let Ok(mut slot) = lock_state(&self.scan_cancel, OnPoison::Recover) {
-            if slot
+        if let Ok(mut slot) = lock_state(&self.scan_cancel, OnPoison::Recover)
+            && slot
                 .as_ref()
                 .is_some_and(|current| Arc::ptr_eq(current, mine))
-            {
-                *slot = None;
-            }
+        {
+            *slot = None;
         }
     }
 
@@ -525,10 +524,10 @@ impl AppState {
     /// (D-059). Returns the owning `Arc` so the caller can later prove ownership (F3).
     fn install_prewarm_cancel(&self) -> Arc<CancelToken> {
         let token = Arc::new(CancelToken::new());
-        if let Ok(mut slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover) {
-            if let Some(previous) = slot.replace(token.clone()) {
-                previous.cancel();
-            }
+        if let Ok(mut slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover)
+            && let Some(previous) = slot.replace(token.clone())
+        {
+            previous.cancel();
         }
         token
     }
@@ -538,23 +537,22 @@ impl AppState {
     /// cleared a newer one's token would leave the newer pass uncancellable — and a prewarm
     /// that cannot be cancelled is a prewarm `run_sync` cannot preempt.
     fn clear_prewarm_cancel_if_ours(&self, mine: &Arc<CancelToken>) {
-        if let Ok(mut slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover) {
-            if slot
+        if let Ok(mut slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover)
+            && slot
                 .as_ref()
                 .is_some_and(|current| Arc::ptr_eq(current, mine))
-            {
-                *slot = None;
-            }
+        {
+            *slot = None;
         }
     }
 
     /// Fires the in-flight prewarm's cancel token, if there is one. Recovers a poisoned
     /// lock like every other cancel path (F1).
     fn request_prewarm_cancel(&self) {
-        if let Ok(slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover) {
-            if let Some(token) = slot.as_ref() {
-                token.cancel();
-            }
+        if let Ok(slot) = lock_state(&self.prewarm_cancel, OnPoison::Recover)
+            && let Some(token) = slot.as_ref()
+        {
+            token.cancel();
         }
     }
 
@@ -563,10 +561,10 @@ impl AppState {
     /// ownership (F3), exactly as the scan and prewarm slots do.
     fn install_thumbnail_cancel(&self) -> Arc<CancelToken> {
         let token = Arc::new(CancelToken::new());
-        if let Ok(mut slot) = lock_state(&self.thumbnail_cancel, OnPoison::Recover) {
-            if let Some(previous) = slot.replace(token.clone()) {
-                previous.cancel();
-            }
+        if let Ok(mut slot) = lock_state(&self.thumbnail_cancel, OnPoison::Recover)
+            && let Some(previous) = slot.replace(token.clone())
+        {
+            previous.cancel();
         }
         token
     }
@@ -577,23 +575,22 @@ impl AppState {
     /// an uncancellable grab is one that keeps a permit and a running ffmpeg for as long as
     /// it likes while the user drags the playhead past it.
     fn clear_thumbnail_cancel_if_ours(&self, mine: &Arc<CancelToken>) {
-        if let Ok(mut slot) = lock_state(&self.thumbnail_cancel, OnPoison::Recover) {
-            if slot
+        if let Ok(mut slot) = lock_state(&self.thumbnail_cancel, OnPoison::Recover)
+            && slot
                 .as_ref()
                 .is_some_and(|current| Arc::ptr_eq(current, mine))
-            {
-                *slot = None;
-            }
+        {
+            *slot = None;
         }
     }
 
     /// Fires the in-flight frame grab's cancel token, if there is one. Recovers a poisoned
     /// lock like every other cancel path (F1).
     fn request_thumbnail_cancel(&self) {
-        if let Ok(slot) = lock_state(&self.thumbnail_cancel, OnPoison::Recover) {
-            if let Some(token) = slot.as_ref() {
-                token.cancel();
-            }
+        if let Ok(slot) = lock_state(&self.thumbnail_cancel, OnPoison::Recover)
+            && let Some(token) = slot.as_ref()
+        {
+            token.cancel();
         }
     }
 
@@ -964,10 +961,10 @@ fn pyramid_for(
     let key = sundaysync_core::CacheKey::for_file(file, sundaysync_core::ANALYSIS_RATE)
         .map_err(|e| e.to_string())?;
 
-    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover) {
-        if let Some(hit) = lru.get(key.as_str()) {
-            return Ok(hit);
-        }
+    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover)
+        && let Some(hit) = lru.get(key.as_str())
+    {
+        return Ok(hit);
     }
 
     let entry = sundaysync_core::Cache::new(dir).entry_path(&key);
@@ -1034,10 +1031,10 @@ fn waveform_meta_for(
     let key = sundaysync_core::CacheKey::for_file(file, sundaysync_core::ANALYSIS_RATE)
         .map_err(|e| e.to_string())?;
 
-    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover) {
-        if let Some(hit) = lru.get(key.as_str()) {
-            return Ok(WaveformMeta::from(hit.meta()));
-        }
+    if let Ok(mut lru) = lock_state(&state.pyramids, OnPoison::Recover)
+        && let Some(hit) = lru.get(key.as_str())
+    {
+        return Ok(WaveformMeta::from(hit.meta()));
     }
 
     let total_samples = sundaysync_core::Cache::new(dir)
@@ -2015,11 +2012,7 @@ fn update_percent(downloaded: u64, total: u64) -> u8 {
 /// treats it as data.
 fn release_notes(body: Option<String>) -> Option<String> {
     let text = body?.trim().to_string();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// The update phases the renderer renders. Serialised tagged so the frontend gets a
@@ -2128,7 +2121,7 @@ async fn update_download_install(app: AppHandle, beta: bool) -> Result<UpdateSta
         Err(e) => {
             return Ok(UpdateStatus::Error {
                 message: e.to_string(),
-            })
+            });
         }
     };
 
@@ -2424,8 +2417,8 @@ pub fn run() {
 mod tests {
     use super::*;
     use sundaysync_core::{
-        Device, DeviceKind, Parameters, Placement, Rational, Reference, Sequence, Unsynced,
-        UnsyncedReason, SCHEMA_VERSION,
+        Device, DeviceKind, Parameters, Placement, Rational, Reference, SCHEMA_VERSION, Sequence,
+        Unsynced, UnsyncedReason,
     };
 
     fn sample_result() -> SyncResult {
@@ -2899,9 +2892,9 @@ mod tests {
 #[cfg(test)]
 mod waveform_tests {
     use super::*;
-    use sundaysync_core::{CacheKey, ANALYSIS_RATE};
+    use sundaysync_core::{ANALYSIS_RATE, CacheKey};
     use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponseBody};
-    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop_assets};
     use tauri::webview::InvokeRequest;
 
     /// A media file (contents irrelevant — the cache key is path+size+mtime+rate) plus a
@@ -3642,7 +3635,9 @@ mod waveform_tests {
         ) {
             Ok(InvokeResponseBody::Raw(bytes)) => Ok(bytes),
             Ok(InvokeResponseBody::Json(j)) => {
-                panic!("read_audio_window answered with JSON ({j}) — D-055's binary IPC assumption is broken")
+                panic!(
+                    "read_audio_window answered with JSON ({j}) — D-055's binary IPC assumption is broken"
+                )
             }
             Err(e) => Err(e.as_str().unwrap_or_default().to_string()),
         }
@@ -3798,7 +3793,7 @@ mod waveform_tests {
 mod preview_tests {
     use super::*;
     use tauri::ipc::{CallbackFn, InvokeBody, InvokeResponseBody};
-    use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+    use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop_assets};
     use tauri::webview::InvokeRequest;
 
     fn app_with(state: AppState) -> tauri::App<tauri::test::MockRuntime> {
@@ -4422,11 +4417,13 @@ mod preview_tests {
 
         // Fires as soon as the grab has installed its token — the deterministic stand-in
         // for the user dragging the playhead onward.
-        let canceller = std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            if let Some(token) = slot.lock().unwrap().as_ref() {
-                token.cancel();
-                return;
+        let canceller = std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                if let Some(token) = slot.lock().unwrap().as_ref() {
+                    token.cancel();
+                    return;
+                }
             }
         });
 

@@ -9,7 +9,7 @@
 use proptest::prelude::*;
 use std::path::PathBuf;
 use sundaysync_core::{
-    place::confidence_from_psr, Placement, SyncResult, Unsynced, UnsyncedReason, Warning,
+    Placement, SyncResult, Unsynced, UnsyncedReason, Warning, place::confidence_from_psr,
 };
 
 fn placement(file: &str, device: &str, offset: f64) -> Placement {

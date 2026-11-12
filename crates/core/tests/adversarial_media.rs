@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use sundaysync_core::{scan, Cache, CancelToken, Extractor, NoProgress, Sidecar, SyncRequest};
+use sundaysync_core::{Cache, CancelToken, Extractor, NoProgress, Sidecar, SyncRequest, scan};
 use sundaysync_fixturegen::{hostile, shoot, signal, wav};
 
 /// No single case in this suite should take anywhere near this long. Generous next to

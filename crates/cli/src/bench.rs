@@ -579,11 +579,7 @@ impl RssSampler {
         let polled = self.peak_kb.load(std::sync::atomic::Ordering::Relaxed);
         let hwm = kernel_peak_rss_kb().unwrap_or(0);
         let best = polled.max(hwm);
-        if best == 0 {
-            None
-        } else {
-            Some(best * 1024)
-        }
+        if best == 0 { None } else { Some(best * 1024) }
     }
 }
 

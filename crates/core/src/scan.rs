@@ -10,13 +10,13 @@ use crate::extract;
 use crate::probe::{self, AudioStream, Probed, VideoStream};
 use crate::progress::{CancelToken, Progress, ProgressSink, Stage};
 use crate::result::{
-    Device, DeviceKind, SkipReason, SkippedFile, Unsynced, UnsyncedReason, SCHEMA_VERSION,
+    Device, DeviceKind, SCHEMA_VERSION, SkipReason, SkippedFile, Unsynced, UnsyncedReason,
 };
 use crate::sidecar::Sidecar;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// How often the scan walk emits a progress tick, in files enumerated.
 ///
@@ -455,20 +455,22 @@ fn probe_candidates(
 
     std::thread::scope(|scope| {
         for _ in 0..workers.clamp(1, total) {
-            scope.spawn(|| loop {
-                let i = next.fetch_add(1, Ordering::Relaxed);
-                if i >= total || cancel.is_cancelled() {
-                    break;
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= total || cancel.is_cancelled() {
+                        break;
+                    }
+                    let outcome = probe::probe(sidecar, &candidates[i], cancel);
+                    if let Ok(mut slots) = slots.lock() {
+                        slots[i] = Some(outcome);
+                    }
+                    progress.report(Progress {
+                        stage: Stage::Probing,
+                        completed: done.fetch_add(1, Ordering::Relaxed) + 1,
+                        total,
+                    });
                 }
-                let outcome = probe::probe(sidecar, &candidates[i], cancel);
-                if let Ok(mut slots) = slots.lock() {
-                    slots[i] = Some(outcome);
-                }
-                progress.report(Progress {
-                    stage: Stage::Probing,
-                    completed: done.fetch_add(1, Ordering::Relaxed) + 1,
-                    total,
-                });
             });
         }
     });
@@ -951,9 +953,11 @@ mod tests {
         let (found, _, skipped) = collect(&[dir], None, &NoProgress, &CancelToken::new()).unwrap();
 
         assert_eq!(found.len(), 5, "only the five originals survive: {found:?}");
-        assert!(found
-            .iter()
-            .all(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4"))));
+        assert!(
+            found
+                .iter()
+                .all(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4")))
+        );
         assert_eq!(
             skipped.len(),
             9,

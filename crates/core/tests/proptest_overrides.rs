@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use sundaysync_core::probe::AudioStream;
 use sundaysync_core::scan::{self, FileEntry, ScanManifest};
-use sundaysync_core::{CancelToken, Device, DeviceKind, NoProgress, Sidecar, SCHEMA_VERSION};
+use sundaysync_core::{CancelToken, Device, DeviceKind, NoProgress, SCHEMA_VERSION, Sidecar};
 
 // ---- 1. Device-override accounting -----------------------------------------------------
 
@@ -74,14 +74,14 @@ fn devices_account_for_every_file(manifest: &ScanManifest) -> Result<(), String>
                     "{} claims device {:?}, which does not exist in manifest.devices",
                     entry.file.display(),
                     entry.device
-                ))
+                ));
             }
             Some(d) if !d.files.contains(&entry.file) => {
                 return Err(format!(
                     "{} claims device {:?}, but that device's file list does not contain it",
                     entry.file.display(),
                     entry.device
-                ))
+                ));
             }
             Some(_) => {}
         }

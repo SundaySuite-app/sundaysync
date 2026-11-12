@@ -247,11 +247,7 @@ impl Cache {
         self.fold_entries(
             0usize,
             |acc, _meta, name| {
-                if name.ends_with(".f32") {
-                    acc + 1
-                } else {
-                    acc
-                }
+                if name.ends_with(".f32") { acc + 1 } else { acc }
             },
         )
     }
@@ -277,7 +273,7 @@ impl Cache {
                 return Err(Error::Io {
                     path: self.dir.clone(),
                     source,
-                })
+                });
             }
         };
         for entry in entries.flatten() {
@@ -406,7 +402,7 @@ impl Cache {
                 return Err(Error::Io {
                     path: self.dir.clone(),
                     source,
-                })
+                });
             }
         };
         let mut out = Vec::new();
@@ -440,7 +436,7 @@ impl Cache {
                 return Err(Error::Io {
                     path: self.dir.clone(),
                     source,
-                })
+                });
             }
         };
         let mut acc = init;
